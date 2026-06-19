@@ -1,0 +1,12 @@
+{
+  "name": "fides-auth-monorepo",
+  "private": true,
+  "packageManager": "pnpm@11.6.0",
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4"
+  }
+}
