@@ -1,0 +1,24 @@
+# Node.js dependencies
+node_modules/
+
+
+# Build output
+dist/
+build/
+
+# TypeScript declaration files
+*.d.ts
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Editor-specific settings
+vscode/
+idea/
+
+# Environment variables
+env
+
+# Coverage reports
+coverage/
