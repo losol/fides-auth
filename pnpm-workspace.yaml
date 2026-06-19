@@ -1,0 +1,6 @@
+packages:
+  - "packages/*"
+  - "config/*"
+allowBuilds:
+  '@swc/core': true
+  sharp: true
