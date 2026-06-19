@@ -1,0 +1,32 @@
+version: 2
+updates:
+  # npm / pnpm workspace — covers all packages/* and config/* via the root lockfile
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      # Batch minor/patch bumps for dev tooling so they don't flood the PR list
+      dev-tooling:
+        patterns:
+          - "turbo"
+          - "vite"
+          - "vitest"
+          - "@changesets/*"
+          - "typescript"
+        dependency-type: "development"
+
+  # GitHub Actions — keeps pinned SHAs in workflows up to date
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
