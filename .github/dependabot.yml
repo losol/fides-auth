@@ -9,6 +9,11 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
+    ignore:
+      # @types/node must stay aligned with the minimum supported runtime (Node 22).
+      # Bump manually when .nvmrc and engines.node are updated.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       # Batch minor/patch bumps for dev tooling so they don't flood the PR list
       dev-tooling:
