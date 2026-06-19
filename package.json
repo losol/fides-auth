@@ -4,9 +4,13 @@
   "packageManager": "pnpm@11.6.0",
   "scripts": {
     "build": "turbo run build",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:tag": "changeset tag"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.29.4",
     "turbo": "^2.5.4"
   }
 }
