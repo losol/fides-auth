@@ -17,6 +17,40 @@ import { cookies } from 'next/headers';
 
 const logger = Logger.create({ namespace: 'fides-auth-next:cookies' });
 
+/**
+ * Browser per-cookie size limit (RFC 6265: browsers must support at least
+ * 4096 bytes for the sum of the cookie's name and value). Cookies at or above
+ * this size are silently dropped by the browser, which manifests as a broken
+ * login (the cookie is never stored, so the user appears unauthenticated).
+ */
+const COOKIE_MAX_BYTES = 4096;
+
+/**
+ * Threshold at which we emit an informational log that a cookie is getting
+ * large. This is not an error — a session with many scopes/roles can legitimately
+ * approach this size — it just gives us visibility before we hit the hard limit.
+ */
+const COOKIE_INFO_BYTES = 3500;
+
+/**
+ * Thrown when a cookie's name + value would meet or exceed the browser's
+ * per-cookie size limit. Setting such a cookie would be silently dropped by the
+ * browser, so we fail loudly instead. Callers (e.g. the OIDC callback) can catch
+ * this to surface a clear error rather than producing a broken login.
+ */
+export class CookieTooLargeError extends Error {
+  constructor(
+    public readonly cookieName: string,
+    public readonly size: number,
+    public readonly limit: number = COOKIE_MAX_BYTES
+  ) {
+    super(
+      `Cookie "${cookieName}" is ${size} bytes, which meets or exceeds the browser limit of ${limit} bytes and would be silently dropped`
+    );
+    this.name = 'CookieTooLargeError';
+  }
+}
+
 export interface CookieOptions {
   /** Cookie path (default: '/') */
   path?: string;
@@ -86,6 +120,16 @@ export async function setAuthCookie(
   try {
     const cookieStore = await cookies();
     const cookieOptions = { ...defaultSessionCookieOptions, ...options };
+
+    // The browser per-cookie limit applies to name + value. Fail loudly above
+    // it, since the browser would otherwise drop the cookie silently.
+    const size = Buffer.byteLength(name, 'utf8') + Buffer.byteLength(value, 'utf8');
+    if (size >= COOKIE_MAX_BYTES) {
+      throw new CookieTooLargeError(name, size);
+    }
+    if (size >= COOKIE_INFO_BYTES) {
+      logger.info({ cookieName: name, size }, 'Cookie approaching browser size limit');
+    }
 
     cookieStore.set(name, value, cookieOptions);
 
