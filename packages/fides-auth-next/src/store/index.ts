@@ -114,14 +114,14 @@ export {
   type AuthStatus,
 } from '@eventuras/fides-auth-store';
 
-// React bindings (this package owns these for now).
+// React bindings — re-exported from @eventuras/fides-auth-react so existing
+// `@eventuras/fides-auth-next/store` import sites keep working.
 export {
   createAuthStoreHooks,
+  useSessionMonitor,
+  useHeartbeat,
   type AuthStoreSelector,
   type AuthStoreActions,
-} from './hooks';
-
-export { useSessionMonitor } from './use-session-monitor';
-
-export { useHeartbeat, type HeartbeatConfig } from './use-heartbeat';
+  type HeartbeatConfig,
+} from '@eventuras/fides-auth-react';
 
