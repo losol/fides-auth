@@ -35,6 +35,10 @@
       "types": "./dist/activity-tracker.d.ts",
       "import": "./dist/activity-tracker.js"
     },
+    "./cookies": {
+      "types": "./dist/cookies.d.ts",
+      "import": "./dist/cookies.js"
+    },
     "./logger": {
       "types": "./dist/logger.d.ts",
       "import": "./dist/logger.js"

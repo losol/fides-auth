@@ -5,6 +5,7 @@
  */
 
 export * from './activity-tracker';
+export * from './cookies';
 export * from './logger';
 export * from './oauth-logging';
 export * from './session-refresh';

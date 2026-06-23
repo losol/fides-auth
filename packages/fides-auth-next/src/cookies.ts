@@ -12,87 +12,33 @@
  * - Edge Runtime without proper configuration
  */
 
+import {
+  ACCESS_TOKEN_COOKIE_NAME,
+  COOKIE_INFO_BYTES,
+  assertCookieWithinLimit,
+  defaultSessionCookieOptions,
+} from '@eventuras/fides-auth/cookies';
+import type { CookieOptions } from '@eventuras/fides-auth/cookies';
 import { Logger } from '@eventuras/logger';
 import { cookies } from 'next/headers';
 
+// Re-export the framework-agnostic cookie attributes, limits, and size guard from
+// the core package so existing import sites keep working. This Next adapter only
+// owns the actual cookie I/O (via next/headers); the values and the size check
+// itself live in @eventuras/fides-auth/cookies.
+export {
+  COOKIE_INFO_BYTES,
+  COOKIE_MAX_BYTES,
+  CookieTooLargeError,
+  ACCESS_TOKEN_COOKIE_NAME,
+  defaultSessionCookieOptions,
+  defaultOAuthCookieOptions,
+  cookieByteSize,
+  assertCookieWithinLimit,
+} from '@eventuras/fides-auth/cookies';
+export type { CookieOptions } from '@eventuras/fides-auth/cookies';
+
 const logger = Logger.create({ namespace: 'fides-auth-next:cookies' });
-
-/**
- * Browser per-cookie size limit (RFC 6265: browsers must support at least
- * 4096 bytes for the sum of the cookie's name and value). Cookies at or above
- * this size are silently dropped by the browser, which manifests as a broken
- * login (the cookie is never stored, so the user appears unauthenticated).
- */
-const COOKIE_MAX_BYTES = 4096;
-
-/**
- * Threshold at which we emit an informational log that a cookie is getting
- * large. This is not an error — a session with many scopes/roles can legitimately
- * approach this size — it just gives us visibility before we hit the hard limit.
- */
-const COOKIE_INFO_BYTES = 3500;
-
-/**
- * Thrown when a cookie's name + value would meet or exceed the browser's
- * per-cookie size limit. Setting such a cookie would be silently dropped by the
- * browser, so we fail loudly instead. Callers (e.g. the OIDC callback) can catch
- * this to surface a clear error rather than producing a broken login.
- */
-export class CookieTooLargeError extends Error {
-  constructor(
-    public readonly cookieName: string,
-    public readonly size: number,
-    public readonly limit: number = COOKIE_MAX_BYTES
-  ) {
-    super(
-      `Cookie "${cookieName}" is ${size} bytes, which meets or exceeds the browser limit of ${limit} bytes and would be silently dropped`
-    );
-    this.name = 'CookieTooLargeError';
-  }
-}
-
-export interface CookieOptions {
-  /** Cookie path (default: '/') */
-  path?: string;
-  /** Max age in seconds */
-  maxAge?: number;
-  /** SameSite policy (default: 'lax') */
-  sameSite?: 'strict' | 'lax' | 'none';
-  /** HTTP only flag (default: true) */
-  httpOnly?: boolean;
-  /** Secure flag (default: true in production) */
-  secure?: boolean;
-}
-
-/**
- * Default cookie options for session cookies.
- * - Secure in production
- * - HTTP only
- * - Lax same-site policy
- * - 30 days max age
- */
-export const defaultSessionCookieOptions: CookieOptions = {
-  path: '/',
-  maxAge: 60 * 60 * 24 * 30, // 30 days
-  sameSite: 'lax',
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-};
-
-/**
- * Default cookie options for OAuth state/PKCE cookies.
- * - Secure in production
- * - HTTP only
- * - Lax same-site policy
- * - 10 minutes max age (short-lived for security)
- */
-export const defaultOAuthCookieOptions: CookieOptions = {
-  path: '/',
-  maxAge: 60 * 10, // 10 minutes
-  sameSite: 'lax',
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-};
 
 /**
  * Sets a cookie with the given name and value.
@@ -121,14 +67,9 @@ export async function setAuthCookie(
     const cookieStore = await cookies();
     const cookieOptions = { ...defaultSessionCookieOptions, ...options };
 
-    // The browser per-cookie limit applies to the serialized "name=value" pair.
-    // Count the '=' separator too, so a borderline pair (name+value === 4095)
-    // isn't let through only to be dropped at 4096 once serialized. Fail loudly
-    // above the limit, since the browser would otherwise drop the cookie silently.
-    const size = Buffer.byteLength(name, 'utf8') + 1 + Buffer.byteLength(value, 'utf8');
-    if (size >= COOKIE_MAX_BYTES) {
-      throw new CookieTooLargeError(name, size);
-    }
+    // Fail loudly above the browser per-cookie limit (the browser would otherwise
+    // drop the cookie silently). The size check lives in the core package.
+    const size = assertCookieWithinLimit(name, value);
     if (size >= COOKIE_INFO_BYTES) {
       logger.info({ cookieName: name, size }, 'Cookie approaching browser size limit');
     }
@@ -253,16 +194,6 @@ export async function setSessionCookie(
 
   logger.info('Session cookie set');
 }
-
-/**
- * Name of the cookie holding the (split-out) access token.
- *
- * The access token — typically a large JWT carrying scopes/roles — is stored in
- * its own cookie so it gets a full per-cookie byte budget, instead of competing
- * for space with the rest of the session inside a single "session" cookie. See
- * {@link CookieTooLargeError} for the limit this works around.
- */
-export const ACCESS_TOKEN_COOKIE_NAME = 'session_at';
 
 /**
  * Sets the access-token cookie ("session_at") with session cookie settings.
