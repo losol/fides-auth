@@ -20,12 +20,13 @@ vi.mock('./cookies', () => ({
   getAuthCookie: vi.fn(),
   setSessionCookie: vi.fn(),
   deleteAuthCookies: vi.fn(),
+  CookieTooLargeError: class CookieTooLargeError extends Error {},
 }));
 vi.mock('./request', () => ({
   globalGETRateLimit: vi.fn(),
 }));
 vi.mock('./session', () => ({
-  createSession: vi.fn(),
+  createAndPersistSession: vi.fn(),
 }));
 
 import { handleOidcCallback } from './oidc-callback';
@@ -36,14 +37,14 @@ import {
 } from '@eventuras/fides-auth/oauth';
 import { getAuthCookie } from './cookies';
 import { globalGETRateLimit } from './request';
-import { createSession } from './session';
+import { createAndPersistSession } from './session';
 
 const mockedExchange = vi.mocked(exchangeAuthorizationCode);
 const mockedBuildSession = vi.mocked(buildSessionFromTokens);
 const mockedValidateReturnUrl = vi.mocked(validateReturnUrl);
 const mockedGetAuthCookie = vi.mocked(getAuthCookie);
 const mockedRateLimit = vi.mocked(globalGETRateLimit);
-const mockedCreateSession = vi.mocked(createSession);
+const mockedCreateAndPersistSession = vi.mocked(createAndPersistSession);
 
 const config = {
   oauthConfig: {
@@ -65,7 +66,7 @@ beforeEach(() => {
   );
   mockedExchange.mockResolvedValue({ accessToken: 'a' } as any);
   mockedBuildSession.mockReturnValue({} as any);
-  mockedCreateSession.mockResolvedValue('jwt');
+  mockedCreateAndPersistSession.mockResolvedValue('jwt');
   mockedValidateReturnUrl.mockReturnValue(new URL('https://host.example.test/'));
 });
 

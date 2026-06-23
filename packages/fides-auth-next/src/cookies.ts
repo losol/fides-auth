@@ -121,9 +121,11 @@ export async function setAuthCookie(
     const cookieStore = await cookies();
     const cookieOptions = { ...defaultSessionCookieOptions, ...options };
 
-    // The browser per-cookie limit applies to name + value. Fail loudly above
-    // it, since the browser would otherwise drop the cookie silently.
-    const size = Buffer.byteLength(name, 'utf8') + Buffer.byteLength(value, 'utf8');
+    // The browser per-cookie limit applies to the serialized "name=value" pair.
+    // Count the '=' separator too, so a borderline pair (name+value === 4095)
+    // isn't let through only to be dropped at 4096 once serialized. Fail loudly
+    // above the limit, since the browser would otherwise drop the cookie silently.
+    const size = Buffer.byteLength(name, 'utf8') + 1 + Buffer.byteLength(value, 'utf8');
     if (size >= COOKIE_MAX_BYTES) {
       throw new CookieTooLargeError(name, size);
     }
@@ -250,6 +252,46 @@ export async function setSessionCookie(
   });
 
   logger.info('Session cookie set');
+}
+
+/**
+ * Name of the cookie holding the (split-out) access token.
+ *
+ * The access token — typically a large JWT carrying scopes/roles — is stored in
+ * its own cookie so it gets a full per-cookie byte budget, instead of competing
+ * for space with the rest of the session inside a single "session" cookie. See
+ * {@link CookieTooLargeError} for the limit this works around.
+ */
+export const ACCESS_TOKEN_COOKIE_NAME = 'session_at';
+
+/**
+ * Sets the access-token cookie ("session_at") with session cookie settings.
+ *
+ * @param encryptedJwt - The encrypted JWT wrapping the access token
+ * @param options - Optional cookie options (merged with session defaults)
+ */
+export async function setAccessTokenCookie(
+  encryptedJwt: string,
+  options: Partial<CookieOptions> = {}
+): Promise<void> {
+  await setAuthCookie(ACCESS_TOKEN_COOKIE_NAME, encryptedJwt, {
+    ...defaultSessionCookieOptions,
+    ...options,
+  });
+}
+
+/**
+ * Gets the access-token cookie ("session_at") value, or null if absent.
+ */
+export async function getAccessTokenCookie(): Promise<string | null> {
+  return await getAuthCookie(ACCESS_TOKEN_COOKIE_NAME);
+}
+
+/**
+ * Deletes the access-token cookie ("session_at").
+ */
+export async function deleteAccessTokenCookie(): Promise<void> {
+  await deleteAuthCookie(ACCESS_TOKEN_COOKIE_NAME);
 }
 
 /**
