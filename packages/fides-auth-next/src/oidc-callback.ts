@@ -15,11 +15,11 @@ import { Logger } from '@eventuras/logger';
 
 import {
   getAuthCookie,
-  setSessionCookie,
   deleteAuthCookies,
+  CookieTooLargeError,
 } from './cookies';
 import { globalGETRateLimit } from './request';
-import { createSession } from './session';
+import { createAndPersistSession } from './session';
 
 const logger = Logger.create({ namespace: 'fides-auth-next:oidc-callback' });
 
@@ -117,10 +117,9 @@ export async function handleOidcCallback(
       storedState,
     );
 
-    // 5) Build session from tokens and persist
+    // 5) Build session from tokens and persist (split across session/session_at)
     const session = buildSessionFromTokens(tokens, rolesClaim);
-    const jwt = await createSession(session, { sessionDurationDays });
-    await setSessionCookie(jwt);
+    await createAndPersistSession(session, { sessionDurationDays });
 
     // 7) Clean up PKCE & returnTo cookies
     const returnTo = await getAuthCookie('returnTo');
@@ -142,6 +141,15 @@ export async function handleOidcCallback(
       headers: { Location: redirectUrl.toString() },
     });
   } catch (error) {
+    // The session was too large for a cookie — surface this distinctly instead
+    // of hiding it in a generic 500, so it's diagnosable in production.
+    if (error instanceof CookieTooLargeError) {
+      logger.error({ error, cookieName: error.cookieName, size: error.size }, 'Session cookie too large to store');
+      return new Response('The session is too large to store. Please contact support.', {
+        status: 431,
+      });
+    }
+
     logger.error({ error }, 'OIDC callback error');
     return new Response('An unexpected error occurred. Please restart the login process.', {
       status: 500,

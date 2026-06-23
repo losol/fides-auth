@@ -47,6 +47,10 @@
       "types": "./dist/session-validation.d.ts",
       "import": "./dist/session-validation.js"
     },
+    "./session-cookies": {
+      "types": "./dist/session-cookies.d.ts",
+      "import": "./dist/session-cookies.js"
+    },
     "./oauth": {
       "types": "./dist/oauth.d.ts",
       "import": "./dist/oauth.js"

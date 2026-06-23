@@ -1,11 +1,18 @@
 import { createEncryptedJWT, getSessionSecret } from '@eventuras/fides-auth/utils';
-import { validateSessionJwt } from '@eventuras/fides-auth/session-validation';
+import { encodeSessionCookies, decodeSessionCookies } from '@eventuras/fides-auth/session-cookies';
 import { refreshSession as refreshSessionCore } from '@eventuras/fides-auth/session-refresh';
 import type { Session, CreateSessionOptions } from '@eventuras/fides-auth/types';
 import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
 import { Logger } from '@eventuras/logger';
 import { cache } from 'react';
-import { getSessionCookie, setSessionCookie, deleteSessionCookie } from './cookies';
+import {
+  getSessionCookie,
+  setSessionCookie,
+  deleteSessionCookie,
+  getAccessTokenCookie,
+  setAccessTokenCookie,
+  deleteAccessTokenCookie,
+} from './cookies';
 
 const logger = Logger.create({ namespace: 'fides-auth-next:session' });
 
@@ -51,6 +58,27 @@ export async function createSession<TData = Record<string, unknown>>(
 }
 
 /**
+ * Persists a session across the "session" and "session_at" cookies. The core
+ * {@link encodeSessionCookies} splits the access token out (see that module for
+ * the why); this thin wrapper just writes the resulting values to the cookie
+ * store and clears a stale access-token cookie when there is none.
+ *
+ * @returns The encrypted JWT stored in the main "session" cookie.
+ */
+async function persistSessionCookies(session: Session): Promise<string> {
+  const encoded = await encodeSessionCookies(session, getSessionSecret());
+
+  await setSessionCookie(encoded.session);
+  if (encoded.accessToken) {
+    await setAccessTokenCookie(encoded.accessToken);
+  } else {
+    await deleteAccessTokenCookie();
+  }
+
+  return encoded.session;
+}
+
+/**
  * Retrieves the current session from the "session" cookie, if any.
  * Uses React server components' cache for performance.
  *
@@ -77,22 +105,18 @@ export const getCurrentSession = cache(async (config?: OAuthConfig): Promise<Ses
   logger.debug('Retrieving current session');
 
   try {
-    const sessionCookie = await getSessionCookie();
-
-    if (!sessionCookie) {
-      logger.debug('No session cookie found');
-      return null;
-    }
-
-    const { status, session } = await validateSessionJwt(sessionCookie, getSessionSecret());
-
-    if (status !== 'VALID') {
-      logger.warn({ status }, 'Session validation failed');
-      return null;
-    }
+    // Read both cookie values and let the core reassemble the session (split,
+    // expiry, legacy single-cookie handling all live in @eventuras/fides-auth).
+    const session = await decodeSessionCookies(
+      {
+        session: await getSessionCookie(),
+        accessToken: await getAccessTokenCookie(),
+      },
+      getSessionSecret(),
+    );
 
     if (!session) {
-      logger.warn('Session validation succeeded but no session object returned');
+      logger.debug('No valid current session');
       return null;
     }
 
@@ -160,11 +184,8 @@ export async function refreshCurrentSession(
       return null;
     }
 
-    // Create new encrypted JWT
-    const jwt = await createSession(updatedSession, options);
-
-    // Update the session cookie
-    await setSessionCookie(jwt);
+    // Persist the refreshed session across the session/session_at cookies.
+    await persistSessionCookies(updatedSession);
 
     logger.info('Session refreshed and cookie updated successfully');
     return updatedSession;
@@ -217,11 +238,10 @@ export async function createAndPersistSession(
   logger.info('Creating and persisting new session');
 
   try {
-    const jwt = await createSession(session, options);
-    await setSessionCookie(jwt);
+    const mainJwt = await persistSessionCookies(session);
 
     logger.info('Session created and persisted successfully');
-    return jwt;
+    return mainJwt;
   } catch (error) {
     logger.error({ error }, 'Failed to create and persist session');
     throw error;
@@ -243,6 +263,7 @@ export async function clearCurrentSession(): Promise<void> {
 
   try {
     await deleteSessionCookie();
+    await deleteAccessTokenCookie();
     logger.info('Session cleared successfully');
   } catch (error) {
     logger.error({ error }, 'Failed to clear session');

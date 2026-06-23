@@ -54,6 +54,24 @@ export async function createEncryptedJWT(
     .encrypt(normalizeSecret(secret));
 }
 
+/**
+ * Decrypts a JWE produced by {@link createEncryptedJWT} and returns its payload.
+ *
+ * Counterpart to {@link createEncryptedJWT}. Throws if the token cannot be
+ * decrypted (wrong key, tampering, or malformed input).
+ *
+ * @param encryptedJwt - The encrypted JWT string.
+ * @param secret - The decryption key as a hex string or Uint8Array (32 bytes for A256GCM).
+ * @returns A promise that resolves to the decrypted JWT payload.
+ */
+export async function decryptJWT(
+  encryptedJwt: string,
+  secret: string | Uint8Array,
+): Promise<jose.JWTPayload> {
+  const { payload } = await jose.jwtDecrypt(encryptedJwt, normalizeSecret(secret));
+  return payload;
+}
+
 
 /**
  * Encrypts the given text using AES-GCM via the Web Crypto API.
