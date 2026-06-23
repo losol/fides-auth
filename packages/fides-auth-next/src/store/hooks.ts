@@ -1,6 +1,5 @@
 import { useSelector as useStoreSelector } from '@xstate/store-react';
-import type { SessionUser } from './types';
-import type { createAuthStore } from './store';
+import type { SessionUser, createAuthStore } from '@eventuras/fides-auth-store';
 
 /**
  * Return type for store-based auth hooks

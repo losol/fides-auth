@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect } from 'react';
-import { startSessionMonitor, type SessionMonitorConfig } from './session-monitor';
-import type { createAuthStore } from './store';
-import type { AuthStatus } from './types';
+import {
+  startSessionMonitor,
+  type SessionMonitorConfig,
+  type AuthStatus,
+  type createAuthStore,
+} from '@eventuras/fides-auth-store';
 
 /**
  * React hook for session monitoring with automatic cleanup

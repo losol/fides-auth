@@ -99,32 +99,29 @@
  * ```
  */
 
-// Store exports
+// Framework-agnostic store core — re-exported from @eventuras/fides-auth-store so
+// existing `@eventuras/fides-auth-next/store` import sites keep working.
 export {
   createAuthStore,
   initializeAuth,
   checkAuth,
+  startSessionMonitor,
+  configureAuthLogger,
   type AuthStoreContext,
   type AuthStoreConfig,
-} from './store';
+  type SessionMonitorConfig,
+  type SessionUser,
+  type AuthStatus,
+} from '@eventuras/fides-auth-store';
 
+// React bindings (this package owns these for now).
 export {
   createAuthStoreHooks,
   type AuthStoreSelector,
   type AuthStoreActions,
 } from './hooks';
 
-export {
-  startSessionMonitor,
-  type SessionMonitorConfig,
-} from './session-monitor';
-
 export { useSessionMonitor } from './use-session-monitor';
 
 export { useHeartbeat, type HeartbeatConfig } from './use-heartbeat';
-
-export { configureAuthLogger } from './configure-logger';
-
-// Shared types
-export type { SessionUser, AuthStatus } from './types';
 

@@ -57,6 +57,7 @@
   },
   "dependencies": {
     "@eventuras/fides-auth": "workspace:*",
+    "@eventuras/fides-auth-store": "workspace:*",
     "@eventuras/logger": "^0.8.1",
     "@xstate/store": "^4.0.0",
     "@xstate/store-react": "^2.0.0"
