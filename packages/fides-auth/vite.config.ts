@@ -5,6 +5,7 @@ export default defineVanillaLibConfig({
     index: 'src/index.ts',
     'activity-tracker': 'src/activity-tracker.ts',
     cookies: 'src/cookies.ts',
+    heartbeat: 'src/heartbeat.ts',
     logger: 'src/logger.ts',
     'session-refresh': 'src/session-refresh.ts',
     'session-validation': 'src/session-validation.ts',

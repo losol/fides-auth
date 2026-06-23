@@ -39,6 +39,10 @@
       "types": "./dist/cookies.d.ts",
       "import": "./dist/cookies.js"
     },
+    "./heartbeat": {
+      "types": "./dist/heartbeat.d.ts",
+      "import": "./dist/heartbeat.js"
+    },
     "./logger": {
       "types": "./dist/logger.d.ts",
       "import": "./dist/logger.js"
@@ -109,6 +113,7 @@
     "@eventuras/typescript-config": "workspace:*",
     "@eventuras/vite-config": "workspace:*",
     "@types/node": "^22.20.0",
+    "jsdom": "29.1.1",
     "vite": "^8.0.8",
     "vitest": "^4.1.4"
   },

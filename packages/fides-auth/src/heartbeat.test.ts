@@ -1,21 +1,13 @@
-/**
- * Tests for the useHeartbeat React hook.
- *
- * The hook schedules refreshes from the access token's expiry (returned by the
- * endpoint as `accessTokenExpiresAt`), primes once on mount to learn it, and
- * defers when the tab is hidden/idle. Tests run under fake timers so we can
- * advance time deterministically, with a mocked global fetch.
- */
+// @vitest-environment jsdom
+//
+// Tests for the framework-agnostic heartbeat engine. It schedules refreshes from
+// the access token's expiry (returned by the endpoint as `accessTokenExpiresAt`),
+// primes once on start to learn it, and defers when the tab is hidden/idle. Tests
+// run under fake timers so we can advance time deterministically, with a mocked
+// global fetch. No React — the engine is driven directly.
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { act, render } from '@testing-library/react';
 
-import { useHeartbeat } from './use-heartbeat';
-
-/** Minimal component that mounts the hook with given config. */
-function HeartbeatHost(props: Parameters<typeof useHeartbeat>[0] = {}) {
-  useHeartbeat(props);
-  return null;
-}
+import { createHeartbeat, type HeartbeatConfig } from './heartbeat';
 
 /** Dispatches a keystroke on window so the activity tracker records it. */
 function recordKeystroke(): void {
@@ -41,9 +33,14 @@ function expiryResponse(ttlMs: number): Response {
 
 /** Flush pending timers up to `ms`, draining microtasks in between. */
 async function advance(ms: number): Promise<void> {
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(ms);
-  });
+  await vi.advanceTimersByTimeAsync(ms);
+}
+
+/** Start the engine with the given config; auto-stopped after each test. */
+let running: ReturnType<typeof createHeartbeat> | null = null;
+function start(config: HeartbeatConfig = {}): ReturnType<typeof createHeartbeat> {
+  running = createHeartbeat(config);
+  return running;
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -57,14 +54,16 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  running?.stop();
+  running = null;
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
-describe('useHeartbeat — priming', () => {
-  it('refreshes immediately on mount to discover the expiry', async () => {
+describe('createHeartbeat — priming', () => {
+  it('refreshes immediately on start to discover the expiry', async () => {
     const onRefreshed = vi.fn();
-    render(<HeartbeatHost onRefreshed={onRefreshed} />);
+    start({ onRefreshed });
 
     await advance(0);
 
@@ -77,14 +76,14 @@ describe('useHeartbeat — priming', () => {
   });
 
   it('honors a custom endpoint', async () => {
-    render(<HeartbeatHost endpoint="/custom/heartbeat" />);
+    start({ endpoint: '/custom/heartbeat' });
     await advance(0);
     expect(fetchMock).toHaveBeenCalledWith('/custom/heartbeat', expect.anything());
   });
 
   it('skips the prime and schedules from initialExpiresAt when provided', async () => {
     const tenMin = new Date(Date.now() + 10 * 60_000).toISOString();
-    render(<HeartbeatHost initialExpiresAt={tenMin} fraction={0.3} />);
+    start({ initialExpiresAt: tenMin, fraction: 0.3 });
 
     // No immediate refresh — expiry is already known.
     await advance(0);
@@ -98,9 +97,9 @@ describe('useHeartbeat — priming', () => {
   });
 });
 
-describe('useHeartbeat — expiry-driven cadence', () => {
+describe('createHeartbeat — expiry-driven cadence', () => {
   it('schedules the next refresh from the returned expiry (5-min token, fraction 0.3)', async () => {
-    render(<HeartbeatHost fraction={0.3} />);
+    start({ fraction: 0.3 });
 
     // Prime.
     await advance(0);
@@ -115,7 +114,7 @@ describe('useHeartbeat — expiry-driven cadence', () => {
 
   it('self-adjusts to a short TTL via the skew floor (10-second token)', async () => {
     fetchMock.mockImplementation(() => Promise.resolve(expiryResponse(10_000)));
-    render(<HeartbeatHost fraction={0.3} minSkewMs={5_000} minRefreshIntervalMs={5_000} />);
+    start({ fraction: 0.3, minSkewMs: 5_000, minRefreshIntervalMs: 5_000 });
 
     await advance(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -129,7 +128,7 @@ describe('useHeartbeat — expiry-driven cadence', () => {
 
   it('never refreshes faster than minRefreshIntervalMs for ultra-short tokens', async () => {
     fetchMock.mockImplementation(() => Promise.resolve(expiryResponse(1_000)));
-    render(<HeartbeatHost minSkewMs={5_000} minRefreshIntervalMs={5_000} />);
+    start({ minSkewMs: 5_000, minRefreshIntervalMs: 5_000 });
 
     await advance(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -140,13 +139,13 @@ describe('useHeartbeat — expiry-driven cadence', () => {
   });
 });
 
-describe('useHeartbeat — session expired', () => {
+describe('createHeartbeat — session expired', () => {
   it('fires onSessionExpired on 401 and stops further refreshes', async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }));
     const onSessionExpired = vi.fn();
     const onRefreshed = vi.fn();
 
-    render(<HeartbeatHost onSessionExpired={onSessionExpired} onRefreshed={onRefreshed} />);
+    start({ onSessionExpired, onRefreshed });
 
     await advance(0);
     expect(onSessionExpired).toHaveBeenCalledTimes(1);
@@ -158,14 +157,14 @@ describe('useHeartbeat — session expired', () => {
   });
 });
 
-describe('useHeartbeat — transient failure', () => {
+describe('createHeartbeat — transient failure', () => {
   it('retries with backoff and reports via onError, then resumes', async () => {
     fetchMock
       .mockRejectedValueOnce(new Error('network down'))
       .mockImplementation(() => Promise.resolve(expiryResponse(5 * 60_000)));
     const onError = vi.fn();
 
-    render(<HeartbeatHost minRefreshIntervalMs={5_000} onError={onError} />);
+    start({ minRefreshIntervalMs: 5_000, onError });
 
     // Prime fails.
     await advance(0);
@@ -179,11 +178,11 @@ describe('useHeartbeat — transient failure', () => {
   });
 });
 
-describe('useHeartbeat — defer when hidden/idle', () => {
+describe('createHeartbeat — defer when hidden/idle', () => {
   it('defers a due refresh while idle, then refreshes on the next interaction', async () => {
-    render(<HeartbeatHost fraction={0.3} idleThresholdMs={1_000} />);
+    start({ fraction: 0.3, idleThresholdMs: 1_000 });
 
-    // Prime at mount (active), token = 5min → next refresh at 210s.
+    // Prime at start (active), token = 5min → next refresh at 210s.
     await advance(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
@@ -200,7 +199,7 @@ describe('useHeartbeat — defer when hidden/idle', () => {
   it('defers while the tab is hidden, then refreshes when it becomes visible', async () => {
     // idleThresholdMs is shorter than the time spent hidden, so returning to the
     // tab must count as activity for the deferred refresh to run on focus alone.
-    render(<HeartbeatHost fraction={0.3} idleThresholdMs={1_000} />);
+    start({ fraction: 0.3, idleThresholdMs: 1_000 });
 
     await advance(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -215,8 +214,8 @@ describe('useHeartbeat — defer when hidden/idle', () => {
   });
 });
 
-describe('useHeartbeat — unmount', () => {
-  it('does not fire callbacks for fetches that resolve after unmount', async () => {
+describe('createHeartbeat — stop', () => {
+  it('does not fire callbacks for fetches that resolve after stop', async () => {
     let resolveFetch: (response: Response) => void = () => undefined;
     fetchMock.mockImplementation((_url: string, init: RequestInit) => {
       return new Promise<Response>((resolve, reject) => {
@@ -229,19 +228,17 @@ describe('useHeartbeat — unmount', () => {
 
     const onRefreshed = vi.fn();
     const onError = vi.fn();
-    const { unmount } = render(<HeartbeatHost onRefreshed={onRefreshed} onError={onError} />);
+    const hb = start({ onRefreshed, onError });
 
     // Prime fires; fetch is in-flight (pending promise).
     await advance(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    // Unmount aborts the controller; resolve the pending fetch and drain.
-    unmount();
+    // Stop aborts the controller; resolve the pending fetch and drain.
+    hb.stop();
     resolveFetch(new Response('{}', { status: 200 }));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(onRefreshed).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
