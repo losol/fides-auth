@@ -20,7 +20,7 @@ The heavy logic lives in the packages these wrap (the heartbeat engine in
 pnpm add @eventuras/fides-auth-react
 ```
 
-`react` and `@xstate/store-react` are peer dependencies.
+`react`, `@xstate/store`, and `@xstate/store-react` are peer dependencies.
 
 ## Usage
 
@@ -37,7 +37,9 @@ export const { useAuthStore, useAuthActions } = createAuthStoreHooks(authStore);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   useSessionMonitor(authStore, checkAuthStatus);
-  useHeartbeat({ onSessionExpired: () => authStore.send({ type: 'sessionExpired' }) });
+  useHeartbeat({
+    onSessionExpired: () => authStore.send({ type: 'sessionExpired' }),
+  });
   return <>{children}</>;
 }
 
@@ -45,8 +47,10 @@ function Profile() {
   const auth = useAuthStore();
   const { logout } = useAuthActions();
   if (auth.isInitializing) return null;
-  return auth.isAuthenticated
-    ? <button onClick={logout}>Log out {auth.user?.name}</button>
-    : <a href="/login">Log in</a>;
+  return auth.isAuthenticated ? (
+    <button onClick={logout}>Log out {auth.user?.name}</button>
+  ) : (
+    <a href='/login'>Log in</a>
+  );
 }
 ```
