@@ -27,6 +27,7 @@ export default defineNextLibConfig({
 
     // Workspace dependencies
     '@eventuras/fides-auth',
+    '@eventuras/fides-auth-store',
     '@eventuras/logger',
   ],
 });

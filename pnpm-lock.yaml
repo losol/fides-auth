@@ -72,6 +72,9 @@ importers:
       '@eventuras/fides-auth':
         specifier: workspace:*
         version: link:../fides-auth
+      '@eventuras/fides-auth-store':
+        specifier: workspace:*
+        version: link:../fides-auth-store
       '@eventuras/logger':
         specifier: ^0.8.1
         version: 0.8.1
@@ -124,6 +127,34 @@ importers:
       xstate:
         specifier: ^5.30.0
         version: 5.32.1
+
+  packages/fides-auth-store:
+    dependencies:
+      '@eventuras/fides-auth':
+        specifier: workspace:*
+        version: link:../fides-auth
+      '@eventuras/logger':
+        specifier: ^0.8.1
+        version: 0.8.1
+      '@xstate/store':
+        specifier: ^4.0.0
+        version: 4.2.0
+    devDependencies:
+      '@eventuras/typescript-config':
+        specifier: workspace:*
+        version: link:../../config/typescript-config
+      '@eventuras/vite-config':
+        specifier: workspace:*
+        version: link:../../config/vite-config
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.0
+      vite:
+        specifier: ^8.0.8
+        version: 8.0.16(@types/node@22.20.0)(jiti@2.7.0)
+      vitest:
+        specifier: ^4.1.4
+        version: 4.1.9(@types/node@22.20.0)(jsdom@29.1.1)(vite@8.0.16(@types/node@22.20.0)(jiti@2.7.0))
 
 packages:
 
