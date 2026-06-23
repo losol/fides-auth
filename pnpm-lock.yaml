@@ -152,30 +152,15 @@ importers:
       '@eventuras/vite-config':
         specifier: workspace:*
         version: link:../../config/vite-config
-      '@testing-library/jest-dom':
-        specifier: 6.9.1
-        version: 6.9.1
-      '@testing-library/react':
-        specifier: ^16.3.2
-        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@types/react':
         specifier: ^19.2.14
         version: 19.2.17
-      '@types/react-dom':
-        specifier: ^19.2.3
-        version: 19.2.3(@types/react@19.2.17)
       '@xstate/store':
         specifier: ^4.0.0
         version: 4.2.0
-      jsdom:
-        specifier: 29.1.1
-        version: 29.1.1
       react:
         specifier: ^19.2.0
         version: 19.2.7
-      react-dom:
-        specifier: ^19.2.0
-        version: 19.2.7(react@19.2.7)
       vite:
         specifier: ^8.0.8
         version: 8.0.16(@types/node@24.13.2)(jiti@2.7.0)
