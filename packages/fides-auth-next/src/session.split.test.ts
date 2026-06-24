@@ -10,17 +10,17 @@ import { vi, describe, it, expect, beforeEach } from 'vitest';
 // 32-byte (64 hex char) secret for A256GCM, set before any module reads it.
 process.env.SESSION_SECRET = 'a'.repeat(64);
 
-// In-memory cookie jar shared with the mocked ./cookies module (hoisted so the
-// vi.mock factory can close over it).
+// In-memory cookie jar backing the mocked next/headers cookie store (hoisted so
+// the vi.mock factory can close over it). This exercises the real adapter path:
+// session.ts -> nextCookieStore -> @eventuras/fides-auth/server.
 const { jar } = vi.hoisted(() => ({ jar: new Map<string, string>() }));
 
-vi.mock('./cookies', () => ({
-  getSessionCookie: vi.fn(async () => jar.get('session') ?? null),
-  setSessionCookie: vi.fn(async (v: string) => { jar.set('session', v); }),
-  deleteSessionCookie: vi.fn(async () => { jar.delete('session'); }),
-  getAccessTokenCookie: vi.fn(async () => jar.get('session_at') ?? null),
-  setAccessTokenCookie: vi.fn(async (v: string) => { jar.set('session_at', v); }),
-  deleteAccessTokenCookie: vi.fn(async () => { jar.delete('session_at'); }),
+vi.mock('next/headers', () => ({
+  cookies: vi.fn(async () => ({
+    get: (name: string) => (jar.has(name) ? { value: jar.get(name) } : undefined),
+    set: (name: string, value: string) => { jar.set(name, value); },
+    delete: (name: string) => { jar.delete(name); },
+  })),
 }));
 
 // getCurrentSession is wrapped in React's cache(); make it a pass-through.

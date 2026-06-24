@@ -96,6 +96,12 @@ export const defaultOAuthCookieOptions: CookieOptions = {
 export const ACCESS_TOKEN_COOKIE_NAME = 'session_at';
 
 /**
+ * Name of the main session cookie (everything except the split-out access token).
+ * See {@link ACCESS_TOKEN_COOKIE_NAME} for why the access token is stored apart.
+ */
+export const SESSION_COOKIE_NAME = 'session';
+
+/**
  * Serialized byte size of a `name=value` cookie pair. The browser per-cookie
  * limit applies to the serialized pair, so the `=` separator is counted too —
  * otherwise a borderline pair (name+value === 4095) would slip through only to be
