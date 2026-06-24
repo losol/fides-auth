@@ -17,6 +17,8 @@ export default defineVanillaLibConfig({
     utils: 'src/utils.ts',
     types: 'src/types.ts',
     'rate-limit': 'src/rate-limit.ts',
+    'server/cookie-store': 'src/server/cookie-store.ts',
+    'server/index': 'src/server/index.ts',
     'providers/vipps/index': 'src/providers/vipps/index.ts',
   },
 });
