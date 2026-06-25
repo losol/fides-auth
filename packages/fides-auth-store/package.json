@@ -1,6 +1,6 @@
 {
   "name": "@eventuras/fides-auth-store",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Framework-agnostic authentication state store (XState Store) for @eventuras/fides-auth",
   "keywords": [
     "authentication",
