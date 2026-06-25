@@ -10,3 +10,7 @@ export {
   refreshSessionInStore,
   clearSession,
 } from './session';
+
+export { handleOidcLogin, type OidcLoginConfig } from './oidc-login';
+export { handleOidcCallback, type OidcCallbackConfig } from './oidc-callback';
+export { handleHeartbeat, type HeartbeatHandlerConfig } from './heartbeat-handler';
