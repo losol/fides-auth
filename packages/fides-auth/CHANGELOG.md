@@ -1,5 +1,49 @@
 # @eventuras/fides-auth
 
+## 0.10.0
+
+### Minor Changes
+
+- f8c2ee3: Move the framework-agnostic cookie attributes, size limits, and size guard into
+  the core package.
+
+  The new `@eventuras/fides-auth/cookies` export holds `CookieOptions`,
+  `defaultSessionCookieOptions`, `defaultOAuthCookieOptions`,
+  `ACCESS_TOKEN_COOKIE_NAME`, the `COOKIE_MAX_BYTES`/`COOKIE_INFO_BYTES` limits,
+  the `CookieTooLargeError` class, and pure `cookieByteSize` /
+  `assertCookieWithinLimit` helpers — none of which need a framework. This makes
+  them reusable by future adapters (e.g. React Router) instead of living only in
+  the Next.js binding.
+
+  `@eventuras/fides-auth-next` now re-exports these from the core package and keeps
+  only the actual cookie I/O (via `next/headers`). Its public API is unchanged.
+
+- 019f8a0: Add a framework-agnostic `createHeartbeat()` engine at `@eventuras/fides-auth/heartbeat`. `fides-auth-next`'s `useHeartbeat` is now a thin wrapper over it; behaviour and API unchanged.
+- dcf1b7d: Add a framework-agnostic `CookieStore` interface and session persistence helpers (`persistSession`, `readSession`, `refreshSessionInStore`, `clearSession`) at `@eventuras/fides-auth/server`. `fides-auth-next`'s session functions now delegate to them through a Next cookie-store adapter; public API unchanged.
+- 50f6882: Move the OIDC request handlers — `handleOidcLogin`, `handleOidcCallback`, `handleHeartbeat` — into `@eventuras/fides-auth/server`, taking a `CookieStore` and an optional rate-limit callback over the standard Request/Response. `fides-auth-next` now wraps them with its Next cookie store and rate limiters; public API unchanged.
+- 3c72759: Split the session across two cookies to make room for large access tokens.
+
+  The access token — typically the largest part of a session — now lives in its
+  own `session_at` cookie, while the rest stays in `session`, so each gets a full
+  per-cookie byte budget instead of competing for one ~4KB limit.
+
+  The framework-agnostic encode/decode logic lives in the core package as a new
+  `@eventuras/fides-auth/session-cookies` export (`encodeSessionCookies` /
+  `decodeSessionCookies`), plus a `decryptJWT` helper in `@eventuras/fides-auth/utils`.
+  `@eventuras/fides-auth-next` is a thin adapter that wires these to the Next.js
+  cookie store. Legacy single-cookie sessions are still read transparently, and the
+  "expired access token means no session" contract is preserved.
+
+### Patch Changes
+
+- 39f2cbd: Standardize MIT licensing across the workspace.
+
+  Every package now carries a `LICENSE` file with a consistent
+  `Copyright (c) 2024 Losol AS` notice, and `@eventuras/fides-auth-next` gains the
+  `license` / `author` metadata it was missing and ships its `LICENSE` in the
+  published tarball. `@eventuras/fides-auth`'s existing license notice is updated
+  to the same copyright holder.
+
 ## 0.9.0
 
 ### Minor Changes
@@ -29,10 +73,12 @@
 - a29b507: Stop bundling runtime dependencies into published library output, and stop minifying.
 
   The vanilla/react/next library presets used to inline every transitive dep (e.g. `oauth4webapi` was bundled into `@eventuras/fides-auth`) and minify class/function names. Two consequences:
+
   - **`instanceof` failed across module boundaries.** A consumer importing `ResponseBodyError` from `openid-client` got a different class than the one a library threw, because the library carried its own bundled+renamed copy.
   - **Stack traces were unreadable** — minified names like `j` instead of `ResponseBodyError`.
 
   The presets now:
+
   - Auto-externalize every entry in the consumer's `dependencies`, `peerDependencies`, and `optionalDependencies` (plus `node:*` built-ins).
   - Set `build.minify: false` (libraries should not minify — consumers minify their own bundle).
   - Emit sourcemaps so consumer stack traces map back to original sources.
@@ -44,6 +90,7 @@
 ### Minor Changes
 
 - 7caaea2: Surface granted scopes as a first-class field on `Session`.
+
   - Added `scopes?: string[]` to the `Session` interface in `types.ts`
   - `buildSessionFromTokens` now populates `session.scopes` by splitting the space-separated `tokens.scope` string (empty/missing scope leaves the field `undefined`)
   - Added `hasScope(session, scope)` convenience helper in `utils.ts`
@@ -61,6 +108,7 @@
   `openid-client`'s own API.
 
   `discoverAndBuildAuthorizationUrl` now routes based on the flag:
+
   - `usePar: true` + provider advertises `pushed_authorization_request_endpoint` → uses PAR.
   - `usePar: true` + provider does **not** advertise PAR → throws.
   - `usePar` unset/false + provider advertises PAR → standard flow plus a
