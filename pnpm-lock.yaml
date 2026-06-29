@@ -138,8 +138,8 @@ importers:
         specifier: ^19.2.14
         version: 19.2.17
       '@xstate/store':
-        specifier: ^4.0.0
-        version: 4.2.0
+        specifier: ^4.2.1
+        version: 4.2.1
       react:
         specifier: ^19.2.0
         version: 19.2.7
@@ -159,8 +159,8 @@ importers:
         specifier: ^0.8.1
         version: 0.8.1
       '@xstate/store':
-        specifier: ^4.0.0
-        version: 4.2.0
+        specifier: ^4.2.1
+        version: 4.2.1
     devDependencies:
       '@eventuras/typescript-config':
         specifier: workspace:*
@@ -1021,6 +1021,9 @@ packages:
 
   '@xstate/store@4.2.0':
     resolution: {integrity: sha512-ZJYkKKkwRIQP6r5w0Uj1y8QlYqowUez/OUCLGc3opXYZP/bOvm+rrGq1i7T81jqN9EqYntqrr/bM0+uoGIiDSQ==}
+
+  '@xstate/store@4.2.1':
+    resolution: {integrity: sha512-dX7g9bYFOK/YvyFJVCsdHk3o/g1eC+eJcX8mHPWmitAXH6O58xSk1V91lUj67/cn27c2+uMKl98N7nRz+IyHoA==}
 
   acorn@8.17.0:
     resolution: {integrity: sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg==}
@@ -2716,6 +2719,8 @@ snapshots:
       react: 19.2.7
 
   '@xstate/store@4.2.0': {}
+
+  '@xstate/store@4.2.1': {}
 
   acorn@8.17.0: {}
 
