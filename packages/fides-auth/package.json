@@ -118,8 +118,8 @@
     "@eventuras/vite-config": "workspace:*",
     "@types/node": "^22.20.0",
     "jsdom": "29.1.1",
-    "vite": "^8.0.8",
-    "vitest": "^4.1.4"
+    "vite": "^8.1.3",
+    "vitest": "^4.1.10"
   },
   "engines": {
     "node": ">=18"
