@@ -12,8 +12,8 @@ importers:
         specifier: ^2.29.4
         version: 2.31.0(@types/node@24.13.2)
       turbo:
-        specifier: ^2.10.0
-        version: 2.10.0
+        specifier: ^2.10.3
+        version: 2.10.3
 
   config/typescript-config: {}
 
@@ -21,26 +21,26 @@ importers:
     dependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.2
-        version: 4.3.2(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))
+        version: 4.3.2(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))
       '@vitejs/plugin-react':
         specifier: ^6.0.3
-        version: 6.0.3(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))
+        version: 6.0.3(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))
       '@vitejs/plugin-react-swc':
         specifier: ^4.3.0
-        version: 4.3.1(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))
+        version: 4.3.1(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))
       glob:
         specifier: ^13.0.6
         version: 13.0.6
       vite-plugin-dts:
         specifier: ^5.0.3
-        version: 5.0.3(rolldown@1.1.5)(typescript@6.0.3)(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))
+        version: 5.0.3(rolldown@1.1.5)(typescript@6.0.3)(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))
     devDependencies:
       typescript:
         specifier: ^6.0.2
         version: 6.0.3
       vite:
-        specifier: ^8.1.0
-        version: 8.1.0(@types/node@24.13.2)(jiti@2.7.0)
+        specifier: ^8.1.3
+        version: 8.1.3(@types/node@24.13.2)(jiti@2.7.0)
 
   packages/fides-auth:
     dependencies:
@@ -64,11 +64,11 @@ importers:
         specifier: 29.1.1
         version: 29.1.1
       vite:
-        specifier: ^8.1.0
-        version: 8.1.0(@types/node@22.20.0)(jiti@2.7.0)
+        specifier: ^8.1.3
+        version: 8.1.3(@types/node@22.20.0)(jiti@2.7.0)
       vitest:
         specifier: ^4.1.4
-        version: 4.1.9(@types/node@22.20.0)(jsdom@29.1.1)(vite@8.1.0(@types/node@22.20.0)(jiti@2.7.0))
+        version: 4.1.9(@types/node@22.20.0)(jsdom@29.1.1)(vite@8.1.3(@types/node@22.20.0)(jiti@2.7.0))
 
   packages/fides-auth-next:
     dependencies:
@@ -107,11 +107,11 @@ importers:
         specifier: ^19.2.0
         version: 19.2.7
       vite:
-        specifier: ^8.1.0
-        version: 8.1.0(@types/node@24.13.2)(jiti@2.7.0)
+        specifier: ^8.1.3
+        version: 8.1.3(@types/node@24.13.2)(jiti@2.7.0)
       vitest:
         specifier: ^4.1.6
-        version: 4.1.9(@types/node@24.13.2)(jsdom@29.1.1)(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))
+        version: 4.1.9(@types/node@24.13.2)(jsdom@29.1.1)(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))
 
   packages/fides-auth-react:
     dependencies:
@@ -144,11 +144,11 @@ importers:
         specifier: ^19.2.0
         version: 19.2.7
       vite:
-        specifier: ^8.1.0
-        version: 8.1.0(@types/node@24.13.2)(jiti@2.7.0)
+        specifier: ^8.1.3
+        version: 8.1.3(@types/node@24.13.2)(jiti@2.7.0)
       vitest:
         specifier: ^4.1.6
-        version: 4.1.9(@types/node@24.13.2)(jsdom@29.1.1)(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))
+        version: 4.1.9(@types/node@24.13.2)(jsdom@29.1.1)(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))
 
   packages/fides-auth-store:
     dependencies:
@@ -172,11 +172,11 @@ importers:
         specifier: ^22.20.0
         version: 22.20.0
       vite:
-        specifier: ^8.1.0
-        version: 8.1.0(@types/node@22.20.0)(jiti@2.7.0)
+        specifier: ^8.1.3
+        version: 8.1.3(@types/node@22.20.0)(jiti@2.7.0)
       vitest:
         specifier: ^4.1.4
-        version: 4.1.9(@types/node@22.20.0)(jsdom@29.1.1)(vite@8.1.0(@types/node@22.20.0)(jiti@2.7.0))
+        version: 4.1.9(@types/node@22.20.0)(jsdom@29.1.1)(vite@8.1.3(@types/node@22.20.0)(jiti@2.7.0))
 
 packages:
 
@@ -900,33 +900,33 @@ packages:
     resolution: {integrity: sha512-zIcONa+hVtVSSep9UT3jZ5rizo2BsxgyDYU7WFD5eICBE7no3881HGeb/QkGfsJs6JTkY1aQhT7rIPC7e+0nnA==}
     engines: {node: '>=14', npm: '>=6', yarn: '>=1'}
 
-  '@turbo/darwin-64@2.10.0':
-    resolution: {integrity: sha512-EwvHThXzpY0KGd1/NAmuewI5D+aVa3Rl/OlxE36yfjUKb/+ySrfJrSlEFt8aD1OXwnnaHnQnPKHFndor0Zxlsg==}
+  '@turbo/darwin-64@2.10.3':
+    resolution: {integrity: sha512-guuiO2kKc7yUQFU2jhWyM/BrYGD/brqb0+JvJIXTQ/QI1NlWfHZ1id50kkkOWqxmBiDc8DgW2orfY85pQIc7gw==}
     cpu: [x64]
     os: [darwin]
 
-  '@turbo/darwin-arm64@2.10.0':
-    resolution: {integrity: sha512-9d2fTyyG0lf5Wq1bwJA9qUaeecViMkLcdctWaMMmCkxZ/JqypmqOwK3W6vmejeKVgkr06gSoiX8bD+xN5Jpxcg==}
+  '@turbo/darwin-arm64@2.10.3':
+    resolution: {integrity: sha512-UglEDl/r1/h5Vw6oS6cEE29Jugz2sDLxHCSupNznKatj1fDMRXFqYKFcbvm8RTFhtYPI45NxkrPNo9BqNychBg==}
     cpu: [arm64]
     os: [darwin]
 
-  '@turbo/linux-64@2.10.0':
-    resolution: {integrity: sha512-sZBtjMuufitanjzi6UssoUpJMnnPlLMcdcJj3m3ptNsSq31Xh7MnjhwA5nWvLDTfEFg8GPcbYFXMo8vSdKRfqQ==}
+  '@turbo/linux-64@2.10.3':
+    resolution: {integrity: sha512-KuQxaPWD7OBmwEZqO0sgijwcuXR5eMWbo7BEt2m1D2Q3RylJDj7WMcJ0Btv2VJA0QC+khzAaTAm1yWowJ0CWAw==}
     cpu: [x64]
     os: [linux]
 
-  '@turbo/linux-arm64@2.10.0':
-    resolution: {integrity: sha512-vkq/Z8R+1DQ+kifWFa810IjRy2NNBVvha3cg9sWA3nFh6nnGrHSMnnJKrzH7c/No9kq4Jb55Ru44YKsCSBgrKg==}
+  '@turbo/linux-arm64@2.10.3':
+    resolution: {integrity: sha512-DPkIKQ+6p0sho3Cx/e/A3F+AKgXQJA+z//cHsTcyyM1YWRGSYA0UTP8NUpb4iS2tVBSniGwmjRUr73hpq8kcDg==}
     cpu: [arm64]
     os: [linux]
 
-  '@turbo/windows-64@2.10.0':
-    resolution: {integrity: sha512-CRUEguLWxFQHptYZS7HjPhNhAFawfea07iR+xAQ5e4klgLrPCMdexBkXwSCwOxqTFknJ7RZFN3gOaADsw+Gttg==}
+  '@turbo/windows-64@2.10.3':
+    resolution: {integrity: sha512-8NvFAze9D4PsosZAnK3aGqHz2vLzREz9lNIxLgfE0jRchq2sZQE190cwFm7WX17yg3ftPvwCvWH3rhLbG1UHCQ==}
     cpu: [x64]
     os: [win32]
 
-  '@turbo/windows-arm64@2.10.0':
-    resolution: {integrity: sha512-dVHGaf9F8twzgibcBqKoADT/LLqf9++jDb+hq/LPWWaOmRpp4M+/pVOm7vy4z9D++xg8eaxWLT0+wQxFwhYu9A==}
+  '@turbo/windows-arm64@2.10.3':
+    resolution: {integrity: sha512-AqjqV5cHbFa0YRaQ+Dyw6lSm6as4h/Uf8LcZ7VN8i+Odr23ShFD5SUvVAR1d3rZqibFVs9c0VdtXdfQfkdcs3A==}
     cpu: [arm64]
     os: [win32]
 
@@ -1437,8 +1437,8 @@ packages:
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
-  nanoid@3.3.15:
-    resolution: {integrity: sha512-y7Wygv/7mEOvxTuEQDB8StXdMRBWf1kR/tlhAzBRUFkB2jfcLOAxO/SHmOO2zgz1pVgK29/kyupn059/bCHdjA==}
+  nanoid@3.3.16:
+    resolution: {integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
@@ -1567,8 +1567,8 @@ packages:
     resolution: {integrity: sha512-PS08Iboia9mts/2ygV3eLpY5ghnUcfLV/EXTOW1E2qYxJKGGBUtNjN76FYHnMs36RmARn41bC0AZmn+rR0OVpQ==}
     engines: {node: ^10 || ^12 || >=14}
 
-  postcss@8.5.16:
-    resolution: {integrity: sha512-vuwillviilfKZsg0VGj5R/YwwcHx4SLsIOI/7K6mQkWx+l5cUHTjj5g0AasTBcyXsbfTgrwsUNmVUb5xVwyPwg==}
+  postcss@8.5.19:
+    resolution: {integrity: sha512-Mz8SaolMd8nB+G13WkORcxQKHZ/NE4xXevtkJHVuG+guo9/wYKlIMTKAqGdEmYOXR2ijPjTYNHssizdaVSUNdQ==}
     engines: {node: ^10 || ^12 || >=14}
 
   prettier@2.8.8:
@@ -1781,8 +1781,8 @@ packages:
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
-  turbo@2.10.0:
-    resolution: {integrity: sha512-o016H9PPtuH2deb3mh3Vci3Avfi9UYgM/RONQisY7HnloupP0IFSbFS3gFYJgFJP8nwBrByHWFQIDa8T2zIXPw==}
+  turbo@2.10.3:
+    resolution: {integrity: sha512-uZIqzfgtWbyqu1Tqwdd0giRnPGgL0ejbcdF8eZLJhtTTVSrOgArZGzYeXTD6XNcc7ANgdhqex11Y9bHBeyiQLQ==}
     hasBin: true
 
   typescript@6.0.3:
@@ -1855,8 +1855,8 @@ packages:
       vite:
         optional: true
 
-  vite@8.1.0:
-    resolution: {integrity: sha512-BuJcQK/56NQTWDGn4ABea3q4SSBdNPWwNZKTkkUpcMPnLoquSYH8llRtSUIgoL1KSCpHt5eghLShn50mH36y7Q==}
+  vite@8.1.3:
+    resolution: {integrity: sha512-Ds+gBRbj0lwRO2Y5hwnUBdxSwlAve9LeRyU4sNnAr0ewW0gWF0n5bgXgUzbgZ49MV9BVUAQUFYVcDUcilUExMA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -2569,12 +2569,12 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.3.2
       '@tailwindcss/oxide-win32-x64-msvc': 4.3.2
 
-  '@tailwindcss/vite@4.3.2(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))':
+  '@tailwindcss/vite@4.3.2(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))':
     dependencies:
       '@tailwindcss/node': 4.3.2
       '@tailwindcss/oxide': 4.3.2
       tailwindcss: 4.3.2
-      vite: 8.1.0(@types/node@24.13.2)(jiti@2.7.0)
+      vite: 8.1.3(@types/node@24.13.2)(jiti@2.7.0)
 
   '@testing-library/jest-dom@6.9.1':
     dependencies:
@@ -2585,22 +2585,22 @@ snapshots:
       picocolors: 1.1.1
       redent: 3.0.0
 
-  '@turbo/darwin-64@2.10.0':
+  '@turbo/darwin-64@2.10.3':
     optional: true
 
-  '@turbo/darwin-arm64@2.10.0':
+  '@turbo/darwin-arm64@2.10.3':
     optional: true
 
-  '@turbo/linux-64@2.10.0':
+  '@turbo/linux-64@2.10.3':
     optional: true
 
-  '@turbo/linux-arm64@2.10.0':
+  '@turbo/linux-arm64@2.10.3':
     optional: true
 
-  '@turbo/windows-64@2.10.0':
+  '@turbo/windows-64@2.10.3':
     optional: true
 
-  '@turbo/windows-arm64@2.10.0':
+  '@turbo/windows-arm64@2.10.3':
     optional: true
 
   '@tybys/wasm-util@0.10.3':
@@ -2632,18 +2632,18 @@ snapshots:
     dependencies:
       csstype: 3.2.3
 
-  '@vitejs/plugin-react-swc@4.3.1(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))':
+  '@vitejs/plugin-react-swc@4.3.1(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
       '@swc/core': 1.15.41
-      vite: 8.1.0(@types/node@24.13.2)(jiti@2.7.0)
+      vite: 8.1.3(@types/node@24.13.2)(jiti@2.7.0)
     transitivePeerDependencies:
       - '@swc/helpers'
 
-  '@vitejs/plugin-react@6.0.3(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))':
+  '@vitejs/plugin-react@6.0.3(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
-      vite: 8.1.0(@types/node@24.13.2)(jiti@2.7.0)
+      vite: 8.1.3(@types/node@24.13.2)(jiti@2.7.0)
 
   '@vitest/expect@4.1.9':
     dependencies:
@@ -2654,21 +2654,21 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.9(vite@8.1.0(@types/node@22.20.0)(jiti@2.7.0))':
+  '@vitest/mocker@4.1.9(vite@8.1.3(@types/node@22.20.0)(jiti@2.7.0))':
     dependencies:
       '@vitest/spy': 4.1.9
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.1.0(@types/node@22.20.0)(jiti@2.7.0)
+      vite: 8.1.3(@types/node@22.20.0)(jiti@2.7.0)
 
-  '@vitest/mocker@4.1.9(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))':
+  '@vitest/mocker@4.1.9(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))':
     dependencies:
       '@vitest/spy': 4.1.9
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.1.0(@types/node@24.13.2)(jiti@2.7.0)
+      vite: 8.1.3(@types/node@24.13.2)(jiti@2.7.0)
 
   '@vitest/pretty-format@4.1.9':
     dependencies:
@@ -3070,7 +3070,7 @@ snapshots:
 
   ms@2.1.3: {}
 
-  nanoid@3.3.15: {}
+  nanoid@3.3.16: {}
 
   next@16.2.9(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:
@@ -3192,13 +3192,13 @@ snapshots:
 
   postcss@8.4.31:
     dependencies:
-      nanoid: 3.3.15
+      nanoid: 3.3.16
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  postcss@8.5.16:
+  postcss@8.5.19:
     dependencies:
-      nanoid: 3.3.15
+      nanoid: 3.3.16
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
@@ -3401,14 +3401,14 @@ snapshots:
 
   tslib@2.8.1: {}
 
-  turbo@2.10.0:
+  turbo@2.10.3:
     optionalDependencies:
-      '@turbo/darwin-64': 2.10.0
-      '@turbo/darwin-arm64': 2.10.0
-      '@turbo/linux-64': 2.10.0
-      '@turbo/linux-arm64': 2.10.0
-      '@turbo/windows-64': 2.10.0
-      '@turbo/windows-arm64': 2.10.0
+      '@turbo/darwin-64': 2.10.3
+      '@turbo/darwin-arm64': 2.10.3
+      '@turbo/linux-64': 2.10.3
+      '@turbo/linux-arm64': 2.10.3
+      '@turbo/windows-64': 2.10.3
+      '@turbo/windows-arm64': 2.10.3
 
   typescript@6.0.3: {}
 
@@ -3423,7 +3423,7 @@ snapshots:
 
   universalify@0.1.2: {}
 
-  unplugin-dts@1.0.3(rolldown@1.1.5)(typescript@6.0.3)(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0)):
+  unplugin-dts@1.0.3(rolldown@1.1.5)(typescript@6.0.3)(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0)):
     dependencies:
       '@rollup/pluginutils': 5.4.0
       '@volar/typescript': 2.4.28
@@ -3436,7 +3436,7 @@ snapshots:
       unplugin: 2.3.11
     optionalDependencies:
       rolldown: 1.1.5
-      vite: 8.1.0(@types/node@24.13.2)(jiti@2.7.0)
+      vite: 8.1.3(@types/node@24.13.2)(jiti@2.7.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -3447,11 +3447,11 @@ snapshots:
       picomatch: 4.0.5
       webpack-virtual-modules: 0.6.2
 
-  vite-plugin-dts@5.0.3(rolldown@1.1.5)(typescript@6.0.3)(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0)):
+  vite-plugin-dts@5.0.3(rolldown@1.1.5)(typescript@6.0.3)(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0)):
     dependencies:
-      unplugin-dts: 1.0.3(rolldown@1.1.5)(typescript@6.0.3)(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))
+      unplugin-dts: 1.0.3(rolldown@1.1.5)(typescript@6.0.3)(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))
     optionalDependencies:
-      vite: 8.1.0(@types/node@24.13.2)(jiti@2.7.0)
+      vite: 8.1.3(@types/node@24.13.2)(jiti@2.7.0)
     transitivePeerDependencies:
       - '@rspack/core'
       - '@vue/language-core'
@@ -3461,11 +3461,11 @@ snapshots:
       - typescript
       - webpack
 
-  vite@8.1.0(@types/node@22.20.0)(jiti@2.7.0):
+  vite@8.1.3(@types/node@22.20.0)(jiti@2.7.0):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.5
-      postcss: 8.5.16
+      postcss: 8.5.19
       rolldown: 1.1.5
       tinyglobby: 0.2.17
     optionalDependencies:
@@ -3473,11 +3473,11 @@ snapshots:
       fsevents: 2.3.3
       jiti: 2.7.0
 
-  vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0):
+  vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.5
-      postcss: 8.5.16
+      postcss: 8.5.19
       rolldown: 1.1.5
       tinyglobby: 0.2.17
     optionalDependencies:
@@ -3485,10 +3485,10 @@ snapshots:
       fsevents: 2.3.3
       jiti: 2.7.0
 
-  vitest@4.1.9(@types/node@22.20.0)(jsdom@29.1.1)(vite@8.1.0(@types/node@22.20.0)(jiti@2.7.0)):
+  vitest@4.1.9(@types/node@22.20.0)(jsdom@29.1.1)(vite@8.1.3(@types/node@22.20.0)(jiti@2.7.0)):
     dependencies:
       '@vitest/expect': 4.1.9
-      '@vitest/mocker': 4.1.9(vite@8.1.0(@types/node@22.20.0)(jiti@2.7.0))
+      '@vitest/mocker': 4.1.9(vite@8.1.3(@types/node@22.20.0)(jiti@2.7.0))
       '@vitest/pretty-format': 4.1.9
       '@vitest/runner': 4.1.9
       '@vitest/snapshot': 4.1.9
@@ -3505,7 +3505,7 @@ snapshots:
       tinyexec: 1.2.4
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.0
-      vite: 8.1.0(@types/node@22.20.0)(jiti@2.7.0)
+      vite: 8.1.3(@types/node@22.20.0)(jiti@2.7.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 22.20.0
@@ -3513,10 +3513,10 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  vitest@4.1.9(@types/node@24.13.2)(jsdom@29.1.1)(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0)):
+  vitest@4.1.9(@types/node@24.13.2)(jsdom@29.1.1)(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0)):
     dependencies:
       '@vitest/expect': 4.1.9
-      '@vitest/mocker': 4.1.9(vite@8.1.0(@types/node@24.13.2)(jiti@2.7.0))
+      '@vitest/mocker': 4.1.9(vite@8.1.3(@types/node@24.13.2)(jiti@2.7.0))
       '@vitest/pretty-format': 4.1.9
       '@vitest/runner': 4.1.9
       '@vitest/snapshot': 4.1.9
@@ -3533,7 +3533,7 @@ snapshots:
       tinyexec: 1.2.4
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.0
-      vite: 8.1.0(@types/node@24.13.2)(jiti@2.7.0)
+      vite: 8.1.3(@types/node@24.13.2)(jiti@2.7.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 24.13.2
