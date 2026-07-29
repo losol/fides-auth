@@ -116,10 +116,10 @@
   "devDependencies": {
     "@eventuras/typescript-config": "workspace:*",
     "@eventuras/vite-config": "workspace:*",
-    "@types/node": "^22.20.0",
+    "@types/node": "^22.20.1",
     "jsdom": "29.1.1",
-    "vite": "^8.1.0",
-    "vitest": "^4.1.4"
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10"
   },
   "engines": {
     "node": ">=18"
