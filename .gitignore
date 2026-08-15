@@ -22,3 +22,6 @@ env
 
 # Coverage reports
 coverage/
+
+# Turborepo
+.turbo/
