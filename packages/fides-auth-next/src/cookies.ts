@@ -31,6 +31,7 @@ export {
   COOKIE_MAX_BYTES,
   CookieTooLargeError,
   ACCESS_TOKEN_COOKIE_NAME,
+  ID_TOKEN_COOKIE_NAME,
   defaultSessionCookieOptions,
   defaultOAuthCookieOptions,
   cookieByteSize,

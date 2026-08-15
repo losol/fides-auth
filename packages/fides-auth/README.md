@@ -9,6 +9,7 @@ Framework-agnostic OAuth 2.0 / OpenID Connect library with PKCE, encrypted sessi
 - **Dual environment** — Node.js (`openid-client`) and browser (Web Crypto) entry points
 - **Encrypted sessions** — AES-256-GCM encrypted JWTs for secure session storage
 - **Rate limiting** — Generic token-bucket algorithm, ready for login protection
+- **RP-initiated logout** — End the provider's session too, with `id_token_hint` (OIDC RP-Initiated Logout 1.0)
 - **Silent login** — Detect `prompt=none` results without user interaction
 - **Pluggable logging** — Bring your own logger (pino, winston, etc.) or use the built-in console logger
 - **Tree-shakeable** — Each module is a separate entry point; import only what you need
@@ -114,6 +115,7 @@ Each module is available as a separate entry point for tree-shaking:
 | `@eventuras/fides-auth/rate-limit`         | Universal   | Token-bucket rate limiter                             |
 | `@eventuras/fides-auth/logger`             | Universal   | Pluggable logger interface and configuration          |
 | `@eventuras/fides-auth/types`              | Universal   | TypeScript types (Session, Tokens, etc.)              |
+| `@eventuras/fides-auth/server`             | Node.js     | Request handlers (login, callback, logout, heartbeat) |
 | `@eventuras/fides-auth/providers/vipps`    | Node.js     | Vipps Login identity provider                         |
 
 ### OAuth — Node.js (`/oauth`)
@@ -172,6 +174,36 @@ low-level wrapper directly:
 ```typescript
 const authUrl = await buildAuthorizationUrlWithPAR(config, pkce);
 ```
+
+#### RP-Initiated Logout
+
+Clearing your own session cookie is not a logout — the provider's session survives,
+so the next `/authorize` re-authenticates silently. `buildOidcLogoutUrl` builds the
+request that ends the provider session too, and returns `null` when the provider
+advertises no `end_session_endpoint`:
+
+```typescript
+const logoutUrl = await buildOidcLogoutUrl(oauthConfig, {
+  postLogoutRedirectUri: "https://app.example.com/",
+  idTokenHint: session?.tokens?.idToken,
+});
+```
+
+The `/server` entry point wraps the whole dance — read the hint, clear the cookies,
+redirect:
+
+```typescript
+import { handleOidcLogout } from "@eventuras/fides-auth/server";
+
+return handleOidcLogout(request, {
+  oauthConfig,
+  cookies,
+  postLogoutRedirectUri: "https://app.example.com/",
+});
+```
+
+See [docs/rp-initiated-logout.md](./docs/rp-initiated-logout.md) for the full
+parameter set, where the ID token is stored, and why `client_id` is still sent.
 
 ### OAuth — Browser (`/oauth-browser`)
 

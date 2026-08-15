@@ -38,6 +38,10 @@
       "types": "./dist/oidc-login.d.ts",
       "import": "./dist/oidc-login.js"
     },
+    "./oidc-logout": {
+      "types": "./dist/oidc-logout.d.ts",
+      "import": "./dist/oidc-logout.js"
+    },
     "./heartbeat-handler": {
       "types": "./dist/heartbeat-handler.d.ts",
       "import": "./dist/heartbeat-handler.js"

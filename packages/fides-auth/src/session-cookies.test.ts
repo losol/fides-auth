@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest';
 
-import { encodeSessionCookies, decodeSessionCookies } from './session-cookies';
-import { createEncryptedJWT } from './utils';
-import { Session } from './types';
+import {
+  encodeSessionCookies,
+  decodeSessionCookies,
+  decodeIdTokenCookie,
+} from './session-cookies';
+import { createEncryptedJWT, decryptJWT } from './utils';
+import { Session, Tokens } from './types';
 
 // 32-byte (64 hex char) key for A256GCM.
 const SECRET = 'a'.repeat(64);
@@ -14,9 +18,10 @@ function jwtWithExp(secondsFromNow: number): string {
   return `${enc({ alg: 'none', typ: 'JWT' })}.${enc({ exp })}.sig`;
 }
 
-const session = (accessToken?: string): Session => ({
+const session = (accessToken?: string, idToken?: string): Session => ({
   tokens: {
     accessToken,
+    idToken,
     refreshToken: 'refresh-token',
     accessTokenExpiresAt: '2099-01-01T00:00:00.000Z',
   },
@@ -38,6 +43,26 @@ describe('encodeSessionCookies', () => {
     const encoded = await encodeSessionCookies(session(undefined), SECRET);
     expect(encoded.accessToken).toBeUndefined();
   });
+
+  it('gives the ID token its own value, kept out of the other two', async () => {
+    const idToken = jwtWithExp(3600);
+    const encoded = await encodeSessionCookies(session(jwtWithExp(3600), idToken), SECRET);
+
+    expect(encoded.idToken).toBeTruthy();
+
+    // Decrypt rather than search the ciphertext: the point is that the payloads
+    // carry no idToken, not that a base64 fragment happens to be absent.
+    const main = await decryptJWT(encoded.session, SECRET);
+    const accessTokenValue = await decryptJWT(encoded.accessToken!, SECRET);
+
+    expect((main.tokens as Tokens | undefined)?.idToken).toBeUndefined();
+    expect(accessTokenValue.idToken).toBeUndefined();
+  });
+
+  it('omits the ID-token value when the session has none', async () => {
+    const encoded = await encodeSessionCookies(session(jwtWithExp(3600)), SECRET);
+    expect(encoded.idToken).toBeUndefined();
+  });
 });
 
 describe('decodeSessionCookies', () => {
@@ -54,6 +79,22 @@ describe('decodeSessionCookies', () => {
     expect(decoded?.tokens?.refreshToken).toBe('refresh-token');
     expect(decoded?.user?.email).toBe('ada@example.test');
     expect(decoded?.scopes).toEqual(['openid', 'profile']);
+  });
+
+  it('round-trips the ID token', async () => {
+    const idToken = jwtWithExp(3600);
+    const encoded = await encodeSessionCookies(session(jwtWithExp(3600), idToken), SECRET);
+
+    const decoded = await decodeSessionCookies(
+      {
+        session: encoded.session,
+        accessToken: encoded.accessToken ?? null,
+        idToken: encoded.idToken ?? null,
+      },
+      SECRET,
+    );
+
+    expect(decoded?.tokens?.idToken).toBe(idToken);
   });
 
   it('returns null when there is no session value', async () => {
@@ -99,5 +140,31 @@ describe('decodeSessionCookies', () => {
 
     const decoded = await decodeSessionCookies({ session: legacy, accessToken: null }, SECRET);
     expect(decoded?.tokens?.accessToken).toBe(accessToken);
+  });
+});
+
+describe('decodeIdTokenCookie', () => {
+  it('returns the ID token after the access token has expired', async () => {
+    const idToken = jwtWithExp(3600);
+    const encoded = await encodeSessionCookies(session(jwtWithExp(-60), idToken), SECRET);
+
+    // The session itself is gone once the access token expires...
+    expect(
+      await decodeSessionCookies(
+        {
+          session: encoded.session,
+          accessToken: encoded.accessToken ?? null,
+          idToken: encoded.idToken ?? null,
+        },
+        SECRET,
+      ),
+    ).toBeNull();
+
+    // ...but the logout hint must survive it.
+    expect(await decodeIdTokenCookie(encoded.idToken!, SECRET)).toBe(idToken);
+  });
+
+  it('returns undefined for a corrupt value instead of throwing', async () => {
+    expect(await decodeIdTokenCookie('not-a-jwe', SECRET)).toBeUndefined();
   });
 });

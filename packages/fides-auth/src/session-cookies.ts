@@ -5,10 +5,9 @@
 // (Next.js, React Router, …) own the actual cookie store and call these helpers
 // to split a session across two cookie values and to reassemble it again.
 //
-// The split: the access token (typically the largest part — a JWT carrying
-// scopes/roles) is encrypted into its own value, and everything else into the
-// main value. Giving each its own cookie keeps a large access token from blowing
-// the browser's ~4KB per-cookie limit.
+// The split: the large raw JWTs — the access token and the ID token (kept for
+// `id_token_hint` on logout) — each get their own encrypted value, everything else
+// goes in the main one, so no cookie has to carry two JWTs against the ~4KB limit.
 
 import { decodeJwt } from 'jose';
 
@@ -39,13 +38,15 @@ function accessTokenIsExpired(accessToken: string): boolean {
 
 /** Encrypted cookie values produced from a session. */
 export interface EncodedSessionCookies {
-  /** Value for the main session cookie (everything except the raw access token). */
+  /** Value for the main session cookie (everything except the raw access/ID tokens). */
   session: string;
   /**
    * Value for the access-token cookie, or `undefined` when the session carries
    * no access token. Adapters should delete the access-token cookie in that case.
    */
   accessToken?: string;
+  /** Value for the ID-token cookie, or `undefined` when the session carries none. */
+  idToken?: string;
 }
 
 /** Raw cookie values read from the store, before decoding. */
@@ -54,10 +55,13 @@ export interface RawSessionCookies {
   session: string | null;
   /** The access-token cookie value, or null if absent. */
   accessToken: string | null;
+  /** The ID-token cookie value, or null if absent. */
+  idToken?: string | null;
 }
 
 /**
- * Encrypts a session into the two cookie values, splitting the access token out.
+ * Encrypts a session into the three cookie values, splitting the raw access and ID
+ * tokens out.
  *
  * @param session - The session to encode.
  * @param secret - The encryption key as a hex string or Uint8Array (32 bytes for A256GCM).
@@ -68,24 +72,26 @@ export async function encodeSessionCookies(
 ): Promise<EncodedSessionCookies> {
   const { tokens, ...rest } = session;
   const accessToken = tokens?.accessToken;
+  const idToken = tokens?.idToken;
 
-  // Main value: the whole session minus the raw access token (undefined keys are
-  // dropped during JWT serialization).
+  // Main value: the whole session minus the raw access and ID tokens (undefined
+  // keys are dropped during JWT serialization).
   const coreSession: Session = {
     ...rest,
-    tokens: tokens ? { ...tokens, accessToken: undefined } : undefined,
+    tokens: tokens ? { ...tokens, accessToken: undefined, idToken: undefined } : undefined,
   };
 
   const main = await createEncryptedJWT(coreSession, secret);
-  const encodedAccessToken = accessToken
-    ? await createEncryptedJWT({ accessToken }, secret)
-    : undefined;
 
-  return { session: main, accessToken: encodedAccessToken };
+  return {
+    session: main,
+    accessToken: accessToken ? await createEncryptedJWT({ accessToken }, secret) : undefined,
+    idToken: idToken ? await createEncryptedJWT({ idToken }, secret) : undefined,
+  };
 }
 
 /**
- * Decodes the cookie values back into a session, reattaching the access token.
+ * Decodes the cookie values back into a session, reattaching the access and ID tokens.
  *
  * Returns null when there is no session, the main value fails validation, or the
  * access token has expired — preserving the contract that an expired access token
@@ -132,5 +138,33 @@ export async function decodeSessionCookies(
     }
   }
 
+  if (raw.idToken) {
+    const idToken = await decodeIdTokenCookie(raw.idToken, secret);
+    if (idToken) {
+      session.tokens = { ...session.tokens, idToken };
+    }
+  }
+
   return session;
+}
+
+/**
+ * Decrypts the ID-token cookie value on its own, independent of session validity.
+ * Logout needs the hint precisely when the session has gone stale, so this must not
+ * go through {@link decodeSessionCookies}.
+ *
+ * @param raw - The ID-token cookie value.
+ * @param secret - The decryption key as a hex string or Uint8Array (32 bytes for A256GCM).
+ */
+export async function decodeIdTokenCookie(
+  raw: string,
+  secret: string | Uint8Array,
+): Promise<string | undefined> {
+  try {
+    const payload = await decryptJWT(raw, secret);
+    return typeof payload.idToken === 'string' ? payload.idToken : undefined;
+  } catch (error) {
+    logger.warn({ error }, 'Failed to decode ID-token cookie');
+    return undefined;
+  }
 }

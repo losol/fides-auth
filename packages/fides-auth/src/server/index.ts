@@ -8,9 +8,11 @@ export {
   persistSession,
   readSession,
   refreshSessionInStore,
+  readIdToken,
   clearSession,
 } from './session';
 
 export { handleOidcLogin, type OidcLoginConfig } from './oidc-login';
 export { handleOidcCallback, type OidcCallbackConfig } from './oidc-callback';
+export { handleOidcLogout, type OidcLogoutConfig } from './oidc-logout';
 export { handleHeartbeat, type HeartbeatHandlerConfig } from './heartbeat-handler';
