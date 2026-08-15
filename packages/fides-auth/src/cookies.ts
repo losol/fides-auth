@@ -51,28 +51,41 @@ export interface CookieOptions {
   sameSite?: 'strict' | 'lax' | 'none';
   /** HTTP only flag (default: true) */
   httpOnly?: boolean;
-  /** Secure flag (default: true in production) */
+  /**
+   * Secure flag. `true` in {@link defaultSessionCookieOptions} and
+   * {@link defaultOAuthCookieOptions}; when omitted from a hand-built options
+   * object, the adapter's own default applies.
+   */
   secure?: boolean;
 }
 
 /**
  * Default cookie options for session cookies.
- * - Secure in production
+ * - Secure
  * - HTTP only
  * - Lax same-site policy
  * - 30 days max age
+ *
+ * `secure` is unconditional rather than derived from NODE_ENV: a deployment that
+ * doesn't set it — staging, a container, any non-Next server — would otherwise put
+ * the session cookie on the wire in the clear, silently.
+ *
+ * The cookie spec exempts localhost from the https requirement, so a `Secure`
+ * cookie is still set and sent over `http://localhost` and local development is
+ * unaffected. Plain http on any other host — a LAN address, a custom dev hostname —
+ * needs an explicit `secure: false`.
  */
 export const defaultSessionCookieOptions: CookieOptions = {
   path: '/',
   maxAge: 60 * 60 * 24 * 30, // 30 days
   sameSite: 'lax',
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
+  secure: true,
 };
 
 /**
  * Default cookie options for OAuth state/PKCE cookies.
- * - Secure in production
+ * - Secure — see {@link defaultSessionCookieOptions}
  * - HTTP only
  * - Lax same-site policy
  * - 10 minutes max age (short-lived for security)
@@ -82,7 +95,7 @@ export const defaultOAuthCookieOptions: CookieOptions = {
   maxAge: 60 * 10, // 10 minutes
   sameSite: 'lax',
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
+  secure: true,
 };
 
 /**
