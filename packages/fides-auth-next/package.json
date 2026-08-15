@@ -2,14 +2,14 @@
   "name": "@eventuras/fides-auth-next",
   "version": "0.4.0",
   "description": "Next.js bindings for @eventuras/fides-auth",
-  "homepage": "https://github.com/losol/eventuras/tree/main/libs/fides-auth-next#readme",
+  "homepage": "https://github.com/losol/fides-auth/tree/main/packages/fides-auth-next#readme",
   "bugs": {
-    "url": "https://github.com/losol/eventuras/issues"
+    "url": "https://github.com/losol/fides-auth/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/losol/eventuras.git",
-    "directory": "libs/fides-auth-next"
+    "url": "https://github.com/losol/fides-auth.git",
+    "directory": "packages/fides-auth-next"
   },
   "license": "MIT",
   "author": "losol <losol@users.noreply.github.com>",

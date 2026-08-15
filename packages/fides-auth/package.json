@@ -13,14 +13,14 @@
     "identity",
     "vipps"
   ],
-  "homepage": "https://github.com/losol/eventuras/tree/main/libs/fides-auth#readme",
+  "homepage": "https://github.com/losol/fides-auth/tree/main/packages/fides-auth#readme",
   "bugs": {
-    "url": "https://github.com/losol/eventuras/issues"
+    "url": "https://github.com/losol/fides-auth/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/losol/eventuras.git",
-    "directory": "libs/fides-auth"
+    "url": "https://github.com/losol/fides-auth.git",
+    "directory": "packages/fides-auth"
   },
   "license": "MIT",
   "author": "losol <losol@users.noreply.github.com>",
