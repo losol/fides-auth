@@ -4,6 +4,7 @@ export * from './session';
 export * from './cookies';
 export * from './oidc-callback';
 export * from './oidc-login';
+export * from './oidc-logout';
 export * from './heartbeat-handler';
 
 // Authentication Store (XState Store)

@@ -79,3 +79,11 @@ describe('buildSessionFromTokens — scopes', () => {
     expect(session.scopes).toEqual(['openid', 'profile']);
   });
 });
+
+describe('buildSessionFromTokens — id token', () => {
+  it('retains the raw id_token for id_token_hint on logout', async () => {
+    const tokens = await makeTokenResponse();
+    const session = buildSessionFromTokens(tokens);
+    expect(session.tokens?.idToken).toBe(tokens.id_token);
+  });
+});

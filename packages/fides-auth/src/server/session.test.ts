@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
+import { CookieTooLargeError } from '../cookies';
 import { createEncryptedJWT } from '../utils';
 import type { Session } from '../types';
 import type { CookieStore } from './cookie-store';
@@ -61,6 +62,37 @@ describe('persistSession', () => {
 
     expect(jar.has('session')).toBe(true);
     expect(jar.has('session_at')).toBe(false);
+  });
+
+  it('writes the ID token to session_it, kept out of the other two cookies', async () => {
+    const idToken = jwtWithExp(3600);
+    const session = baseSession(jwtWithExp(3600));
+    session.tokens!.idToken = idToken;
+    const { store, jar } = memoryStore();
+
+    await persistSession(store, session, secret);
+
+    expect(jar.has('session_it')).toBe(true);
+    expect(jar.get('session')).not.toContain(idToken.split('.')[1]);
+    expect(jar.get('session_at')).not.toContain(idToken.split('.')[1]);
+  });
+
+  it('leaves every cookie untouched when one value is too large', async () => {
+    // The previous user's cookies must survive intact: writing some of them and
+    // then throwing would leave user B's session beside user A's ID token.
+    const previous = {
+      session: 'user-a-session',
+      session_at: 'user-a-access-token',
+      session_it: 'user-a-id-token',
+    };
+    const { store, jar } = memoryStore(previous);
+
+    const session = baseSession(jwtWithExp(3600));
+    session.tokens!.idToken = 'x'.repeat(5000);
+
+    await expect(persistSession(store, session, secret)).rejects.toThrow(CookieTooLargeError);
+
+    expect(Object.fromEntries(jar)).toEqual(previous);
   });
 });
 

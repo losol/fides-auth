@@ -40,7 +40,7 @@ const { logout } = useAuthActions();
 - **XState Store**: Simple auth state management with automatic session monitoring
 - **Cookie Helpers**: Server-side cookie operations
 - **Session Management**: High-level session functions
-- **OAuth**: Complete OAuth flow with PKCE
+- **OAuth**: Complete OAuth flow with PKCE and RP-initiated logout
 - **TypeScript**: Full type safety
 
 ## Core Functions
@@ -54,6 +54,11 @@ import {
   setSessionCookie,
   getSessionCookie,
 } from "@eventuras/fides-auth-next";
+
+// Route handlers
+import { handleOidcLogin } from "@eventuras/fides-auth-next/oidc-login";
+import { handleOidcCallback } from "@eventuras/fides-auth-next/oidc-callback";
+import { handleOidcLogout } from "@eventuras/fides-auth-next/oidc-logout";
 
 // Client-side
 import { useAuthStore, useAuthActions } from "./auth-store";

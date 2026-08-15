@@ -7,6 +7,9 @@ export default defineNextLibConfig({
     request: 'src/request.ts',
     'store/index': 'src/store/index.ts',
     'heartbeat-handler': 'src/heartbeat-handler.ts',
+    'oidc-callback': 'src/oidc-callback.ts',
+    'oidc-login': 'src/oidc-login.ts',
+    'oidc-logout': 'src/oidc-logout.ts',
   },
   external: [
     // State management

@@ -38,6 +38,8 @@ export const refreshSession = async (
           ? new Date(Date.now() + newtokens.expires_in * 1000).toISOString()
           : undefined,
         refreshToken: newtokens.refresh_token ?? current_session.tokens?.refreshToken,
+        // A refresh doesn't always return id_token, and a stale hint still works.
+        idToken: newtokens.id_token ?? current_session.tokens?.idToken,
       },
     };
 

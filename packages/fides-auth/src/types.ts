@@ -6,6 +6,11 @@ export interface Tokens {
   refreshToken?: string;
   /** ISO 8601 string — see {@link accessTokenExpiresAt}. */
   refreshTokenExpiresAt?: string;
+  /**
+   * Raw (encoded) ID token, sent as `id_token_hint` on RP-initiated logout. Rides
+   * in the access-token cookie, not the main one — see `session-cookies.ts`.
+   */
+  idToken?: string;
 }
 
 /** Authenticated user session with tokens, user info, and optional custom data. */

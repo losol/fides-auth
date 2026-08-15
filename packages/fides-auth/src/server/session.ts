@@ -8,6 +8,7 @@
 import {
   ACCESS_TOKEN_COOKIE_NAME,
   COOKIE_INFO_BYTES,
+  ID_TOKEN_COOKIE_NAME,
   SESSION_COOKIE_NAME,
   assertCookieWithinLimit,
   defaultSessionCookieOptions,
@@ -16,7 +17,11 @@ import { createLogger } from '../logger';
 import type { OAuthConfig } from '../oauth';
 import { getOAuthErrorLogContext } from '../oauth-logging';
 import { refreshSession } from '../session-refresh';
-import { decodeSessionCookies, encodeSessionCookies } from '../session-cookies';
+import {
+  decodeIdTokenCookie,
+  decodeSessionCookies,
+  encodeSessionCookies,
+} from '../session-cookies';
 import type { CreateSessionOptions, Session } from '../types';
 import type { CookieStore } from './cookie-store';
 
@@ -24,20 +29,19 @@ const logger = createLogger({ namespace: 'fides-auth:server:session' });
 
 type Secret = string | Uint8Array;
 
-/** Writes a cookie after the browser size guard; logs as it nears the limit. */
-async function writeChecked(store: CookieStore, name: string, value: string): Promise<void> {
+/** Applies the browser size guard to one cookie value; logs as it nears the limit. */
+function checkSize(name: string, value: string): void {
   // Fail loudly above the browser per-cookie limit (the browser would otherwise
   // drop the cookie silently, producing a broken login).
   const size = assertCookieWithinLimit(name, value);
   if (size >= COOKIE_INFO_BYTES) {
     logger.info({ cookieName: name, size }, 'Cookie approaching browser size limit');
   }
-  await store.set(name, value, defaultSessionCookieOptions);
 }
 
 /**
- * Encrypts a session and writes it across the "session" and "session_at" cookies,
- * clearing a stale access-token cookie when the session carries no access token.
+ * Encrypts a session and writes it across the "session", "session_at" and
+ * "session_it" cookies, clearing the split-out cookies the session has no token for.
  *
  * @returns The encrypted JWT stored in the main "session" cookie.
  */
@@ -48,11 +52,25 @@ export async function persistSession(
 ): Promise<string> {
   const encoded = await encodeSessionCookies(session, secret);
 
-  await writeChecked(store, SESSION_COOKIE_NAME, encoded.session);
-  if (encoded.accessToken) {
-    await writeChecked(store, ACCESS_TOKEN_COOKIE_NAME, encoded.accessToken);
-  } else {
-    await store.delete(ACCESS_TOKEN_COOKIE_NAME);
+  const values: Array<[string, string | undefined]> = [
+    [SESSION_COOKIE_NAME, encoded.session],
+    [ACCESS_TOKEN_COOKIE_NAME, encoded.accessToken],
+    [ID_TOKEN_COOKIE_NAME, encoded.idToken],
+  ];
+
+  // Size-check everything before touching the store. Throwing part-way through
+  // would leave one user's session cookie next to another user's tokens — the
+  // caller sees an error while the browser holds a working, mixed-up session.
+  for (const [name, value] of values) {
+    if (value) checkSize(name, value);
+  }
+
+  for (const [name, value] of values) {
+    if (value) {
+      await store.set(name, value, defaultSessionCookieOptions);
+    } else {
+      await store.delete(name);
+    }
   }
 
   return encoded.session;
@@ -61,7 +79,7 @@ export async function persistSession(
 /**
  * Reads and reassembles the current session from the cookie store, or null when
  * there is no valid session. All the split/expiry/legacy handling lives in
- * {@link decodeSessionCookies}; this just supplies the two cookie values.
+ * {@link decodeSessionCookies}; this just supplies the cookie values.
  */
 export async function readSession(store: CookieStore, secret: Secret): Promise<Session | null> {
   try {
@@ -69,6 +87,7 @@ export async function readSession(store: CookieStore, secret: Secret): Promise<S
       {
         session: (await store.get(SESSION_COOKIE_NAME)) ?? null,
         accessToken: (await store.get(ACCESS_TOKEN_COOKIE_NAME)) ?? null,
+        idToken: (await store.get(ID_TOKEN_COOKIE_NAME)) ?? null,
       },
       secret,
     );
@@ -131,8 +150,24 @@ export async function refreshSessionInStore(
   }
 }
 
-/** Deletes both session cookies. */
+/**
+ * Reads the raw ID token, whether or not the session is still valid. Logout needs
+ * the hint after the access token has expired, which is exactly when
+ * {@link readSession} returns null.
+ */
+export async function readIdToken(store: CookieStore, secret: Secret): Promise<string | undefined> {
+  try {
+    const raw = await store.get(ID_TOKEN_COOKIE_NAME);
+    return raw ? await decodeIdTokenCookie(raw, secret) : undefined;
+  } catch (error) {
+    logger.error({ error }, 'Unexpected error reading ID token');
+    return undefined;
+  }
+}
+
+/** Deletes all session cookies. */
 export async function clearSession(store: CookieStore): Promise<void> {
   await store.delete(SESSION_COOKIE_NAME);
   await store.delete(ACCESS_TOKEN_COOKIE_NAME);
+  await store.delete(ID_TOKEN_COOKIE_NAME);
 }

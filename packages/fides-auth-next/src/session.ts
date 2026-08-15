@@ -17,6 +17,10 @@ const logger = Logger.create({ namespace: 'fides-auth-next:session' });
 /**
  * Creates an encrypted JWT containing session data.
  *
+ * Pre-split API: this serializes the whole session, raw tokens included, into one
+ * value. Prefer {@link createAndPersistSession}, which splits the large JWTs across
+ * cookies instead of spending one cookie's byte budget on all of them.
+ *
  * @param session - Session data (tokens, user, etc.)
  * @param options - Configuration options (e.g., sessionDurationDays)
  * @returns Encrypted JWT string

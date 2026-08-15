@@ -96,8 +96,20 @@ export const defaultOAuthCookieOptions: CookieOptions = {
 export const ACCESS_TOKEN_COOKIE_NAME = 'session_at';
 
 /**
- * Name of the main session cookie (everything except the split-out access token).
- * See {@link ACCESS_TOKEN_COOKIE_NAME} for why the access token is stored apart.
+ * Name of the cookie holding the (split-out) ID token, kept for `id_token_hint`
+ * on RP-initiated logout.
+ *
+ * It gets its own cookie for two reasons: it is a second large JWT, which would
+ * eat into the access token's byte budget, and it must outlive access-token
+ * expiry — a logout after the session has gone stale is exactly when the hint is
+ * needed.
+ */
+export const ID_TOKEN_COOKIE_NAME = 'session_it';
+
+/**
+ * Name of the main session cookie (everything except the split-out access and ID
+ * tokens). See {@link ACCESS_TOKEN_COOKIE_NAME} for why the raw tokens are stored
+ * apart.
  */
 export const SESSION_COOKIE_NAME = 'session';
 
