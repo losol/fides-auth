@@ -1,5 +1,77 @@
 # @eventuras/fides-auth
 
+## 0.11.0
+
+### Minor Changes
+
+- 82ec137: Route `clientCredentialsGrant` through openid-client instead of a raw `fetch`.
+
+  It was the one place the server module talked to a token endpoint directly, so it
+  missed the transport guards the rest of the package gets for free — while being the
+  request that carries the client secret. Three behaviour changes, all breaking:
+
+  - The token endpoint must now be **https**. A plain-http endpoint rejects with
+    `OAUTH_HTTP_REQUEST_FORBIDDEN` instead of posting the secret in the clear.
+  - Failures throw openid-client's typed errors rather than a generic
+    `Error("Client credentials grant failed: <status> - <body>")`. Code matching on
+    that message needs updating.
+  - Requests time out, 30 seconds by default, where previously they never did.
+    Configurable via the new `timeout` option (seconds).
+
+  Also adds an optional `issuer` to `ClientCredentialsConfig`, defaulting to the token
+  endpoint's origin.
+
+- fa9de74: RP-initiated logout: send `id_token_hint`.
+
+  `Tokens.idToken` now holds the raw ID token — populated by `buildSessionFromTokens`,
+  kept fresh by `refreshSession`, and stored in its own `session_it` cookie so no cookie
+  has to carry two large JWTs. `readIdToken` reads it independently of session validity,
+  since logout needs the hint after the access token has expired.
+
+  `buildOidcLogoutUrl(oauthConfig, options)` accepts `idTokenHint`, `state`,
+  `logoutHint` and `includeClientId` alongside `postLogoutRedirectUri`. A string second
+  argument still means `postLogoutRedirectUri`, and it still returns `null` when the
+  provider advertises no `end_session_endpoint`.
+
+  New `handleOidcLogout` handler in `@eventuras/fides-auth/server` — `POST`-only by
+  default and same-origin checked via `Sec-Fetch-Site`/`Origin` — wrapped for Next.js at
+  `@eventuras/fides-auth-next/oidc-logout`. See
+  `packages/fides-auth/docs/rp-initiated-logout.md` for the full parameter set, where
+  the ID token is stored, and why `client_id` is still sent.
+
+  Also fixes the `./oidc-callback` and `./oidc-login` subpath exports in
+  `@eventuras/fides-auth-next`, which pointed at files the build never emitted.
+
+  `persistSession` now size-checks every cookie value before writing any of them.
+  Previously a value that exceeded the browser limit threw part-way through, leaving the
+  new session cookie next to the previous user's tokens.
+
+- 2468ac6: Set `secure` on the default cookie options unconditionally.
+
+  **Breaking for anyone serving over plain http on a non-localhost host.** Minor rather
+  than major because this package is pre-1.0, where minor is the breaking channel — a
+  major would cut 1.0.0.
+
+  `defaultSessionCookieOptions` and `defaultOAuthCookieOptions` derived the flag from
+  `process.env.NODE_ENV === 'production'`, so any deployment that did not set
+  `NODE_ENV` — staging, a container, any server that isn't following the Next
+  convention — served the session cookie without `Secure`, over plain HTTP, silently.
+
+  The cookie spec exempts localhost from the https requirement, so `Secure` cookies are
+  still set and sent over `http://localhost` and local development is unaffected. Plain
+  http on a LAN address or a custom dev hostname now needs an explicit `secure: false`,
+  which is a deliberate choice rather than a silent default.
+
+### Patch Changes
+
+- db99ad0: Widen the `jose` dependency from an exact pin to `^6.2.8`.
+
+  An exact pin in a library forces a second copy of `jose` into any consumer tree that
+  already resolves it through a range — `openid-client` depends on `jose: ^6.2.2`, so
+  this repo was carrying two copies itself — and it withholds patch releases from
+  consumers until we cut a release of our own. Reproducibility is the lockfile's job,
+  not a library's dependency range.
+
 ## 0.10.0
 
 ### Minor Changes
