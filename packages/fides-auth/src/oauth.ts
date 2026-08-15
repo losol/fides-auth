@@ -233,7 +233,7 @@ export async function discoverAndBuildAuthorizationUrl(
  * Configuration for OAuth client credentials flow (machine-to-machine authentication)
  */
 export type ClientCredentialsConfig = {
-  /** OAuth token endpoint URL */
+  /** OAuth token endpoint URL. Must be https. */
   tokenEndpoint: string;
   /** OAuth client ID */
   clientId: string;
@@ -241,6 +241,16 @@ export type ClientCredentialsConfig = {
   clientSecret: string;
   /** Optional scope for the access token */
   scope?: string;
+  /**
+   * Issuer identifier. Only used to satisfy the server metadata; defaults to the
+   * token endpoint's origin, which is right for the common case.
+   */
+  issuer?: string;
+  /**
+   * Request timeout in seconds.
+   * @default 30
+   */
+  timeout?: number;
 };
 
 /**
@@ -554,9 +564,12 @@ export async function buildOidcLogoutUrl(
 /**
  * Performs OAuth 2.0 client credentials grant flow for machine-to-machine authentication.
  *
+ * Uses client_secret_post against the given token endpoint. The endpoint must be
+ * https — the request carries the client secret.
+ *
  * @param config - Client credentials configuration including token endpoint, client ID, and secret
  * @returns Token response from the OAuth provider
- * @throws Error if the token request fails
+ * @throws Error if the endpoint is not https, the request times out, or the grant fails
  *
  * @example
  * ```typescript
@@ -569,37 +582,38 @@ export async function buildOidcLogoutUrl(
  * ```
  */
 export async function clientCredentialsGrant(
-  config: ClientCredentialsConfig
+  config: ClientCredentialsConfig,
 ): Promise<openid.TokenEndpointResponse> {
   try {
-    const params = new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-    });
+    // Build the configuration from metadata rather than discovering it: callers
+    // give us a token endpoint, not an issuer. Going through openid-client anyway
+    // buys the https guard and the timeout, which a raw fetch of a caller-supplied
+    // URL carrying a client secret would not have.
+    const openidConfig = new openid.Configuration(
+      {
+        issuer: config.issuer ?? new URL(config.tokenEndpoint).origin,
+        token_endpoint: config.tokenEndpoint,
+      },
+      config.clientId,
+      config.clientSecret,
+      // Explicit rather than relying on openid-client's default, matching the
+      // discovery calls above: the JSDoc promises client_secret_post.
+      openid.ClientSecretPost(config.clientSecret),
+    );
+    openidConfig.timeout = config.timeout ?? 30;
 
-    if (config.scope) {
-      params.set('scope', config.scope);
-    }
+    const tokens = await openid.clientCredentialsGrant(
+      openidConfig,
+      config.scope ? { scope: config.scope } : undefined,
+    );
 
-    const response = await fetch(config.tokenEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error(
-        { status: response.status, error: errorText },
-        'Client credentials grant failed'
-      );
-      throw new Error(`Client credentials grant failed: ${response.status} - ${errorText}`);
-    }
-
-    return (await response.json()) as openid.TokenEndpointResponse;
+    logger.debug({ tokenEndpoint: config.tokenEndpoint }, 'Client credentials grant successful');
+    return tokens;
   } catch (error) {
-    logger.error({ error, tokenEndpoint: config.tokenEndpoint }, 'Client credentials grant error');
+    logger.error(
+      { ...getOAuthErrorLogContext(error), tokenEndpoint: config.tokenEndpoint },
+      'Client credentials grant failed',
+    );
     throw error;
   }
 }
