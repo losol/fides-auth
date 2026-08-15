@@ -4,6 +4,7 @@ import {
   COOKIE_MAX_BYTES,
   CookieTooLargeError,
   ACCESS_TOKEN_COOKIE_NAME,
+  ID_TOKEN_COOKIE_NAME,
   defaultSessionCookieOptions,
   defaultOAuthCookieOptions,
   cookieByteSize,
@@ -55,8 +56,9 @@ describe('CookieTooLargeError', () => {
 });
 
 describe('cookie defaults', () => {
-  it('exposes the split access-token cookie name', () => {
+  it('exposes the split cookie names', () => {
     expect(ACCESS_TOKEN_COOKIE_NAME).toBe('session_at');
+    expect(ID_TOKEN_COOKIE_NAME).toBe('session_it');
   });
 
   it('uses lax, httpOnly, root-path defaults', () => {
@@ -64,6 +66,13 @@ describe('cookie defaults', () => {
       expect(opts.path).toBe('/');
       expect(opts.sameSite).toBe('lax');
       expect(opts.httpOnly).toBe(true);
+    }
+  });
+
+  it('sets secure unconditionally, not only when NODE_ENV is production', () => {
+    // A deployment that doesn't set NODE_ENV must not silently drop the flag.
+    for (const opts of [defaultSessionCookieOptions, defaultOAuthCookieOptions]) {
+      expect(opts.secure).toBe(true);
     }
   });
 
