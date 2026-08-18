@@ -13,6 +13,7 @@ import {
   exchangeAuthorizationCode,
   validateReturnUrl,
 } from '../oauth';
+import { SESSION_EVENT } from '../session-events';
 import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
 import { persistSession } from './session';
@@ -103,8 +104,11 @@ export async function handleOidcCallback(
     );
 
     // Build the session and persist it (split across session/session_at).
+    // persistSession raises session.created — it is the only layer that knows
+    // what the session cost in cookie bytes, and a login that comes back without
+    // a refresh token (no offline_access) is visible there on day one.
     const session = buildSessionFromTokens(tokens, rolesClaim);
-    await persistSession(cookies, session, secret);
+    await persistSession(cookies, session, secret, { event: SESSION_EVENT.CREATED });
 
     // Clean up PKCE & returnTo cookies (read returnTo first).
     const returnTo = await cookies.get('returnTo');
@@ -120,7 +124,10 @@ export async function handleOidcCallback(
     );
     redirectUrl.searchParams.set('login', 'success');
 
-    logger.info({ redirectUrl: redirectUrl.toString() }, 'Login successful, redirecting');
+    logger.info(
+      { sid: session.sid, redirectUrl: redirectUrl.toString() },
+      'Login successful, redirecting',
+    );
 
     return new Response(null, {
       status: 302,

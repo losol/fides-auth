@@ -1,4 +1,5 @@
-import { Logger } from '@eventuras/logger';
+import { createLogger } from '@eventuras/fides-auth/logger';
+import { SESSION_EVENT, type SessionClientEvent } from '@eventuras/fides-auth/session-events';
 import type { createAuthStore } from './store';
 import type { AuthStatus } from './types';
 
@@ -27,6 +28,17 @@ export type SessionMonitorConfig = {
    * Callback when session check fails
    */
   onError?: (error: Error) => void;
+
+  /**
+   * Called for every session lifecycle event the monitor observes, using the
+   * same vocabulary as the server-side events.
+   *
+   * The logger writes to the browser console, which production never sees.
+   * Forward these to your own endpoint, Sentry or an OTLP collector to get the
+   * client half of a session's story into the same place as the server half.
+   * The library ships no transport of its own.
+   */
+  onEvent?: (event: SessionClientEvent) => void;
 };
 
 const DEFAULT_CONFIG = {
@@ -64,10 +76,22 @@ export function startSessionMonitor(
   config: SessionMonitorConfig = {}
 ): () => void {
   const finalConfig = { ...DEFAULT_CONFIG, ...config };
-  const logger = Logger.create({
+  // The pluggable factory, not @eventuras/logger directly — otherwise
+  // configureAuthLogger() has no effect here and this one module logs to a
+  // different place than the rest of the package.
+  const logger = createLogger({
     namespace: finalConfig.loggerNamespace,
     context: { component: 'SessionMonitor' },
   });
+
+  // A consumer's beacon must never be able to stop the monitor.
+  const emit = (event: SessionClientEvent): void => {
+    try {
+      finalConfig.onEvent?.(event);
+    } catch (error) {
+      logger.warn({ error: String(error) }, 'onEvent callback threw');
+    }
+  };
 
   logger.debug({ interval: finalConfig.interval }, 'Starting session monitor');
 
@@ -86,6 +110,7 @@ export function startSessionMonitor(
       if (!result.authenticated) {
         // User is no longer authenticated - session ended
         logger.info('Session monitor detected unauthenticated state - session ended');
+        emit({ event: SESSION_EVENT.REJECTED, source: 'session-monitor' });
         store.send({ type: 'sessionExpired' });
 
         if (finalConfig.onSessionExpired) {
@@ -108,6 +133,11 @@ export function startSessionMonitor(
       if (isInvalidGrant) {
         // This is expected during logout or session expiry - log at info level
         logger.info('Session monitor detected expired refresh token - user session ended');
+        emit({
+          event: SESSION_EVENT.REJECTED,
+          source: 'session-monitor',
+          reason: 'refresh_failed',
+        });
         store.send({ type: 'sessionExpired' });
 
         if (finalConfig.onSessionExpired) {

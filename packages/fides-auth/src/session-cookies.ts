@@ -12,6 +12,7 @@
 import { createEncryptedJWT, decryptJWT } from './utils';
 import { validateSessionJwt } from './session-validation';
 import { createLogger } from './logger';
+import type { SessionRejectedReason } from './session-events';
 import { Session } from './types';
 
 const logger = createLogger({ namespace: 'fides-auth:session-cookies' });
@@ -70,32 +71,42 @@ export async function encodeSessionCookies(
   };
 }
 
+/** Outcome of decoding the cookie values: a session, or why there isn't one. */
+export type DecodedSessionCookies =
+  | { session: Session; reason?: undefined }
+  | { session: null; reason: SessionRejectedReason };
+
 /**
- * Decodes the cookie values back into a session, reattaching the access and ID tokens.
+ * Decodes the cookie values back into a session, reporting why when it can't.
  *
- * Returns the session whenever the main value decrypts and validates — an
- * expired access token does not hide it; token freshness is the caller's
- * concern. Returns null for a missing/invalid main value, or a stale legacy
- * single-cookie session (one re-login). A corrupt access-token value is
- * tolerated: the session is returned without it.
+ * Same rules as {@link decodeSessionCookies}, but the failure carries a
+ * {@link SessionRejectedReason} from the package-wide vocabulary so a proxy or a
+ * status route logs the same word for the same situation as the heartbeat
+ * endpoint does. Deliberately does not log: the caller knows the request
+ * context, and logging here too would double every rejection.
  *
  * @param raw - The raw cookie values read from the store.
  * @param secret - The decryption key as a hex string or Uint8Array (32 bytes for A256GCM).
  */
-export async function decodeSessionCookies(
+export async function tryDecodeSessionCookies(
   raw: RawSessionCookies,
   secret: string | Uint8Array,
-): Promise<Session | null> {
+): Promise<DecodedSessionCookies> {
   if (!raw.session) {
-    return null;
+    return { session: null, reason: 'no_session_cookie' };
   }
 
   const { status, session } = await validateSessionJwt(raw.session, secret);
 
-  // EXPIRED only fires for legacy single-cookie sessions — dropped, not migrated.
+  // EXPIRED only fires for legacy single-cookie sessions — dropped, not migrated,
+  // and worth separating from corruption because it costs exactly one re-login.
+  // validateSessionJwt already logs why it rejected the value; this layer only
+  // translates that into the shared vocabulary.
   if (status !== 'VALID' || !session) {
-    logger.debug({ status }, 'Session cookie did not validate');
-    return null;
+    return {
+      session: null,
+      reason: status === 'EXPIRED' ? 'stale_legacy_session' : 'unreadable_session',
+    };
   }
 
   if (raw.accessToken) {
@@ -120,7 +131,29 @@ export async function decodeSessionCookies(
     }
   }
 
-  return session;
+  return { session };
+}
+
+/**
+ * Decodes the cookie values back into a session, reattaching the access and ID tokens.
+ *
+ * Returns the session whenever the main value decrypts and validates — an
+ * expired access token does not hide it; token freshness is the caller's
+ * concern. Returns null for a missing/invalid main value, or a stale legacy
+ * single-cookie session (one re-login). A corrupt access-token value is
+ * tolerated: the session is returned without it.
+ *
+ * Prefer {@link tryDecodeSessionCookies} when you want to log *why* there is no
+ * session.
+ *
+ * @param raw - The raw cookie values read from the store.
+ * @param secret - The decryption key as a hex string or Uint8Array (32 bytes for A256GCM).
+ */
+export async function decodeSessionCookies(
+  raw: RawSessionCookies,
+  secret: string | Uint8Array,
+): Promise<Session | null> {
+  return (await tryDecodeSessionCookies(raw, secret)).session;
 }
 
 /**

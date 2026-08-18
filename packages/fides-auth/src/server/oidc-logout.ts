@@ -9,7 +9,7 @@ import type { OAuthConfig } from '../oauth';
 import { buildOidcLogoutUrl } from '../oauth';
 import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
-import { clearSession, readIdToken } from './session';
+import { clearSession, readIdToken, tryReadSession } from './session';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-logout' });
 
@@ -130,8 +130,12 @@ export async function handleOidcLogout(
   // access token has expired, which is exactly when the hint still matters.
   const idTokenHint = await readIdToken(cookies, secret);
 
+  // Best-effort correlation id, so the logout line joins the rest of this
+  // session's events. A session too broken to read still logs out fine.
+  const sid = (await tryReadSession(cookies, secret)).session?.sid;
+
   try {
-    await clearSession(cookies);
+    await clearSession(cookies, { trigger: 'logout', sid });
   } catch (error) {
     // Never redirect to the provider on a half-cleared local session — the user
     // would come back looking logged in.

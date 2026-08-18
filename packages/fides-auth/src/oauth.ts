@@ -4,6 +4,7 @@ import * as openid from 'openid-client';
 
 import { createLogger } from './logger';
 import { getOAuthErrorLogContext } from './oauth-logging';
+import { newSessionId } from './session-events';
 import type { Session } from './types';
 
 const logger = createLogger({ namespace: 'fides-auth:oauth' });
@@ -381,6 +382,9 @@ export function buildSessionFromTokens(
   }
 
   return {
+    // Minted once here and carried across refreshes, so every log line for this
+    // session shares one correlation id.
+    sid: newSessionId(),
     tokens: {
       accessToken: tokens.access_token,
       accessTokenExpiresAt: tokens.expires_in

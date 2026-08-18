@@ -7,9 +7,10 @@
 
 import { createLogger } from '../logger';
 import type { OAuthConfig } from '../oauth';
+import { SESSION_EVENT, logSessionEvent, type SessionRejectedReason } from '../session-events';
 import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
-import { readSession, refreshSessionInStore } from './session';
+import { tryRefreshSessionInStore } from './session';
 
 const logger = createLogger({ namespace: 'fides-auth:server:heartbeat' });
 
@@ -30,9 +31,16 @@ export interface HeartbeatHandlerConfig {
 /**
  * Handles a heartbeat request — refresh the active session if there is one.
  *
- * Returns 200 with `{ accessTokenExpiresAt }` on success, 401 when there is no
- * session or the refresh token is dead, 405 for non-POST methods, and 429 when
- * rate-limited.
+ * Returns 200 with `{ accessTokenExpiresAt }` on success, 401 with `{ reason }`
+ * when the session is genuinely over, 503 when the provider could not be
+ * reached, 405 for non-POST methods, and 429 when rate-limited.
+ *
+ * The 401/503 split matters: a 401 tells the client to log the user out, so it
+ * must be reserved for the cases where the session really is finished. A network
+ * blip or a provider 5xx says nothing about the session's validity — answering
+ * 401 there logs out users whose sessions were fine, which is precisely the
+ * "logged out every few minutes" symptom. The client already retries non-401
+ * failures with backoff.
  */
 export async function handleHeartbeat(
   request: Request,
@@ -49,34 +57,57 @@ export async function handleHeartbeat(
     return new Response(null, { status: 429 });
   }
 
-  // An expired access token is what the heartbeat recovers from, not 401 on —
-  // only a missing session or dead refresh token logs the user out.
-  const session = await readSession(cookies, secret);
-  if (!session) {
-    logger.debug('Heartbeat with no session');
-    return new Response(null, { status: 401 });
+  // An expired access token is what the heartbeat recovers from, not 401 on.
+  // tryRefreshSessionInStore reads the session, refreshes it, and reports which
+  // of the two it failed at — so this handler never has to re-read cookies to
+  // work out why.
+  const result = await tryRefreshSessionInStore(cookies, oauthConfig, secret);
+
+  if (result.ok) {
+    logger.debug({ sid: result.session.sid }, 'Heartbeat refresh succeeded');
+    return Response.json(
+      { accessTokenExpiresAt: result.session.tokens?.accessTokenExpiresAt ?? null },
+      {
+        // Auth/session endpoint — must never be cached by the browser or any
+        // intermediary, or a stale 200 could fool the client into thinking a refresh
+        // succeeded without actually hitting the server.
+        headers: { 'Cache-Control': 'private, no-store' },
+      },
+    );
   }
 
-  if (!session.tokens?.refreshToken) {
-    logger.warn('Heartbeat with session but no refresh token');
-    return new Response(null, { status: 401 });
+  // The provider was unreachable or broken. The session is probably still fine,
+  // so keep it and let the client retry rather than ending it.
+  if (result.cause === 'transport' || result.cause === 'idp_error') {
+    logger.warn(
+      { sid: result.sid, cause: result.cause },
+      'Heartbeat refresh could not be completed — keeping the session',
+    );
+    return new Response(null, { status: 503, headers: { 'Cache-Control': 'private, no-store' } });
   }
 
-  const updated = await refreshSessionInStore(cookies, oauthConfig, secret);
-  if (!updated) {
-    // Refresh failed — most likely invalid_grant (refresh token expired).
-    logger.info('Heartbeat refresh failed');
-    return new Response(null, { status: 401 });
-  }
+  // Everything left is a session that genuinely cannot continue.
+  logSessionEvent(logger, {
+    event: SESSION_EVENT.REJECTED,
+    sid: result.sid,
+    reason: result.reason,
+    source: 'heartbeat',
+  });
 
-  logger.debug('Heartbeat refresh succeeded');
+  return unauthorized(result.reason);
+}
+
+/**
+ * 401 carrying the reason in the body.
+ *
+ * The browser is where the logout becomes visible, so letting the client name
+ * the reason lets a consumer beacon it back with the same vocabulary the server
+ * used. The values are session state, not secrets — and clients that ignore the
+ * body are unaffected.
+ */
+function unauthorized(reason: SessionRejectedReason): Response {
   return Response.json(
-    { accessTokenExpiresAt: updated.tokens?.accessTokenExpiresAt ?? null },
-    {
-      // Auth/session endpoint — must never be cached by the browser or any
-      // intermediary, or a stale 200 could fool the client into thinking a refresh
-      // succeeded without actually hitting the server.
-      headers: { 'Cache-Control': 'private, no-store' },
-    },
+    { reason },
+    { status: 401, headers: { 'Cache-Control': 'private, no-store' } },
   );
 }
