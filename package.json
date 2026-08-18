@@ -4,6 +4,7 @@
   "packageManager": "pnpm@11.6.0",
   "scripts": {
     "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "changeset": "changeset",
     "changeset:version": "changeset version",
