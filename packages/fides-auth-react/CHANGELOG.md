@@ -1,5 +1,13 @@
 # @eventuras/fides-auth-react
 
+## 0.1.3
+
+### Patch Changes
+
+- Updated dependencies [a4f412b]
+  - @eventuras/fides-auth@0.12.0
+  - @eventuras/fides-auth-store@0.1.3
+
 ## 0.1.2
 
 ### Patch Changes
