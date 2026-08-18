@@ -49,4 +49,6 @@ export {
 
 export { configureAuthLogger } from './configure-logger';
 
+export type { SessionClientEvent } from '@eventuras/fides-auth/session-events';
+
 export type { SessionUser, AuthStatus } from './types';

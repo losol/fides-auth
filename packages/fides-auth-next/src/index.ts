@@ -1,4 +1,5 @@
 // Next.js-specific bindings
+export * from './cookie-store';
 export * from './request';
 export * from './session';
 export * from './cookies';
@@ -13,6 +14,8 @@ export * from './store';
 // Re-export all framework-agnostic utilities from @eventuras/fides-auth
 export * from '@eventuras/fides-auth/oauth';
 export type { OAuthConfig } from '@eventuras/fides-auth/oauth';
+export * from '@eventuras/fides-auth/logger';
+export * from '@eventuras/fides-auth/session-events';
 export * from '@eventuras/fides-auth/session-refresh';
 export * from '@eventuras/fides-auth/session-validation';
 export * from '@eventuras/fides-auth/silent-login';

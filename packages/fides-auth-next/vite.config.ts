@@ -4,6 +4,7 @@ export default defineNextLibConfig({
   entry: {
     index: 'src/index.ts',
     session: 'src/session.ts',
+    'cookie-store': 'src/cookie-store.ts',
     request: 'src/request.ts',
     'store/index': 'src/store/index.ts',
     'heartbeat-handler': 'src/heartbeat-handler.ts',

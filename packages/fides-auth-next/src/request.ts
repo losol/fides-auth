@@ -1,8 +1,8 @@
 import { headers } from 'next/headers';
 import {TokenBucket} from '@eventuras/fides-auth/rate-limit';
-import { Logger } from '@eventuras/logger';
+import { createLogger } from '@eventuras/fides-auth/logger';
 
-const logger = Logger.create({ namespace: 'fides-auth-next:request' });
+const logger = createLogger({ namespace: 'fides-auth-next:request' });
 
 // Initialize bucket lazily to avoid worker thread issues
 let globalBucket: TokenBucket<string> | null = null;
