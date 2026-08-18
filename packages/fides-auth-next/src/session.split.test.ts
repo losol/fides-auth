@@ -29,6 +29,7 @@ vi.mock('react', () => ({ cache: (fn: unknown) => fn }));
 import {
   createAndPersistSession,
   getCurrentSession,
+  tryGetCurrentSession,
   clearCurrentSession,
 } from './session';
 import { createEncryptedJWT, getSessionSecret } from '@eventuras/fides-auth/utils';
@@ -117,5 +118,46 @@ describe('split-cookie session storage', () => {
 
     const session = await getCurrentSession();
     expect(session?.tokens?.accessToken).toBe(accessToken);
+  });
+});
+
+describe('tryGetCurrentSession — the reason-carrying read', () => {
+  // The Next surface is where eventuras's proxy and status route live, so the
+  // shared vocabulary has to be reachable from here without hand-rolling a
+  // CookieStore over next/headers.
+  it('reports no_session_cookie for an anonymous request', async () => {
+    expect(await tryGetCurrentSession()).toEqual({
+      session: null,
+      reason: 'no_session_cookie',
+    });
+  });
+
+  it('reports unreadable_session for a cookie that will not decrypt', async () => {
+    jar.set('session', 'not-a-jwe');
+
+    const result = await tryGetCurrentSession();
+
+    expect(result.session).toBeNull();
+    expect(result.reason).toBe('unreadable_session');
+  });
+
+  it('returns the session with no reason when the cookies are good', async () => {
+    await createAndPersistSession(baseSession(jwtWithExp(3600)));
+
+    const result = await tryGetCurrentSession();
+
+    expect(result.reason).toBeUndefined();
+    expect(result.session?.user?.email).toBe('ada@example.test');
+  });
+
+  it('agrees with getCurrentSession, which now delegates to it', async () => {
+    await createAndPersistSession(baseSession(jwtWithExp(3600)));
+
+    const [viaTry, viaLegacy] = await Promise.all([
+      tryGetCurrentSession(),
+      getCurrentSession(),
+    ]);
+
+    expect(viaTry.session).toEqual(viaLegacy);
   });
 });

@@ -1,5 +1,5 @@
 import { createStore } from '@xstate/store';
-import { Logger } from '@eventuras/logger';
+import { createLogger } from '@eventuras/fides-auth/logger';
 import type { SessionUser, AuthStatus } from './types';
 
 /**
@@ -68,7 +68,7 @@ const DEFAULT_CONFIG = {
  */
 export function createAuthStore(options: AuthStoreConfig) {
   const config = { ...DEFAULT_CONFIG, ...options.config };
-  const logger = Logger.create({
+  const logger = createLogger({
     namespace: config.loggerNamespace,
     context: { component: 'AuthStore' },
   });
@@ -216,7 +216,7 @@ export async function initializeAuth(
   store: ReturnType<typeof createAuthStore>,
   checkAuthStatus: () => Promise<AuthStatus>
 ) {
-  const logger = Logger.create({
+  const logger = createLogger({
     namespace: 'fides:auth-store',
     context: { component: 'initializeAuth' },
   });
@@ -246,7 +246,7 @@ export async function checkAuth(
   store: ReturnType<typeof createAuthStore>,
   checkAuthStatus: () => Promise<AuthStatus>
 ) {
-  const logger = Logger.create({
+  const logger = createLogger({
     namespace: 'fides:auth-store',
     context: { component: 'checkAuth' },
   });

@@ -84,9 +84,6 @@ importers:
       '@eventuras/fides-auth-store':
         specifier: workspace:*
         version: link:../fides-auth-store
-      '@eventuras/logger':
-        specifier: ^0.8.1
-        version: 0.8.1
       next:
         specifier: ^16.0.0
         version: 16.2.9(react-dom@19.2.7(react@19.2.8))(react@19.2.8)

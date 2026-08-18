@@ -2,17 +2,26 @@ import { createEncryptedJWT, getSessionSecret } from '@eventuras/fides-auth/util
 import {
   persistSession,
   readSession,
+  tryReadSession,
   refreshSessionInStore,
+  tryRefreshSessionInStore,
   clearSession,
+  type ClearSessionOptions,
+  type ReadSessionResult,
+  type RefreshSessionResult,
 } from '@eventuras/fides-auth/server';
 import type { Session, CreateSessionOptions } from '@eventuras/fides-auth/types';
 import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
-import { Logger } from '@eventuras/logger';
+import { createLogger } from '@eventuras/fides-auth/logger';
 import { cache } from 'react';
 
 import { nextCookieStore } from './cookie-store';
 
-const logger = Logger.create({ namespace: 'fides-auth-next:session' });
+const logger = createLogger({ namespace: 'fides-auth-next:session' });
+
+// The result shapes the try* helpers below return, so consumers can name them
+// without reaching past this package.
+export type { ClearSessionOptions, ReadSessionResult, RefreshSessionResult };
 
 /**
  * Creates an encrypted JWT containing session data.
@@ -59,7 +68,41 @@ export async function createSession<TData = Record<string, unknown>>(
  */
 export const getCurrentSession = cache(
   async (_config?: OAuthConfig): Promise<Session<any> | null> => {
-    return readSession(await nextCookieStore(), getSessionSecret());
+    return (await tryGetCurrentSession()).session;
+  },
+);
+
+/**
+ * Reads the current session and, when there isn't one, says why.
+ *
+ * The reason comes from the package-wide vocabulary, so a proxy or a status
+ * route logs the same word for the same situation that the heartbeat endpoint
+ * logs — which is the point of having a vocabulary at all. Cached per render
+ * like {@link getCurrentSession}, and shared with it, so asking for the reason
+ * costs no extra decrypt.
+ *
+ * @example
+ * ```ts
+ * import {
+ *   SESSION_EVENT,
+ *   createLogger,
+ *   logSessionEvent,
+ *   tryGetCurrentSession,
+ * } from '@eventuras/fides-auth-next';
+ * import { redirect } from 'next/navigation';
+ *
+ * const logger = createLogger({ namespace: 'my-app:proxy' });
+ *
+ * const { session, reason } = await tryGetCurrentSession();
+ * if (!session) {
+ *   logSessionEvent(logger, { event: SESSION_EVENT.REJECTED, reason, source: 'proxy' });
+ *   redirect('/login');
+ * }
+ * ```
+ */
+export const tryGetCurrentSession = cache(
+  async (): Promise<ReadSessionResult> => {
+    return tryReadSession(await nextCookieStore(), getSessionSecret());
   },
 );
 
@@ -81,6 +124,28 @@ export async function refreshCurrentSession(
   options: CreateSessionOptions = {}
 ): Promise<Session | null> {
   return refreshSessionInStore(await nextCookieStore(), config, getSessionSecret(), options);
+}
+
+/**
+ * Refreshes the current session and, on failure, says why.
+ *
+ * Prefer this over {@link refreshCurrentSession} anywhere the answer decides
+ * whether the user stays logged in: a bare null cannot tell "the provider says
+ * this refresh token is dead" apart from "we could not reach the provider", and
+ * ending a session on the second is how a provider blip becomes a logout.
+ *
+ * @example
+ * ```ts
+ * const result = await tryRefreshCurrentSession(oauthConfig);
+ * if (!result.ok && result.cause === 'invalid_grant') redirect('/login');
+ * // transport / idp_error: keep the session and retry.
+ * ```
+ */
+export async function tryRefreshCurrentSession(
+  config: OAuthConfig,
+  options: CreateSessionOptions = {}
+): Promise<RefreshSessionResult> {
+  return tryRefreshSessionInStore(await nextCookieStore(), config, getSessionSecret(), options);
 }
 
 /**
@@ -114,6 +179,15 @@ export async function createAndPersistSession(
  * redirect('/');
  * ```
  */
-export async function clearCurrentSession(): Promise<void> {
-  await clearSession(await nextCookieStore());
+export async function clearCurrentSession(
+  options: ClearSessionOptions = {},
+): Promise<void> {
+  // Defaults to `logout` because that is what this function is for; pass a
+  // trigger explicitly when clearing for some other reason. The sid comes from
+  // the per-render cache, so correlating the logout costs nothing extra.
+  const sid = options.sid ?? (await tryGetCurrentSession()).session?.sid;
+  await clearSession(await nextCookieStore(), {
+    trigger: options.trigger ?? 'logout',
+    sid,
+  });
 }

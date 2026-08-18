@@ -19,7 +19,7 @@ import {
   defaultSessionCookieOptions,
 } from '@eventuras/fides-auth/cookies';
 import type { CookieOptions } from '@eventuras/fides-auth/cookies';
-import { Logger } from '@eventuras/logger';
+import { createLogger } from '@eventuras/fides-auth/logger';
 import { cookies } from 'next/headers';
 
 // Re-export the framework-agnostic cookie attributes, limits, and size guard from
@@ -39,7 +39,7 @@ export {
 } from '@eventuras/fides-auth/cookies';
 export type { CookieOptions } from '@eventuras/fides-auth/cookies';
 
-const logger = Logger.create({ namespace: 'fides-auth-next:cookies' });
+const logger = createLogger({ namespace: 'fides-auth-next:cookies' });
 
 /**
  * Sets a cookie with the given name and value.

@@ -22,6 +22,10 @@
       "types": "./dist/session.d.ts",
       "import": "./dist/session.js"
     },
+    "./cookie-store": {
+      "types": "./dist/cookie-store.d.ts",
+      "import": "./dist/cookie-store.js"
+    },
     "./request": {
       "types": "./dist/request.d.ts",
       "import": "./dist/request.js"
@@ -63,8 +67,7 @@
   "dependencies": {
     "@eventuras/fides-auth": "workspace:*",
     "@eventuras/fides-auth-react": "workspace:*",
-    "@eventuras/fides-auth-store": "workspace:*",
-    "@eventuras/logger": "^0.8.1"
+    "@eventuras/fides-auth-store": "workspace:*"
   },
   "devDependencies": {
     "@eventuras/typescript-config": "workspace:*",
