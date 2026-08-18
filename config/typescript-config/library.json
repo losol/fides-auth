@@ -4,10 +4,10 @@
   "extends": "./base.json",
   "compilerOptions": {
     "emitDeclarationOnly": false,
-    "outDir": "dist",
+    "outDir": "${configDir}/dist",
     "noEmit": false
   },
   "include": [
-    "src/**/*"
+    "${configDir}/src/**/*"
   ]
 }

@@ -18,14 +18,15 @@
     "moduleResolution": "Bundler"
   },
   "exclude": [
-    "node_modules",
-    "dist",
-    "build",
-    "**/*.test.ts",
-    "**/*.test.tsx",
-    "**/*.spec.ts",
-    "**/*.spec.tsx",
-    "**/*.stories.ts",
-    "**/*.stories.tsx"
+    "${configDir}/node_modules",
+    "${configDir}/dist",
+    "${configDir}/build",
+    "${configDir}/**/*.test.ts",
+    "${configDir}/**/*.test.tsx",
+    "${configDir}/**/*.spec.ts",
+    "${configDir}/**/*.spec.tsx",
+    "${configDir}/**/*.stories.ts",
+    "${configDir}/**/*.stories.tsx",
+    "${configDir}/**/setupTests.ts"
   ]
 }

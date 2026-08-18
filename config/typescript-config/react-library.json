@@ -7,12 +7,12 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM"],
-    "types": ["react", "react-dom"],
+    "types": ["react"],
     "skipLibCheck": true,
     "noEmit": false,
-    "outDir": "dist"
+    "outDir": "${configDir}/dist"
   },
   "include": [
-    "src/**/*"
+    "${configDir}/src/**/*"
   ]
 }

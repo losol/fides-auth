@@ -47,7 +47,10 @@ jobs:
         run: pnpm install --filter @eventuras/fides-auth-next... --frozen-lockfile --ignore-scripts
 
       - name: Build package
-        run: pnpm --filter @eventuras/fides-auth-next build
+        run: pnpm --filter @eventuras/fides-auth-next... build
+
+      - name: Typecheck
+        run: pnpm --filter @eventuras/fides-auth-next typecheck
 
       - name: Publish to npm
         run: pnpm --filter @eventuras/fides-auth-next publish --access public --provenance --no-git-checks
