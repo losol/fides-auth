@@ -1,23 +1,25 @@
 /**
  * Tests for the heartbeat handler.
  *
- * The handler is glue: method check → rate-limit → load session → refresh →
- * respond. We mock the session helpers so the tests focus on the handler's
- * branching and response shape, not the OAuth machinery (tested elsewhere).
+ * The handler is glue: method check → rate-limit → refresh → respond. We mock
+ * the session helper so the tests focus on the handler's branching and response
+ * shape, not the OAuth machinery (tested elsewhere).
+ *
+ * The 401-vs-503 split gets the most attention here: a 401 tells the client to
+ * log the user out, so anything that answers 401 when the session was actually
+ * fine is a user-visible bug.
  */
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 vi.mock('./session', () => ({
-  readSession: vi.fn(),
-  refreshSessionInStore: vi.fn(),
+  tryRefreshSessionInStore: vi.fn(),
 }));
 
 import { handleHeartbeat } from './heartbeat-handler';
-import { readSession, refreshSessionInStore } from './session';
+import { tryRefreshSessionInStore } from './session';
 import type { CookieStore } from './cookie-store';
 
-const mockedReadSession = vi.mocked(readSession);
-const mockedRefresh = vi.mocked(refreshSessionInStore);
+const mockedRefresh = vi.mocked(tryRefreshSessionInStore);
 
 const noopStore: CookieStore = {
   get: () => null,
@@ -54,7 +56,7 @@ describe('handleHeartbeat — method handling', () => {
     expect(response.headers.get('Allow')).toBe('POST');
     // Pre-condition: never hit rate-limit or session lookup on a method reject.
     expect(config.rateLimit).not.toHaveBeenCalled();
-    expect(mockedReadSession).not.toHaveBeenCalled();
+    expect(mockedRefresh).not.toHaveBeenCalled();
   });
 
   it('returns 405 for PUT, DELETE, PATCH too', async () => {
@@ -72,47 +74,68 @@ describe('handleHeartbeat — rate limiting', () => {
     const response = await handleHeartbeat(makeRequest('POST'), config);
 
     expect(response.status).toBe(429);
-    expect(mockedReadSession).not.toHaveBeenCalled();
+    expect(mockedRefresh).not.toHaveBeenCalled();
   });
 });
 
-describe('handleHeartbeat — authentication', () => {
-  it('returns 401 when there is no current session', async () => {
-    mockedReadSession.mockResolvedValue(null);
+describe('handleHeartbeat — session is over (401)', () => {
+  // Every one of these ends with the user at a login screen, so the reason has
+  // to travel to the client that renders it.
+  it.each([
+    ['no_session_cookie'],
+    ['unreadable_session'],
+    ['stale_legacy_session'],
+    ['no_refresh_token'],
+  ] as const)('returns 401 with reason=%s in the body', async (reason) => {
+    mockedRefresh.mockResolvedValue({ ok: false, reason });
 
     const response = await handleHeartbeat(makeRequest('POST'), config);
 
     expect(response.status).toBe(401);
-    expect(mockedRefresh).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual({ reason });
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
   });
 
-  it('returns 401 when session exists but has no refresh token', async () => {
-    mockedReadSession.mockResolvedValue({ tokens: { accessToken: 'access-only' } } as any);
+  it('returns 401 when the provider says the refresh token is dead', async () => {
+    mockedRefresh.mockResolvedValue({
+      ok: false,
+      reason: 'refresh_failed',
+      cause: 'invalid_grant',
+    });
 
     const response = await handleHeartbeat(makeRequest('POST'), config);
 
     expect(response.status).toBe(401);
-    expect(mockedRefresh).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual({ reason: 'refresh_failed' });
   });
+});
 
-  it('returns 401 when the refresh returns null (refresh failed)', async () => {
-    mockedReadSession.mockResolvedValue({ tokens: { accessToken: 'a', refreshToken: 'r' } } as any);
-    mockedRefresh.mockResolvedValue(null);
+describe('handleHeartbeat — provider unreachable (503)', () => {
+  // The regression that matters: these used to answer 401, which logged out
+  // users whose sessions were perfectly valid.
+  it.each([['transport'], ['idp_error']] as const)(
+    'returns 503, not 401, when cause=%s',
+    async (cause) => {
+      mockedRefresh.mockResolvedValue({ ok: false, reason: 'refresh_failed', cause });
 
-    const response = await handleHeartbeat(makeRequest('POST'), config);
+      const response = await handleHeartbeat(makeRequest('POST'), config);
 
-    expect(response.status).toBe(401);
-    expect(mockedRefresh).toHaveBeenCalledWith(noopStore, config.oauthConfig, config.secret);
-  });
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    },
+  );
 });
 
 describe('handleHeartbeat — success', () => {
   it('returns 200 with accessTokenExpiresAt and no-store Cache-Control', async () => {
     const expiresAt = new Date('2026-05-21T20:00:00.000Z').toISOString();
-    mockedReadSession.mockResolvedValue({ tokens: { accessToken: 'a', refreshToken: 'r' } } as any);
     mockedRefresh.mockResolvedValue({
-      tokens: { accessToken: 'new-access', refreshToken: 'new-refresh', accessTokenExpiresAt: expiresAt },
-    } as any);
+      ok: true,
+      rotatedRefreshToken: true,
+      session: {
+        tokens: { accessToken: 'new-access', refreshToken: 'new-refresh', accessTokenExpiresAt: expiresAt },
+      },
+    });
 
     const response = await handleHeartbeat(makeRequest('POST'), config);
 
@@ -120,11 +143,15 @@ describe('handleHeartbeat — success', () => {
     // Auth/session endpoints must never be cached by browser or intermediaries.
     expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     expect(await response.json()).toMatchObject({ accessTokenExpiresAt: expiresAt });
+    expect(mockedRefresh).toHaveBeenCalledWith(noopStore, config.oauthConfig, config.secret);
   });
 
   it('returns accessTokenExpiresAt: null when the refreshed session has no expiry', async () => {
-    mockedReadSession.mockResolvedValue({ tokens: { accessToken: 'a', refreshToken: 'r' } } as any);
-    mockedRefresh.mockResolvedValue({ tokens: { accessToken: 'new', refreshToken: 'newR' } } as any);
+    mockedRefresh.mockResolvedValue({
+      ok: true,
+      rotatedRefreshToken: false,
+      session: { tokens: { accessToken: 'new', refreshToken: 'newR' } },
+    });
 
     const response = await handleHeartbeat(makeRequest('POST'), config);
     const body = await response.json();

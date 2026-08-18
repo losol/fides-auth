@@ -244,3 +244,137 @@ describe('createHeartbeat — stop', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 });
+
+describe('createHeartbeat — onEvent', () => {
+  // The console never reaches production. onEvent is how a consumer gets the
+  // client half of a session's story into the same place as the server half.
+  it('emits session.refreshed with the new expiry', async () => {
+    fetchMock.mockResolvedValue(expiryResponse(5 * 60_000));
+    const onEvent = vi.fn();
+
+    start({ onEvent });
+    await advance(0);
+
+    expect(onEvent).toHaveBeenCalledWith({
+      event: 'session.refreshed',
+      source: 'heartbeat',
+      expiresAt: Date.now() + 5 * 60_000,
+    });
+  });
+
+  it('carries the server\'s own reason out of a 401 body', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ reason: 'no_refresh_token' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const onEvent = vi.fn();
+
+    start({ onEvent });
+    await advance(0);
+
+    // Same vocabulary the server used, so both halves group on one value.
+    expect(onEvent).toHaveBeenCalledWith({
+      event: 'session.rejected',
+      source: 'heartbeat',
+      reason: 'no_refresh_token',
+    });
+  });
+
+  it('omits the reason when the server sent none', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }));
+    const onEvent = vi.fn();
+
+    start({ onEvent });
+    await advance(0);
+
+    expect(onEvent).toHaveBeenCalledWith({
+      event: 'session.rejected',
+      source: 'heartbeat',
+      reason: undefined,
+    });
+  });
+
+  it('drops an unrecognised reason rather than passing it through', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ reason: 'sudo_make_me_a_sandwich' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const onEvent = vi.fn();
+
+    start({ onEvent });
+    await advance(0);
+
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'session.rejected', reason: undefined }),
+    );
+  });
+
+  it('reports a 503 as a retryable failure carrying the status', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockImplementation(() => Promise.resolve(expiryResponse(5 * 60_000)));
+    const onEvent = vi.fn();
+
+    start({ minRefreshIntervalMs: 5_000, onEvent });
+    await advance(0);
+
+    expect(onEvent).toHaveBeenCalledWith({
+      event: 'session.refresh_failed',
+      source: 'heartbeat',
+      status: 503,
+      attempt: 1,
+    });
+    // A 503 is not a logout: the engine keeps going and recovers.
+    await advance(5_000);
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'session.refreshed' }),
+    );
+  });
+
+  it('reports a request that never landed, with no status', async () => {
+    fetchMock
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockImplementation(() => Promise.resolve(expiryResponse(5 * 60_000)));
+    const onEvent = vi.fn();
+
+    start({ minRefreshIntervalMs: 5_000, onEvent });
+    await advance(0);
+
+    expect(onEvent).toHaveBeenCalledWith({
+      event: 'session.refresh_failed',
+      source: 'heartbeat',
+      attempt: 1,
+      error: 'network down',
+    });
+  });
+
+  it('counts consecutive attempts', async () => {
+    fetchMock.mockRejectedValue(new Error('still down'));
+    const onEvent = vi.fn();
+
+    start({ minRefreshIntervalMs: 5_000, onEvent });
+    await advance(0);
+    await advance(5_000);
+
+    expect(onEvent).toHaveBeenNthCalledWith(1, expect.objectContaining({ attempt: 1 }));
+    expect(onEvent).toHaveBeenNthCalledWith(2, expect.objectContaining({ attempt: 2 }));
+  });
+
+  it('keeps beating when the consumer\'s callback throws', async () => {
+    fetchMock.mockResolvedValue(expiryResponse(5 * 60_000));
+    const onEvent = vi.fn(() => {
+      throw new Error('beacon exploded');
+    });
+
+    start({ onEvent });
+    await advance(0);
+    // A broken telemetry sink must not take the session down with it.
+    await advance(5 * 60_000);
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+  });
+});

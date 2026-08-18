@@ -10,6 +10,7 @@ export default defineVanillaLibConfig({
     'session-refresh': 'src/session-refresh.ts',
     'session-validation': 'src/session-validation.ts',
     'session-cookies': 'src/session-cookies.ts',
+    'session-events': 'src/session-events.ts',
     oauth: 'src/oauth.ts',
     'oauth-browser': 'src/oauth-browser.ts',
     'oauth-logging': 'src/oauth-logging.ts',

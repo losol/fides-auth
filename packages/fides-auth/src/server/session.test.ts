@@ -11,7 +11,9 @@ import type { CookieStore } from './cookie-store';
 import {
   persistSession,
   readSession,
+  tryReadSession,
   refreshSessionInStore,
+  tryRefreshSessionInStore,
   clearSession,
 } from './session';
 
@@ -41,6 +43,15 @@ function jwtWithExp(secondsFromNow: number): string {
   const exp = Math.floor(Date.now() / 1000) + secondsFromNow;
   return `${enc({ alg: 'none', typ: 'JWT' })}.${enc({ exp })}.sig`;
 }
+
+/** Minimal OAuth config — the refresh exchange itself is mocked. */
+const config = {
+  issuer: 'https://idp.test',
+  clientId: 'c',
+  clientSecret: 's',
+  redirect_uri: 'https://app.test/cb',
+  scope: 'openid',
+};
 
 const baseSession = (accessToken?: string): Session => ({
   tokens: {
@@ -166,7 +177,6 @@ describe('clearSession', () => {
 });
 
 describe('refreshSessionInStore', () => {
-  const config = { issuer: 'https://idp.test', clientId: 'c', clientSecret: 's', redirect_uri: 'https://app.test/cb', scope: 'openid' };
 
   it('returns null when there is no session to refresh', async () => {
     const { store } = memoryStore();
@@ -209,5 +219,167 @@ describe('refreshSessionInStore', () => {
     );
     const persisted = await readSession(store, secret);
     expect(persisted?.tokens?.accessToken).toBe(freshToken);
+  });
+});
+
+describe('tryReadSession — rejection reasons', () => {
+  // The reasons are what a proxy, a status route and the heartbeat endpoint all
+  // log, so an operator can tell "nobody was logged in" apart from "the cookie
+  // would not decrypt" without reading library source.
+  it('reports no_session_cookie for an anonymous request', async () => {
+    const { store } = memoryStore();
+
+    expect(await tryReadSession(store, secret)).toEqual({
+      session: null,
+      reason: 'no_session_cookie',
+    });
+  });
+
+  it('reports unreadable_session for a cookie encrypted under a different secret', async () => {
+    const { store } = memoryStore();
+    await persistSession(store, baseSession('token'), 'b'.repeat(64));
+
+    const result = await tryReadSession(store, secret);
+
+    expect(result.session).toBeNull();
+    expect(result.reason).toBe('unreadable_session');
+  });
+
+  it('reports unreadable_session for a cookie that is not a JWE at all', async () => {
+    const { store } = memoryStore({ session: 'not-a-jwe' });
+
+    expect((await tryReadSession(store, secret)).reason).toBe('unreadable_session');
+  });
+
+  it('separates a stale legacy session from a corrupt one', async () => {
+    // A pre-split single-cookie session with an expired access token. It costs
+    // exactly one re-login, which is a different operational story to corruption.
+    const legacy = await createEncryptedJWT(baseSession(jwtWithExp(-60)), secret);
+    const { store } = memoryStore({ session: legacy });
+
+    expect((await tryReadSession(store, secret)).reason).toBe('stale_legacy_session');
+  });
+
+  it('returns the session with no reason when the cookies are good', async () => {
+    const { store } = memoryStore();
+    await persistSession(store, baseSession('token'), secret);
+
+    const result = await tryReadSession(store, secret);
+
+    expect(result.reason).toBeUndefined();
+    expect(result.session?.user?.email).toBe('ada@example.test');
+  });
+});
+
+describe('tryRefreshSessionInStore — failure causes', () => {
+  it('reports no cause when it never got as far as a refresh', async () => {
+    const { store } = memoryStore();
+
+    const result = await tryRefreshSessionInStore(store, config, secret);
+
+    expect(result).toEqual({ ok: false, reason: 'no_session_cookie' });
+    // No cause: there is no provider verdict to report when we never asked it.
+    expect(mockedRefreshSession).not.toHaveBeenCalled();
+  });
+
+  it('reports no_refresh_token without calling the provider', async () => {
+    const { store } = memoryStore();
+    await persistSession(store, { tokens: { accessToken: 'a' } }, secret);
+
+    const result = await tryRefreshSessionInStore(store, config, secret);
+
+    expect(result).toEqual({ ok: false, reason: 'no_refresh_token' });
+    expect(mockedRefreshSession).not.toHaveBeenCalled();
+  });
+
+  it('classifies a dead refresh token as invalid_grant', async () => {
+    const { store } = memoryStore();
+    await persistSession(store, baseSession('a'), secret);
+    mockedRefreshSession.mockRejectedValue(
+      Object.assign(new Error('bad grant'), {
+        code: 'OAUTH_RESPONSE_BODY_ERROR',
+        error: 'invalid_grant',
+      }),
+    );
+
+    expect(await tryRefreshSessionInStore(store, config, secret)).toEqual({
+      ok: false,
+      reason: 'refresh_failed',
+      cause: 'invalid_grant',
+    });
+  });
+
+  it('classifies an unreachable provider as transport', async () => {
+    const { store } = memoryStore();
+    await persistSession(store, baseSession('a'), secret);
+    mockedRefreshSession.mockRejectedValue(
+      Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+      }),
+    );
+
+    const result = await tryRefreshSessionInStore(store, config, secret);
+
+    // The distinction that keeps a valid session alive: not invalid_grant.
+    expect(result).toEqual({ ok: false, reason: 'refresh_failed', cause: 'transport' });
+  });
+
+  it('classifies a provider 500 as idp_error', async () => {
+    const { store } = memoryStore();
+    await persistSession(store, baseSession('a'), secret);
+    mockedRefreshSession.mockRejectedValue(
+      Object.assign(new Error('Server Error'), { status: 500 }),
+    );
+
+    expect(await tryRefreshSessionInStore(store, config, secret)).toEqual({
+      ok: false,
+      reason: 'refresh_failed',
+      cause: 'idp_error',
+    });
+  });
+
+  it('reports refresh-token rotation on success', async () => {
+    const { store } = memoryStore();
+    await persistSession(store, baseSession('a'), secret);
+    mockedRefreshSession.mockResolvedValue({
+      ...baseSession('new-access'),
+      tokens: { accessToken: 'new-access', refreshToken: 'rotated-refresh' },
+    });
+
+    const result = await tryRefreshSessionInStore(store, config, secret);
+
+    expect(result.ok).toBe(true);
+    // Rotation is what turns a lost cookie write into a bricked session, so it
+    // has to be visible without diffing token values by hand.
+    expect(result.ok && result.rotatedRefreshToken).toBe(true);
+  });
+
+  it('reports no rotation when the provider returned the same refresh token', async () => {
+    const { store } = memoryStore();
+    await persistSession(store, baseSession('a'), secret);
+    mockedRefreshSession.mockResolvedValue(baseSession('new-access'));
+
+    const result = await tryRefreshSessionInStore(store, config, secret);
+
+    expect(result.ok && result.rotatedRefreshToken).toBe(false);
+  });
+});
+
+describe('session correlation id', () => {
+  it('survives a refresh, so one session is one id across its whole life', async () => {
+    const { store } = memoryStore();
+    const original = { ...baseSession('a'), sid: 'abc123' };
+    await persistSession(store, original, secret);
+
+    // refreshSession spreads the current session, so sid rides along.
+    mockedRefreshSession.mockImplementation(async (current) => ({
+      ...current,
+      tokens: { ...current.tokens, accessToken: 'new-access' },
+    }));
+
+    const result = await tryRefreshSessionInStore(store, config, secret);
+
+    expect(result.ok && result.session.sid).toBe('abc123');
+    expect((await readSession(store, secret))?.sid).toBe('abc123');
   });
 });

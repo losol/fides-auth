@@ -7,9 +7,15 @@ export type { CookieStore } from './cookie-store';
 export {
   persistSession,
   readSession,
+  tryReadSession,
   refreshSessionInStore,
+  tryRefreshSessionInStore,
   readIdToken,
   clearSession,
+  type ClearSessionOptions,
+  type PersistSessionOptions,
+  type ReadSessionResult,
+  type RefreshSessionResult,
 } from './session';
 
 export { handleOidcLogin, type OidcLoginConfig } from './oidc-login';

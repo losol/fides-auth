@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  classifyRefreshFailure,
   getOAuthConfigLogContext,
   getOAuthErrorLogContext,
 } from './oauth-logging';
@@ -123,5 +124,84 @@ describe('getOAuthErrorLogContext', () => {
     expect(ctx.error).toBeUndefined();
     expect(ctx.status).toBeUndefined();
     expect(ctx.causeMessage).toBeUndefined();
+  });
+});
+
+describe('classifyRefreshFailure', () => {
+  // Only invalid_grant means the user has to log in again. Misclassifying a
+  // network blip as invalid_grant is what ends sessions that were never invalid.
+  it('recognises a dead refresh token', () => {
+    expect(
+      classifyRefreshFailure(
+        Object.assign(new Error('bad'), {
+          code: 'OAUTH_RESPONSE_BODY_ERROR',
+          error: 'invalid_grant',
+        }),
+      ),
+    ).toBe('invalid_grant');
+  });
+
+  it('reads invalid_grant off `cause` too, where oauth4webapi sometimes puts it', () => {
+    expect(
+      classifyRefreshFailure(
+        Object.assign(new Error('wrapped'), {
+          cause: { code: 'OAUTH_RESPONSE_BODY_ERROR', error: 'invalid_grant' },
+        }),
+      ),
+    ).toBe('invalid_grant');
+  });
+
+  it('does not treat other OAuth errors as a dead token', () => {
+    expect(
+      classifyRefreshFailure(
+        Object.assign(new Error('nope'), {
+          code: 'OAUTH_RESPONSE_BODY_ERROR',
+          error: 'temporarily_unavailable',
+        }),
+      ),
+    ).toBe('idp_error');
+  });
+
+  it.each([
+    'ECONNREFUSED',
+    'ENOTFOUND',
+    'ETIMEDOUT',
+    'EAI_AGAIN',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'CERT_HAS_EXPIRED',
+  ])('classifies syscall %s on cause as transport', (code) => {
+    const error = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('boom'), { code }),
+    });
+    expect(classifyRefreshFailure(error)).toBe('transport');
+  });
+
+  it('classifies a bare fetch TypeError as transport', () => {
+    expect(classifyRefreshFailure(new TypeError('fetch failed'))).toBe('transport');
+    expect(classifyRefreshFailure(new TypeError('Failed to fetch'))).toBe('transport');
+  });
+
+  it('classifies an aborted or timed-out request as transport', () => {
+    expect(
+      classifyRefreshFailure(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+    ).toBe('transport');
+    expect(
+      classifyRefreshFailure(Object.assign(new Error('timeout'), { name: 'TimeoutError' })),
+    ).toBe('transport');
+  });
+
+  it('does not call a provider error transport just because it mentions a network', () => {
+    // Message sniffing is only trusted on a bare TypeError; anything else that
+    // happens to say "network" is still the provider talking.
+    const error = Object.assign(new Error('upstream network policy denied'), { status: 502 });
+    expect(classifyRefreshFailure(error)).toBe('idp_error');
+  });
+
+  it('falls back to idp_error for anything unrecognised', () => {
+    // Never invalid_grant by default: an unknown failure must not silently end
+    // a session.
+    for (const value of [null, undefined, 'a string', 42, new Error('who knows')]) {
+      expect(classifyRefreshFailure(value), String(value)).toBe('idp_error');
+    }
   });
 });

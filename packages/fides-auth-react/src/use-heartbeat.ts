@@ -55,6 +55,7 @@ export function useHeartbeat(config: HeartbeatConfig = {}): void {
       onSessionExpired: () => callbacksRef.current.onSessionExpired?.(),
       onRefreshed: () => callbacksRef.current.onRefreshed?.(),
       onError: (error) => callbacksRef.current.onError?.(error),
+      onEvent: (event) => callbacksRef.current.onEvent?.(event),
     });
     return handle.stop;
   }, [

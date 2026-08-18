@@ -8,6 +8,7 @@ export * from './activity-tracker';
 export * from './cookies';
 export * from './logger';
 export * from './oauth-logging';
+export * from './session-events';
 export * from './session-refresh';
 export * from './session-validation';
 export * from './utils';

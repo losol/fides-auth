@@ -15,6 +15,13 @@ export interface Tokens {
 
 /** Authenticated user session with tokens, user info, and optional custom data. */
 export interface Session<TData = Record<string, unknown>> {
+  /**
+   * Correlation id for this session, minted at creation and carried across
+   * refreshes. Logged as `sid` on every session lifecycle event so one user's
+   * login, heartbeats and eventual logout can be tied together. Absent on
+   * sessions created before this field existed.
+   */
+  sid?: string;
   tokens?: Tokens;
   user?: {
     name: string;

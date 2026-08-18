@@ -12,6 +12,11 @@ import {
   type ActivityTracker,
 } from './activity-tracker';
 import { createLogger } from './logger';
+import {
+  SESSION_EVENT,
+  isSessionRejectedReason,
+  type SessionClientEvent,
+} from './session-events';
 
 /**
  * Configuration for {@link createHeartbeat}.
@@ -20,8 +25,9 @@ export interface HeartbeatConfig {
   /**
    * Endpoint to POST to in order to refresh the session.
    * The endpoint must run a server-side refresh and return 2xx with
-   * `{ accessTokenExpiresAt }` (ISO 8601) on success, or 401 when the refresh
-   * token is no longer valid.
+   * `{ accessTokenExpiresAt }` (ISO 8601) on success, 401 with `{ reason }` when
+   * the session is over, and any other non-2xx (503) when the refresh could not
+   * be attempted — only 401 ends the session; the rest are retried.
    * @default '/api/auth/heartbeat'
    */
   endpoint?: string;
@@ -81,6 +87,23 @@ export interface HeartbeatConfig {
    * is just an observability hook.
    */
   onError?: (error: Error) => void;
+
+  /**
+   * Called for every session lifecycle event this engine observes.
+   *
+   * The logger writes to the browser console, which production never sees. This
+   * hook is the way out: forward the events to your own endpoint, Sentry, or an
+   * OTLP collector. The library deliberately ships no transport — where these
+   * go, and whether they go anywhere, is the consumer's call.
+   *
+   * @example
+   * ```ts
+   * useHeartbeat({
+   *   onEvent: (event) => navigator.sendBeacon('/api/telemetry', JSON.stringify(event)),
+   * });
+   * ```
+   */
+  onEvent?: (event: SessionClientEvent) => void;
 
   /**
    * Namespace for the logger.
@@ -156,6 +179,15 @@ export function createHeartbeat(config: HeartbeatConfig = {}): HeartbeatHandle {
 
   const tracker: ActivityTracker = createActivityTracker();
   const abortController = new AbortController();
+
+  // A consumer's beacon must never be able to kill the keepalive.
+  const emit = (event: SessionClientEvent): void => {
+    try {
+      config.onEvent?.(event);
+    } catch (error) {
+      logger.warn({ error: String(error) }, 'onEvent callback threw');
+    }
+  };
 
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
@@ -260,13 +292,27 @@ export function createHeartbeat(config: HeartbeatConfig = {}): HeartbeatHandle {
       if (stopped) return;
 
       if (response.status === 401) {
-        logger.info('Heartbeat returned 401 — session expired');
+        // The handler names the reason in the body; older servers send nothing,
+        // and an unrecognised value is dropped rather than passed through.
+        const body = (await response.json().catch(() => null)) as { reason?: unknown } | null;
+        const reason = isSessionRejectedReason(body?.reason) ? body.reason : undefined;
+
+        logger.info({ reason }, 'Heartbeat returned 401 — session expired');
+        emit({ event: SESSION_EVENT.REJECTED, source: 'heartbeat', reason });
         config.onSessionExpired?.();
         teardown();
         return;
       }
 
       if (!response.ok) {
+        // 503 means the server could not reach the provider — the session is
+        // probably still valid, so this is a retry, not a logout.
+        emit({
+          event: SESSION_EVENT.REFRESH_FAILED,
+          source: 'heartbeat',
+          status: response.status,
+          attempt: failureCount + 1,
+        });
         throw new Error(`Heartbeat failed with status ${response.status}`);
       }
 
@@ -278,17 +324,30 @@ export function createHeartbeat(config: HeartbeatConfig = {}): HeartbeatHandle {
       expiresAt = toEpochMs(body?.accessTokenExpiresAt);
 
       logger.debug({ expiresAt }, 'Heartbeat refresh succeeded');
+      emit({ event: SESSION_EVENT.REFRESHED, source: 'heartbeat', expiresAt });
       config.onRefreshed?.();
       scheduleRefresh();
     } catch (error) {
       if (stopped) return;
       const err = error instanceof Error ? error : new Error(String(error));
       logger.warn({ error: err.message }, 'Heartbeat tick failed, will retry');
-      config.onError?.(err);
 
       // Retry with capped exponential backoff; a real expiry resumes the normal
       // cadence once a tick succeeds.
       failureCount += 1;
+
+      // A thrown non-ok response already emitted with its status above; this
+      // covers the requests that never landed at all.
+      if (!(error instanceof Error) || !/^Heartbeat failed with status/.test(err.message)) {
+        emit({
+          event: SESSION_EVENT.REFRESH_FAILED,
+          source: 'heartbeat',
+          attempt: failureCount,
+          error: err.message,
+        });
+      }
+      config.onError?.(err);
+
       const backoff = Math.min(
         MAX_RETRY_DELAY_MS,
         minRefreshIntervalMs * 2 ** (failureCount - 1),
