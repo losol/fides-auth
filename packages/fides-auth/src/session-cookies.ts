@@ -9,32 +9,12 @@
 // `id_token_hint` on logout) — each get their own encrypted value, everything else
 // goes in the main one, so no cookie has to carry two JWTs against the ~4KB limit.
 
-import { decodeJwt } from 'jose';
-
 import { createEncryptedJWT, decryptJWT } from './utils';
 import { validateSessionJwt } from './session-validation';
 import { createLogger } from './logger';
 import { Session } from './types';
 
 const logger = createLogger({ namespace: 'fides-auth:session-cookies' });
-
-/**
- * True only when the access token is a JWT carrying an `exp` claim that is in the
- * past. Mirrors {@link validateSessionJwt}: an access token we can't decode (an
- * opaque token, or one without `exp`) has unknown expiry and must NOT be treated
- * as expired — otherwise opaque tokens would silently discard the whole session.
- */
-function accessTokenIsExpired(accessToken: string): boolean {
-  try {
-    const { exp } = decodeJwt(accessToken);
-    if (typeof exp !== 'number') {
-      return false;
-    }
-    return exp - Date.now() / 1000 <= 0;
-  } catch {
-    return false;
-  }
-}
 
 /** Encrypted cookie values produced from a session. */
 export interface EncodedSessionCookies {
@@ -93,10 +73,11 @@ export async function encodeSessionCookies(
 /**
  * Decodes the cookie values back into a session, reattaching the access and ID tokens.
  *
- * Returns null when there is no session, the main value fails validation, or the
- * access token has expired — preserving the contract that an expired access token
- * means "no session". A corrupt access-token value is tolerated: the session is
- * returned without an access token rather than discarded.
+ * Returns the session whenever the main value decrypts and validates — an
+ * expired access token does not hide it; token freshness is the caller's
+ * concern. Returns null for a missing/invalid main value, or a stale legacy
+ * single-cookie session (one re-login). A corrupt access-token value is
+ * tolerated: the session is returned without it.
  *
  * @param raw - The raw cookie values read from the store.
  * @param secret - The decryption key as a hex string or Uint8Array (32 bytes for A256GCM).
@@ -111,8 +92,7 @@ export async function decodeSessionCookies(
 
   const { status, session } = await validateSessionJwt(raw.session, secret);
 
-  // status === 'EXPIRED' only fires for legacy single-cookie sessions, where the
-  // access token still lives in the main value. Split sessions are checked below.
+  // EXPIRED only fires for legacy single-cookie sessions — dropped, not migrated.
   if (status !== 'VALID' || !session) {
     logger.debug({ status }, 'Session cookie did not validate');
     return null;
@@ -124,12 +104,7 @@ export async function decodeSessionCookies(
       const accessToken = typeof payload.accessToken === 'string' ? payload.accessToken : undefined;
 
       if (accessToken) {
-        // Preserve the contract: a verifiably-expired access token means no
-        // session. Opaque/undecodable tokens are kept (unknown expiry).
-        if (accessTokenIsExpired(accessToken)) {
-          logger.info('Access token has expired');
-          return null;
-        }
+        // Attached as stored, expired or not — freshness is the caller's concern.
         session.tokens = { ...session.tokens, accessToken };
       }
     } catch (error) {

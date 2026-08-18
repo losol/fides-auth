@@ -45,8 +45,11 @@ export async function createSession<TData = Record<string, unknown>>(
  * agnostic {@link readSession} with React's `cache` so repeated calls within one
  * server render share a single read.
  *
+ * The session may carry an expired access token — check `accessTokenExpires`
+ * before using it, or refresh via `refreshCurrentSession`.
+ *
  * @param _config - Unused; kept for backwards compatibility.
- * @returns Session object or null if no valid session exists.
+ * @returns Session object or null if no session exists.
  *
  * @example
  * ```ts
