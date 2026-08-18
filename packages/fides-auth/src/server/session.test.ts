@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
+
+// Mock only the OAuth exchange; encode/decode and persistence run for real.
+vi.mock('../session-refresh', () => ({ refreshSession: vi.fn() }));
 
 import { CookieTooLargeError } from '../cookies';
 import { createEncryptedJWT } from '../utils';
+import { refreshSession } from '../session-refresh';
 import type { Session } from '../types';
 import type { CookieStore } from './cookie-store';
 import {
@@ -10,6 +14,12 @@ import {
   refreshSessionInStore,
   clearSession,
 } from './session';
+
+const mockedRefreshSession = vi.mocked(refreshSession);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 // 32-byte (64 hex char) secret for A256GCM.
 const secret = 'a'.repeat(64);
@@ -112,11 +122,15 @@ describe('readSession', () => {
     expect(await readSession(store, secret)).toBeNull();
   });
 
-  it('treats a verifiably-expired access token as no session', async () => {
+  it('keeps a session whose access token has expired', async () => {
+    // Expiry must not hide the session — the refresh path recovers it.
+    const expired = jwtWithExp(-10);
     const { store } = memoryStore();
-    await persistSession(store, baseSession(jwtWithExp(-10)), secret);
+    await persistSession(store, baseSession(expired), secret);
 
-    expect(await readSession(store, secret)).toBeNull();
+    const session = await readSession(store, secret);
+    expect(session?.tokens?.accessToken).toBe(expired);
+    expect(session?.tokens?.refreshToken).toBe('refresh-token');
   });
 
   it('still reads a legacy single-cookie session (access token inside session)', async () => {
@@ -129,6 +143,14 @@ describe('readSession', () => {
 
     const session = await readSession(store, secret);
     expect(session?.tokens?.accessToken).toBe(accessToken);
+  });
+
+  it('drops a legacy single-cookie session whose access token has expired', async () => {
+    // Stale legacy sessions are dropped, not migrated — one re-login.
+    const legacy = await createEncryptedJWT(baseSession(jwtWithExp(-10)), secret);
+    const { store } = memoryStore({ session: legacy });
+
+    expect(await readSession(store, secret)).toBeNull();
   });
 });
 
@@ -144,10 +166,12 @@ describe('clearSession', () => {
 });
 
 describe('refreshSessionInStore', () => {
+  const config = { issuer: 'https://idp.test', clientId: 'c', clientSecret: 's', redirect_uri: 'https://app.test/cb', scope: 'openid' };
+
   it('returns null when there is no session to refresh', async () => {
     const { store } = memoryStore();
-    const config = { issuer: 'https://idp.test', clientId: 'c', clientSecret: 's', redirect_uri: 'https://app.test/cb', scope: 'openid' };
     expect(await refreshSessionInStore(store, config, secret)).toBeNull();
+    expect(mockedRefreshSession).not.toHaveBeenCalled();
   });
 
   it('returns null when the stored session has no refresh token', async () => {
@@ -158,7 +182,32 @@ describe('refreshSessionInStore', () => {
     };
     await persistSession(store, noRefresh, secret);
 
-    const config = { issuer: 'https://idp.test', clientId: 'c', clientSecret: 's', redirect_uri: 'https://app.test/cb', scope: 'openid' };
     expect(await refreshSessionInStore(store, config, secret)).toBeNull();
+    expect(mockedRefreshSession).not.toHaveBeenCalled();
+  });
+
+  it('refreshes a session whose access token has already expired', async () => {
+    // The heart of the fix: an expired access token must be refreshable.
+    const expired = jwtWithExp(-60);
+    const { store } = memoryStore();
+    await persistSession(store, baseSession(expired), secret);
+
+    const freshToken = jwtWithExp(3600);
+    const refreshed = baseSession(freshToken);
+    mockedRefreshSession.mockResolvedValue(refreshed);
+
+    const result = await refreshSessionInStore(store, config, secret);
+
+    expect(result).toEqual(refreshed);
+    // The exchange got the session it was refreshing, expired token and all.
+    expect(mockedRefreshSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokens: expect.objectContaining({ accessToken: expired, refreshToken: 'refresh-token' }),
+      }),
+      config,
+      {},
+    );
+    const persisted = await readSession(store, secret);
+    expect(persisted?.tokens?.accessToken).toBe(freshToken);
   });
 });

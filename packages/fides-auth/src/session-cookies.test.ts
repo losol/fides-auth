@@ -101,13 +101,19 @@ describe('decodeSessionCookies', () => {
     expect(await decodeSessionCookies({ session: null, accessToken: null }, SECRET)).toBeNull();
   });
 
-  it('returns null when the split access token has expired', async () => {
-    const encoded = await encodeSessionCookies(session(jwtWithExp(-60)), SECRET);
+  it('keeps a session whose split access token has expired', async () => {
+    // Expired access token + live refresh token means "refresh now", not "log out".
+    const expired = jwtWithExp(-60);
+    const encoded = await encodeSessionCookies(session(expired), SECRET);
+
     const decoded = await decodeSessionCookies(
       { session: encoded.session, accessToken: encoded.accessToken ?? null },
       SECRET,
     );
-    expect(decoded).toBeNull();
+
+    expect(decoded).not.toBeNull();
+    expect(decoded?.tokens?.accessToken).toBe(expired);
+    expect(decoded?.tokens?.refreshToken).toBe('refresh-token');
   });
 
   it('keeps the session for an opaque (non-JWT) access token instead of treating it as expired', async () => {
@@ -134,33 +140,35 @@ describe('decodeSessionCookies', () => {
     expect(decoded?.tokens?.refreshToken).toBe('refresh-token');
   });
 
-  it('reads a legacy session that holds the access token in the main value', async () => {
+  it('reads a legacy session that holds a still-valid access token in the main value', async () => {
     const accessToken = jwtWithExp(3600);
     const legacy = await createEncryptedJWT(session(accessToken), SECRET);
 
     const decoded = await decodeSessionCookies({ session: legacy, accessToken: null }, SECRET);
     expect(decoded?.tokens?.accessToken).toBe(accessToken);
   });
+
+  it('drops a legacy session whose embedded access token has expired', async () => {
+    // Stale legacy sessions are dropped, not migrated — one re-login.
+    const legacy = await createEncryptedJWT(session(jwtWithExp(-60)), SECRET);
+
+    expect(await decodeSessionCookies({ session: legacy, accessToken: null }, SECRET)).toBeNull();
+  });
 });
 
 describe('decodeIdTokenCookie', () => {
-  it('returns the ID token after the access token has expired', async () => {
+  it('returns the ID token even when the session cookie is gone or unreadable', async () => {
     const idToken = jwtWithExp(3600);
     const encoded = await encodeSessionCookies(session(jwtWithExp(-60), idToken), SECRET);
 
-    // The session itself is gone once the access token expires...
+    // Logout needs the hint precisely when the session itself cannot be read.
     expect(
       await decodeSessionCookies(
-        {
-          session: encoded.session,
-          accessToken: encoded.accessToken ?? null,
-          idToken: encoded.idToken ?? null,
-        },
+        { session: 'not-a-valid-jwe', accessToken: null, idToken: encoded.idToken ?? null },
         SECRET,
       ),
     ).toBeNull();
 
-    // ...but the logout hint must survive it.
     expect(await decodeIdTokenCookie(encoded.idToken!, SECRET)).toBe(idToken);
   });
 

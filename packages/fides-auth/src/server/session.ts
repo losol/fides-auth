@@ -78,8 +78,8 @@ export async function persistSession(
 
 /**
  * Reads and reassembles the current session from the cookie store, or null when
- * there is no valid session. All the split/expiry/legacy handling lives in
- * {@link decodeSessionCookies}; this just supplies the cookie values.
+ * there is none. Decode/validation rules live in {@link decodeSessionCookies};
+ * the returned session may carry an expired access token.
  */
 export async function readSession(store: CookieStore, secret: Secret): Promise<Session | null> {
   try {
@@ -114,6 +114,8 @@ export async function refreshSessionInStore(
   options: CreateSessionOptions = {},
 ): Promise<Session | null> {
   try {
+    // readSession also returns sessions with expired access tokens — exactly
+    // what refresh is for.
     const current = await readSession(store, secret);
 
     if (!current) {
@@ -151,9 +153,8 @@ export async function refreshSessionInStore(
 }
 
 /**
- * Reads the raw ID token, whether or not the session is still valid. Logout needs
- * the hint after the access token has expired, which is exactly when
- * {@link readSession} returns null.
+ * Reads the raw ID token independently of the session cookies — logout needs
+ * the hint even when {@link readSession} returns null.
  */
 export async function readIdToken(store: CookieStore, secret: Secret): Promise<string | undefined> {
   try {

@@ -49,6 +49,8 @@ export async function handleHeartbeat(
     return new Response(null, { status: 429 });
   }
 
+  // An expired access token is what the heartbeat recovers from, not 401 on —
+  // only a missing session or dead refresh token logs the user out.
   const session = await readSession(cookies, secret);
   if (!session) {
     logger.debug('Heartbeat with no session');

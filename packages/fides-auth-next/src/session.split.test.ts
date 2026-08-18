@@ -2,8 +2,8 @@
 /**
  * Tests for the split-cookie session storage: the access token lives in its own
  * "session_at" cookie while the rest of the session lives in "session".
- * getCurrentSession must reassemble the two, preserve the "expired access token
- * means no session" contract, and still read legacy single-cookie sessions.
+ * getCurrentSession must reassemble the two — expired access token included —
+ * and still read legacy single-cookie sessions with a live access token.
  */
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
@@ -78,10 +78,14 @@ describe('split-cookie session storage', () => {
     expect(session?.scopes).toEqual(['openid', 'profile']);
   });
 
-  it('returns null when the split access token has expired', async () => {
-    await createAndPersistSession(baseSession(jwtWithExp(-60)));
+  it('keeps the session when the split access token has expired', async () => {
+    // The refresh path recovers this session; expiry must not read as "logged out".
+    const expired = jwtWithExp(-60);
+    await createAndPersistSession(baseSession(expired));
 
-    expect(await getCurrentSession()).toBeNull();
+    const session = await getCurrentSession();
+    expect(session?.tokens?.accessToken).toBe(expired);
+    expect(session?.tokens?.refreshToken).toBe('refresh-token');
   });
 
   it('omits session_at when the session has no access token', async () => {
