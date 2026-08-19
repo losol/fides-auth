@@ -72,7 +72,7 @@
   "devDependencies": {
     "@eventuras/typescript-config": "workspace:*",
     "@eventuras/vite-config": "workspace:*",
-    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/jest-dom": "7.0.0",
     "@types/react": "^19.2.18",
     "jsdom": "29.1.1",
     "react": "^19.2.8",
