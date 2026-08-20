@@ -15,6 +15,7 @@ vi.mock('openid-client', () => ({
 }));
 
 import * as openid from 'openid-client';
+import { clearDiscoveryCache } from './oidc-discovery';
 import { buildOidcLogoutUrl, type OAuthConfig } from './oauth';
 
 const oauthConfig: OAuthConfig = {
@@ -49,6 +50,9 @@ function mockEndSessionUrl(endpoint: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Discovery is cached module-globally; without this a case would inherit the
+  // previous case's provider metadata.
+  clearDiscoveryCache();
   mockDiscovery('https://auth.example.com/connect/logout');
   mockEndSessionUrl('https://auth.example.com/connect/logout');
 });

@@ -22,6 +22,7 @@ vi.mock('openid-client', () => ({
 }));
 
 import * as openid from 'openid-client';
+import { clearDiscoveryCache } from './oidc-discovery';
 import {
   buildAuthorizationUrlWithPAR,
   discoverAndBuildAuthorizationUrl,
@@ -94,6 +95,9 @@ function installTestLogger(): LogEntry[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Discovery is cached module-globally; without this a case would inherit the
+  // previous case's provider metadata.
+  clearDiscoveryCache();
 });
 
 // `installTestLogger()` mutates the module-global logger factory.
