@@ -12,6 +12,7 @@ import * as openid from 'openid-client';
 
 import { createLogger } from './logger';
 import { OAuthConfig } from './oauth';
+import { discoverConfiguration } from './oidc-discovery';
 
 const logger = createLogger({ namespace: 'fides-auth:silent-login' });
 
@@ -63,12 +64,7 @@ export async function buildSilentLoginUrl(
   logger.debug({ issuer: config.issuer }, 'Building silent login URL');
 
   try {
-    const server = await openid.discovery(
-      new URL(config.issuer),
-      config.clientId,
-      config.clientSecret,
-      openid.ClientSecretPost(config.clientSecret)
-    );
+    const server = await discoverConfiguration(config);
 
     const parameters: Record<string, string> = {
       redirect_uri: config.redirect_uri,

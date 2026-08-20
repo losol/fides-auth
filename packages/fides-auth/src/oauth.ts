@@ -4,6 +4,7 @@ import * as openid from 'openid-client';
 
 import { createLogger } from './logger';
 import { getOAuthErrorLogContext } from './oauth-logging';
+import { discoverConfiguration } from './oidc-discovery';
 import { newSessionId } from './session-events';
 import type { Session } from './types';
 
@@ -46,12 +47,7 @@ export async function refreshAccessToken(
   logger.debug({ issuer: oAuthConfig.issuer }, 'Starting token refresh');
 
   try {
-    const config = await openid.discovery(
-      new URL(oAuthConfig.issuer),
-      oAuthConfig.clientId,
-      oAuthConfig.clientSecret,
-      openid.ClientSecretPost(oAuthConfig.clientSecret),
-    );
+    const config = await discoverConfiguration(oAuthConfig);
 
     const tokens = await openid.refreshTokenGrant(
       config,
@@ -130,7 +126,7 @@ export async function buildPKCEOptions(config: OAuthConfig): Promise<PKCEOptions
 /**
  * Builds an authorization URL with PKCE parameters.
  *
- * @param config - Discovered OpenID Configuration (use openid.discovery() to obtain)
+ * @param config - Discovered OpenID Configuration (use discoverConfiguration() to obtain)
  * @param pkceOptions - The PKCE options (e.g., code challenge, state, parameters)
  * @returns A Promise that resolves to the authorization URL
  */
@@ -155,7 +151,7 @@ export async function buildAuthorizationUrl(
  * containing only `client_id` and `request_uri`. The provider's discovery
  * metadata must include `pushed_authorization_request_endpoint`.
  *
- * @param config - Discovered OpenID Configuration (use openid.discovery() to obtain)
+ * @param config - Discovered OpenID Configuration (use discoverConfiguration() to obtain)
  * @param pkceOptions - The PKCE options (e.g., code challenge, state, parameters)
  * @returns A Promise that resolves to the PAR-based authorization URL
  */
@@ -198,12 +194,7 @@ export async function discoverAndBuildAuthorizationUrl(
   logger.debug({ issuer: oauthConfig.issuer }, 'Discovering OpenID configuration');
 
   try {
-    const config = await openid.discovery(
-      new URL(oauthConfig.issuer),
-      oauthConfig.clientId,
-      oauthConfig.clientSecret,
-      openid.ClientSecretPost(oauthConfig.clientSecret)
-    );
+    const config = await discoverConfiguration(oauthConfig);
 
     const parEndpoint = config.serverMetadata().pushed_authorization_request_endpoint;
 
@@ -274,12 +265,7 @@ export async function exchangeAuthorizationCode(
     'Exchanging authorization code for tokens',
   );
 
-  const config = await openid.discovery(
-    new URL(oauthConfig.issuer),
-    oauthConfig.clientId,
-    oauthConfig.clientSecret,
-    openid.ClientSecretPost(oauthConfig.clientSecret),
-  );
+  const config = await discoverConfiguration(oauthConfig);
 
   // openid-client overrides the explicit redirect_uri option with
   // stripParams(callbackUrl). Anchor to oauthConfig.redirect_uri so PAR and
@@ -510,12 +496,7 @@ export async function buildOidcLogoutUrl(
   } = typeof options === 'string' ? { postLogoutRedirectUri: options } : options;
 
   try {
-    const config = await openid.discovery(
-      new URL(oauthConfig.issuer),
-      oauthConfig.clientId,
-      oauthConfig.clientSecret,
-      openid.ClientSecretPost(oauthConfig.clientSecret),
-    );
+    const config = await discoverConfiguration(oauthConfig);
     const endSessionEndpoint = config.serverMetadata().end_session_endpoint;
 
     if (!endSessionEndpoint) {

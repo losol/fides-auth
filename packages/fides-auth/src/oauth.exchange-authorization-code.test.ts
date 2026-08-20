@@ -13,6 +13,7 @@ vi.mock('openid-client', () => ({
 }));
 
 import * as openid from 'openid-client';
+import { clearDiscoveryCache } from './oidc-discovery';
 import { exchangeAuthorizationCode, type OAuthConfig } from './oauth';
 
 function makeOAuthConfig(overrides: Partial<OAuthConfig> = {}): OAuthConfig {
@@ -30,6 +31,9 @@ const discoveredConfig = {} as unknown as openid.Configuration;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Discovery is cached module-globally; without this a case would inherit the
+  // previous case's provider metadata.
+  clearDiscoveryCache();
   vi.mocked(openid.discovery).mockResolvedValue(discoveredConfig);
   vi.mocked(openid.authorizationCodeGrant).mockResolvedValue({
     access_token: 'access',

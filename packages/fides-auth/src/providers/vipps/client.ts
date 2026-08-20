@@ -14,6 +14,7 @@ import {
   type OAuthConfig,
   type PKCEOptions,
 } from '../../oauth';
+import { discoverConfiguration } from '../../oidc-discovery';
 import {
   defaultVippsLoginScope,
   type VippsLoginConfig,
@@ -33,7 +34,6 @@ const logger = createLogger({
 export class VippsLoginClient {
   private readonly config: VippsLoginConfig;
   private readonly oauthConfig: OAuthConfig;
-  private configPromise: Promise<openid.Configuration> | null = null;
 
   constructor(config: VippsLoginConfig) {
     this.config = {
@@ -60,19 +60,15 @@ export class VippsLoginClient {
   }
 
   /**
-   * Get OpenID Configuration (cached)
-   * This ensures we use the same Configuration instance across all operations
+   * Get the OpenID Configuration, shared with the rest of fides-auth.
+   *
+   * Previously memoized on the instance, which cached rejections too: one failed
+   * discovery — a restart during a provider blip — left every later call
+   * rejecting for the lifetime of the client. {@link discoverConfiguration}
+   * caches successes with a TTL and drops failures.
    */
   private async getConfig(): Promise<openid.Configuration> {
-    if (!this.configPromise) {
-      this.configPromise = openid.discovery(
-        new URL(this.oauthConfig.issuer),
-        this.oauthConfig.clientId,
-        this.oauthConfig.clientSecret,
-        openid.ClientSecretPost(this.oauthConfig.clientSecret)
-      );
-    }
-    return this.configPromise;
+    return discoverConfiguration(this.oauthConfig);
   }
 
   /**
