@@ -51,7 +51,7 @@
     "@xstate/store-react": "^2.0.0"
   },
   "peerDependencies": {
-    "@xstate/store": "^4.2.2",
+    "@xstate/store": "^4.2.3",
     "@xstate/store-react": "^2.0.0",
     "react": "^19.0.0"
   },
@@ -59,7 +59,7 @@
     "@eventuras/typescript-config": "workspace:*",
     "@eventuras/vite-config": "workspace:*",
     "@types/react": "^19.2.18",
-    "@xstate/store": "^4.2.2",
+    "@xstate/store": "^4.2.3",
     "@xstate/store-react": "^2.0.0",
     "react": "^19.2.8",
     "typescript": "^6.0.2",
