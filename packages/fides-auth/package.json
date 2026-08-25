@@ -121,7 +121,7 @@
   },
   "dependencies": {
     "jose": "^6.2.8",
-    "openid-client": "^6.8.3"
+    "openid-client": "^6.8.5"
   },
   "devDependencies": {
     "@eventuras/typescript-config": "workspace:*",

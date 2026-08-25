@@ -48,8 +48,8 @@ importers:
         specifier: ^6.2.8
         version: 6.2.8
       openid-client:
-        specifier: ^6.8.3
-        version: 6.8.4
+        specifier: ^6.8.5
+        version: 6.8.5
     devDependencies:
       '@eventuras/typescript-config':
         specifier: workspace:*
@@ -141,8 +141,8 @@ importers:
         specifier: ^19.2.18
         version: 19.2.18
       '@xstate/store':
-        specifier: ^4.2.2
-        version: 4.2.2
+        specifier: ^4.2.3
+        version: 4.2.3
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -165,8 +165,8 @@ importers:
         specifier: ^0.8.1
         version: 0.8.1
       '@xstate/store':
-        specifier: ^4.2.2
-        version: 4.2.2
+        specifier: ^4.2.3
+        version: 4.2.3
     devDependencies:
       '@eventuras/typescript-config':
         specifier: workspace:*
@@ -1108,8 +1108,8 @@ packages:
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
 
-  '@xstate/store@4.2.2':
-    resolution: {integrity: sha512-GdfKOba6q0VP7CGeFVqMbjy4aqAxnkxrM3VykoI+BZbRo3pKA+tDJBfLYaXJlyeGqE3RkHXcWU3GZ8fQW4tFfg==}
+  '@xstate/store@4.2.3':
+    resolution: {integrity: sha512-vV/s0kpk0i3Mmo2AsDMUB5h4xTu/b3fRvXeYhnnz8ODY5ueQXMOlGI8Fn1fY0RXOmCKCmaNOeM6d2hWCrfuMtA==}
 
   acorn@8.17.0:
     resolution: {integrity: sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg==}
@@ -1654,8 +1654,8 @@ packages:
       sass:
         optional: true
 
-  oauth4webapi@3.8.6:
-    resolution: {integrity: sha512-iwemM91xz8nryHti2yTmg5fhyEMVOkOXwHNqbvcATjyajb5oQxCQzrNOA6uElRHuMhQQTKUyFKV9y/CNyg25BQ==}
+  oauth4webapi@3.8.7:
+    resolution: {integrity: sha512-4RxcKxXjuItDFZ20RRPf4YTw3kpeXJyCgJFxVzJ068A7PNJ18st2Dg90tlC1LkSDS0GecroagCLHYEIVUhCAkw==}
 
   obug@2.1.4:
     resolution: {integrity: sha512-4a+OsYv9UktOJKE+l1A4OufDgdRF9PifWj+tJnHURo/P+WOxpG4GzUFL9qCalmWauao6ogiG+QvnCovwPoyAWA==}
@@ -1665,8 +1665,8 @@ packages:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
     engines: {node: '>=14.0.0'}
 
-  openid-client@6.8.4:
-    resolution: {integrity: sha512-QSw0BA08piujetEwfZsHoTrDpMEha7GDZDicQqVwX4u0ChCjefvjDB++TZ8BTg76UpwhzIQgdvvfgfl3HpCSAw==}
+  openid-client@6.8.5:
+    resolution: {integrity: sha512-jNGC/5wnTYwCcEUe2ss0IRUmVRQcgxM0A1nLb3eX/9llqNbMWOQd2xd+qDAgfVCpA5Qh96Y1cdnkfbva6+bSdA==}
 
   outdent@0.5.0:
     resolution: {integrity: sha512-/jHxFIzoMXdqPzTaCpFzAAWhpkSjZPF4Vsn6jAfNpmbH/ymsmd7Qc6VE9BGn0L6YMj6uwpQLxCECpus4ukKS9Q==}
@@ -2943,10 +2943,10 @@ snapshots:
 
   '@xstate/store-react@2.0.0(react@19.2.8)':
     dependencies:
-      '@xstate/store': 4.2.2
+      '@xstate/store': 4.2.3
       react: 19.2.8
 
-  '@xstate/store@4.2.2': {}
+  '@xstate/store@4.2.3': {}
 
   acorn@8.17.0: {}
 
@@ -3396,16 +3396,16 @@ snapshots:
       - '@babel/core'
       - babel-plugin-macros
 
-  oauth4webapi@3.8.6: {}
+  oauth4webapi@3.8.7: {}
 
   obug@2.1.4: {}
 
   on-exit-leak-free@2.1.2: {}
 
-  openid-client@6.8.4:
+  openid-client@6.8.5:
     dependencies:
       jose: 6.2.8
-      oauth4webapi: 3.8.6
+      oauth4webapi: 3.8.7
 
   outdent@0.5.0: {}
 
