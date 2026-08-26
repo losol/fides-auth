@@ -1,5 +1,4 @@
 import { defineConfig, type UserConfig } from 'vite';
-import dts from 'vite-plugin-dts';
 import { resolve } from 'node:path';
 
 import { getRuntimeDependencyExternals, NODE_BUILTINS_EXTERNAL } from './externals.ts';
@@ -49,13 +48,7 @@ export function defineVanillaLibConfig(config: VanillaLibConfig): UserConfig {
   const userExternals = Array.isArray(external) ? external : [];
 
   return defineConfig({
-    plugins: [
-      dts({
-        include: ['src/**/*'],
-        exclude: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx'],
-      }),
-      ...(viteConfig.plugins || []),
-    ],
+    plugins: [...(viteConfig.plugins || [])],
     build: {
       minify: false,
       sourcemap: true,

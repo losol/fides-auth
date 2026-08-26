@@ -58,7 +58,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && tsc --emitDeclarationOnly",
     "typecheck": "tsc --noEmit",
     "dev": "vite build --watch",
     "test": "vitest run",
@@ -76,7 +76,7 @@
     "@types/react": "^19.2.18",
     "jsdom": "30.0.1",
     "react": "^19.2.8",
-    "typescript": "^6.0.2",
+    "typescript": "^7.0.2",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
   },
