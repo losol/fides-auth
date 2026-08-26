@@ -6,6 +6,8 @@ Shared Vite configurations for Eventuras monorepo libraries.
 
 This package provides reusable Vite configuration presets for different types of libraries in the Eventuras monorepo. It helps maintain consistency, reduces duplication, and makes it easier to update build configurations across all libraries.
 
+The presets build JavaScript only. Type declarations are emitted by each package's own `tsc --emitDeclarationOnly` step in its `build` script.
+
 ## Presets
 
 ### Vanilla Library (`vanilla-lib`)
@@ -46,11 +48,9 @@ export default defineReactLibConfig({
 
 **Features:**
 - React plugin (Babel or SWC)
-- TypeScript declaration generation
 - Optional Tailwind CSS support
 - 'use client' directive preservation for RSC
 - Configurable module preservation
-- Auto-excludes test files and stories from types
 
 ### Next.js Library (`next-lib`)
 
@@ -100,10 +100,6 @@ All presets support these options:
 - **`preserveModules`**: Keep source structure in output (default: `true`)
 - **`preserveUseClientDirectives`**: Preserve 'use client' for RSC (default: `true`)
 - **`useSWC`**: Use SWC instead of Babel (default: `false`)
-- **`dts`**: TypeScript declaration options
-  - `entryRoot`: Source root (default: `'src'`)
-  - `outDir`: Output directory (default: `'dist'`)
-  - `rollupTypes`: Bundle types into single file (default: `false`)
 
 ## Migration Guide
 
@@ -114,16 +110,9 @@ All presets support these options:
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 import { defineConfig } from 'vite';
-import dts from 'vite-plugin-dts';
 
 export default defineConfig({
-  plugins: [
-    react(),
-    dts({
-      include: ['src/**/*'],
-      exclude: ['src/**/*.stories.tsx'],
-    }),
-  ],
+  plugins: [react()],
   build: {
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
@@ -158,9 +147,8 @@ export default defineReactLibConfig({
 ## Troubleshooting
 
 ### Types not generated
-- Check that your TypeScript files are in `src/`
-- Ensure test files use `.test.ts` or `.spec.ts` extensions
-- Check `dts.entryRoot` and `dts.outDir` options
+- Declarations come from `tsc --emitDeclarationOnly` in each package's `build` script, not from the Vite presets
+- Check the package tsconfig: `declaration: true`, `outDir`, and that sources are under `src/`
 
 ### 'use client' directives missing
 - Ensure `preserveUseClientDirectives: true` (default for Next.js)

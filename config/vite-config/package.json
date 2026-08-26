@@ -14,11 +14,10 @@
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.0.5",
     "@vitejs/plugin-react-swc": "^4.3.3",
-    "glob": "^13.0.6",
-    "vite-plugin-dts": "^5.0.3"
+    "glob": "^13.0.6"
   },
   "devDependencies": {
-    "typescript": "^6.0.2",
+    "typescript": "^7.0.2",
     "vite": "^8.2.1"
   },
   "peerDependencies": {
