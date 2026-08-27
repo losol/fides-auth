@@ -42,7 +42,7 @@ jobs:
       # Pending changesets -> open / update the "Version Packages" PR.
       - name: Create or update version PR
         if: steps.changesets.outputs.count != '0'
-        uses: changesets/action@22ccf9aa43179fe9e27dc62e575971d28cce197c # v2.0.0
+        uses: changesets/action@198f833dd7d863100ea6e28967bc9a9fdefadb0a # v2.1.0
         with:
           version: pnpm changeset:version
           commit: 'chore: version packages'
@@ -55,7 +55,7 @@ jobs:
       - name: Tag released packages
         if: steps.changesets.outputs.count == '0'
         id: tag
-        uses: changesets/action@22ccf9aa43179fe9e27dc62e575971d28cce197c # v2.0.0
+        uses: changesets/action@198f833dd7d863100ea6e28967bc9a9fdefadb0a # v2.1.0
         with:
           publish: pnpm changeset:tag
         env:
