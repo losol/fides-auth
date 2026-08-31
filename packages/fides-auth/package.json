@@ -120,7 +120,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "jose": "^6.2.8",
+    "jose": "^6.2.9",
     "openid-client": "^6.8.5"
   },
   "devDependencies": {
