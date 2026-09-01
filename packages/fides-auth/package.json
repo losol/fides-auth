@@ -120,8 +120,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "jose": "^6.2.8",
-    "openid-client": "^6.8.5"
+    "jose": "^6.2.9",
+    "openid-client": "^6.8.6"
   },
   "devDependencies": {
     "@eventuras/typescript-config": "workspace:*",
