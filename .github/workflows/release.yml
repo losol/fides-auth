@@ -44,39 +44,23 @@ jobs:
         if: steps.changesets.outputs.count != '0'
         uses: changesets/action@22ccf9aa43179fe9e27dc62e575971d28cce197c # v2.0.0
         with:
-          version: pnpm changeset:version
-          commit: 'chore: version packages'
-          title: 'chore: version packages'
+          version-script: pnpm changeset:version
+          commit-message: 'chore: version packages'
+          pr-title: 'chore: version packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # No pending changesets (e.g. the version PR was just merged) -> tag the
-      # released versions. The publish workflows below do the actual npm publish.
+      # released versions. The action pushes the tags and creates GitHub
+      # releases; the publish workflows below do the actual npm publish.
       - name: Tag released packages
         if: steps.changesets.outputs.count == '0'
         id: tag
         uses: changesets/action@22ccf9aa43179fe9e27dc62e575971d28cce197c # v2.0.0
         with:
-          publish: pnpm changeset:tag
+          publish-script: pnpm changeset:tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create GitHub releases
-        if: steps.tag.outputs.published == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PUBLISHED: ${{ steps.tag.outputs.publishedPackages }}
-        run: |
-          echo "$PUBLISHED" | jq -c '.[]' | while read -r pkg; do
-            NAME=$(echo "$pkg" | jq -r '.name')
-            VERSION=$(echo "$pkg" | jq -r '.version')
-            TAG="${NAME}@${VERSION}"
-            TITLE="$(echo "$NAME" | sed 's|@eventuras/||') v${VERSION}"
-
-            echo "Creating release for ${TAG}"
-            gh release create "$TAG" --title "$TITLE" --generate-notes \
-              || echo "Failed to create release for ${TAG}"
-          done
 
       # GITHUB_TOKEN-pushed tags do not cascade into other workflows, so the
       # publish jobs are dispatched explicitly here.
@@ -84,7 +68,7 @@ jobs:
         if: steps.tag.outputs.published == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PUBLISHED: ${{ steps.tag.outputs.publishedPackages }}
+          PUBLISHED: ${{ steps.tag.outputs.published-packages }}
         run: |
           echo "$PUBLISHED" | jq -c '.[]' | while read -r pkg; do
             NAME=$(echo "$pkg" | jq -r '.name')
