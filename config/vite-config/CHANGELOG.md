@@ -1,5 +1,11 @@
 # @eventuras/vite-config
 
+## 0.3.0
+
+### Minor Changes
+
+- 8a87c07: Emit type declarations with `tsc --emitDeclarationOnly` instead of vite-plugin-dts, and upgrade TypeScript to 7.
+
 ## 0.2.2
 
 ### Patch Changes

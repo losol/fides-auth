@@ -1,5 +1,13 @@
 # @eventuras/fides-auth-store
 
+## 0.2.3
+
+### Patch Changes
+
+- 8a87c07: Emit type declarations with `tsc --emitDeclarationOnly` instead of vite-plugin-dts, and upgrade TypeScript to 7.
+- Updated dependencies [8a87c07]
+  - @eventuras/fides-auth@0.14.1
+
 ## 0.2.2
 
 ### Patch Changes
