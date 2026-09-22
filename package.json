@@ -8,7 +8,7 @@
     "test": "turbo run test",
     "changeset": "changeset",
     "changeset:version": "changeset version",
-    "changeset:tag": "changeset tag"
+    "changeset:tag": "changeset git-tag"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.2",
