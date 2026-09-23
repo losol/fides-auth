@@ -58,12 +58,12 @@
   "devDependencies": {
     "@eventuras/typescript-config": "workspace:*",
     "@eventuras/vite-config": "workspace:*",
-    "@types/react": "^19.2.18",
+    "@types/react": "^19.3.0",
     "@xstate/store": "^4.2.3",
     "@xstate/store-react": "^2.0.0",
-    "react": "^19.2.8",
+    "react": "^19.3.0",
     "typescript": "^7.0.2",
-    "vite": "^8.2.1",
+    "vite": "^8.2.2",
     "vitest": "^4.1.10"
   },
   "engines": {
