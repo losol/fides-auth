@@ -15,8 +15,8 @@ messages are for humans and may be reworded, names are the contract.
 
 | `event`                  | Level             | Always present       | May be absent                                   |
 | ------------------------ | ----------------- | -------------------- | ----------------------------------------------- |
-| `session.created`        | info              | `hasRefreshToken`    | `sid`, `scopes`, `expiresIn`, `cookieBytes`      |
-| `session.refreshed`      | info              | `rotatedRefreshToken`| `sid`, `expiresIn`, `cookieBytes`               |
+| `session.created`        | info              | `hasRefreshToken`    | `sid`, `scopes`, `expiresIn`, `cookieBytes`, `persistence` |
+| `session.refreshed`      | info              | `rotatedRefreshToken`| `sid`, `expiresIn`, `cookieBytes`, `persistence` |
 | `session.rejected`       | per `reason`      | `reason`             | `sid`, `source`                                  |
 | `session.refresh_failed` | per `cause`       | `cause`              | `sid`, `status`, `accessTokenExpiresAt`          |
 | `session.cleared`        | info              | `trigger`            | `sid`                                            |
@@ -45,7 +45,8 @@ endpoint all report the same word for the same situation.
 | `reason`               | Level | Means                                                          |
 | ---------------------- | ----- | -------------------------------------------------------------- |
 | `no_session_cookie`    | debug | No cookie was sent. The ordinary anonymous case.                |
-| `stale_legacy_session` | info  | A pre-split single-cookie session. Costs one re-login.          |
+| `stale_legacy_session` | info  | A pre-split single-cookie session, or split cookies under server persistence. Costs one re-login. |
+| `session_not_found`    | info  | A handle was sent but the server store has no live record: revoked, expired or evicted. Server persistence only. |
 | `refresh_failed`       | info  | The provider rejected the refresh token. See `cause`.           |
 | `unreadable_session`   | warn  | A cookie arrived but would not decrypt. Corruption, or a rotated secret. |
 | `no_refresh_token`     | warn  | The session has no refresh token — usually `offline_access` was never granted. |
@@ -129,7 +130,9 @@ zero.
 ```
 
 Browsers drop a cookie over ~4096 bytes silently, producing a login that appears
-to work and then doesn't.
+to work and then doesn't. Under [server persistence](./server-sessions.md) the
+cookie holds only a handle, so `cookieBytes` is absent and `persistence` is
+`server`.
 
 ## Suggested alerts
 

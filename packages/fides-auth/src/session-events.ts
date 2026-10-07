@@ -50,7 +50,9 @@ export type SessionRejectedReason =
   /** The session decoded but carries no refresh token — usually `offline_access` was never granted. */
   | 'no_refresh_token'
   /** The refresh token was rejected by the provider. See {@link RefreshFailureCause}. */
-  | 'refresh_failed';
+  | 'refresh_failed'
+  /** A handle was sent but the server store has no live record for it: revoked, expired or evicted. Server persistence only. */
+  | 'session_not_found';
 
 /**
  * Why a refresh attempt failed.
@@ -66,6 +68,9 @@ export type RefreshFailureCause =
   | 'transport'
   /** The provider was reached but answered with an error or something unparseable. Retryable. */
   | 'idp_error';
+
+/** Where a session lives between requests. See `server/session-persistence.ts`. */
+export type SessionPersistenceMode = 'cookie' | 'server';
 
 /** What caused the session cookies to be deleted. */
 export type SessionClearedTrigger =
@@ -85,8 +90,10 @@ export type SessionEvent =
     scopes?: string[];
     /** Seconds until the access token expires. */
     expiresIn?: number;
-    /** Total bytes written across the session cookies. Near ~4096 means a session about to break. */
+    /** Total bytes written across the session cookies. Near ~4096 means a session about to break. Absent under server persistence. */
     cookieBytes?: number;
+    /** Where the session was written. Absent on events from before this field existed. */
+    persistence?: SessionPersistenceMode;
   }
   | {
     event: typeof SESSION_EVENT.REFRESHED;
@@ -95,6 +102,7 @@ export type SessionEvent =
     /** True when the provider issued a new refresh token. Rotation turns a lost cookie write into a dead session. */
     rotatedRefreshToken: boolean;
     cookieBytes?: number;
+    persistence?: SessionPersistenceMode;
   }
   | {
     event: typeof SESSION_EVENT.REJECTED;
@@ -132,6 +140,7 @@ type Level = 'debug' | 'info' | 'warn' | 'error';
 const REJECTED_LEVEL: Record<SessionRejectedReason, Level> = {
   no_session_cookie: 'debug',
   stale_legacy_session: 'info',
+  session_not_found: 'info',
   refresh_failed: 'info',
   unreadable_session: 'warn',
   no_refresh_token: 'warn',
@@ -190,6 +199,7 @@ export const SESSION_REJECTED_REASONS = [
   'stale_legacy_session',
   'no_refresh_token',
   'refresh_failed',
+  'session_not_found',
 ] as const satisfies readonly SessionRejectedReason[];
 
 /** Narrows an untrusted value (a response body, a query param) to a known reason. */

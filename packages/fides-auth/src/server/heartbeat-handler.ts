@@ -11,6 +11,7 @@ import { SESSION_EVENT, logSessionEvent, type SessionRejectedReason } from '../s
 import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
 import { tryRefreshSessionInStore } from './session';
+import type { SessionPersistence, SessionSecret } from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:heartbeat' });
 
@@ -24,8 +25,11 @@ export interface HeartbeatHandlerConfig {
   /** Optional rate-limit gate. When it resolves false, the handler responds 429. */
   rateLimit?: () => boolean | Promise<boolean>;
 
-  /** Session encryption secret. Defaults to {@link getSessionSecret}. */
-  secret?: string | Uint8Array;
+  /** Session encryption secret for the default cookie persistence. Defaults to {@link getSessionSecret}. */
+  secret?: SessionSecret;
+
+  /** Where the session lives. Defaults to the cookies under `secret`; see `serverPersistence`. */
+  persistence?: SessionPersistence;
 }
 
 /**
@@ -46,7 +50,8 @@ export async function handleHeartbeat(
   request: Request,
   config: HeartbeatHandlerConfig,
 ): Promise<Response> {
-  const { oauthConfig, cookies, rateLimit, secret = getSessionSecret() } = config;
+  const { oauthConfig, cookies, rateLimit } = config;
+  const persistence = config.persistence ?? config.secret ?? getSessionSecret();
 
   if (request.method !== 'POST') {
     return new Response(null, { status: 405, headers: { Allow: 'POST' } });
@@ -61,7 +66,7 @@ export async function handleHeartbeat(
   // tryRefreshSessionInStore reads the session, refreshes it, and reports which
   // of the two it failed at — so this handler never has to re-read cookies to
   // work out why.
-  const result = await tryRefreshSessionInStore(cookies, oauthConfig, secret);
+  const result = await tryRefreshSessionInStore(cookies, oauthConfig, persistence);
 
   if (result.ok) {
     logger.debug({ sid: result.session.sid }, 'Heartbeat refresh succeeded');

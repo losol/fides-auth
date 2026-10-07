@@ -24,6 +24,9 @@ import {
   validateReturnUrl,
 } from '../oauth';
 import type { CookieStore } from './cookie-store';
+import { serverPersistence } from './session-persistence';
+import { createMemorySessionStore } from './session-store';
+import { sha256 } from '../utils';
 
 const mockedExchange = vi.mocked(exchangeAuthorizationCode);
 const mockedBuildSession = vi.mocked(buildSessionFromTokens);
@@ -109,5 +112,24 @@ describe('handleOidcCallback — guards', () => {
 
     expect(response.status).toBe(400);
     expect(mockedExchange).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleOidcCallback — server persistence', () => {
+  it('stores the session and gives the browser a handle, not the session', async () => {
+    const store = createMemorySessionStore();
+    const persistence = serverPersistence({ store, secret });
+    const { store: cookies, jar } = memoryStore({ oauth_state: 'xyz', oauth_code_verifier: 'verifier' });
+    mockedBuildSession.mockReturnValue({ sid: 'sid-1', tokens: { accessToken: 'a' } } as any);
+    const request = new Request('https://host.example.test/api/auth/callback/oidc?code=abc&state=xyz');
+
+    const response = await handleOidcCallback(request, { ...baseConfig(cookies), persistence });
+
+    expect(response.status).toBe(302);
+    expect(jar.has('session')).toBe(false);
+    expect(jar.has('session_at')).toBe(false);
+    const handle = jar.get('session_ref');
+    expect(handle).toBeDefined();
+    expect((await store.get(await sha256(handle!)))?.sid).toBe('sid-1');
   });
 });
