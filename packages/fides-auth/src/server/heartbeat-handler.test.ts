@@ -160,3 +160,20 @@ describe('handleHeartbeat — success', () => {
     expect(body.accessTokenExpiresAt).toBeNull();
   });
 });
+
+describe('handleHeartbeat — persistence', () => {
+  it('refreshes through the configured persistence rather than the secret', async () => {
+    const persistence = { mode: 'server' } as unknown as NonNullable<
+      Parameters<typeof handleHeartbeat>[1]['persistence']
+    >;
+    mockedRefresh.mockResolvedValue({
+      ok: true,
+      rotatedRefreshToken: false,
+      session: { tokens: { accessToken: 'new', refreshToken: 'r' } },
+    });
+
+    await handleHeartbeat(makeRequest('POST'), { ...config, persistence });
+
+    expect(mockedRefresh).toHaveBeenCalledWith(noopStore, config.oauthConfig, persistence);
+  });
+});

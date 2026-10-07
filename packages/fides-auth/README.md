@@ -8,6 +8,7 @@ Framework-agnostic OAuth 2.0 / OpenID Connect library with PKCE, encrypted sessi
 - **Pushed Authorization Requests** — Opt-in RFC 9126 support (`usePar`) when the provider advertises it
 - **Dual environment** — Node.js (`openid-client`) and browser (Web Crypto) entry points
 - **Encrypted sessions** — AES-256-GCM encrypted JWTs for secure session storage
+- **Server-side sessions** — Opt-in store behind an opaque handle cookie, for providers whose tokens don't fit a cookie
 - **Rate limiting** — Generic token-bucket algorithm, ready for login protection
 - **RP-initiated logout** — End the provider's session too, with `id_token_hint` (OIDC RP-Initiated Logout 1.0)
 - **Silent login** — Detect `prompt=none` results without user interaction
@@ -204,6 +205,28 @@ return handleOidcLogout(request, {
 
 See [docs/rp-initiated-logout.md](./docs/rp-initiated-logout.md) for the full
 parameter set, where the ID token is stored, and why `client_id` is still sent.
+
+#### Server-side sessions
+
+By default the session is encrypted into cookies. When a provider's tokens are
+too large for that (OpenIddict's encrypted JWE tokens, for instance), keep the
+session in a store and give the browser only a handle:
+
+```typescript
+import { serverPersistence, createMemorySessionStore } from "@eventuras/fides-auth/server";
+
+const persistence = serverPersistence({
+  store: createMemorySessionStore(), // or your own SessionStore (Mongo, Redis, …)
+  secret: process.env.SESSION_SECRET!,
+});
+
+return handleHeartbeat(request, { oauthConfig, cookies, persistence });
+```
+
+Every handler and session helper takes `persistence` where it took `secret`.
+The store gets encrypted records keyed by a hash of the handle; `clearSession`
+deletes the record, so logout revokes a copied cookie too. See
+[docs/server-sessions.md](./docs/server-sessions.md).
 
 ### OAuth — Browser (`/oauth-browser`)
 

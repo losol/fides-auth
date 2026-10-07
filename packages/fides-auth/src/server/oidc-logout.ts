@@ -10,6 +10,7 @@ import { buildOidcLogoutUrl } from '../oauth';
 import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
 import { clearSession, readIdToken, tryReadSession } from './session';
+import type { SessionPersistence, SessionSecret } from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-logout' });
 
@@ -47,8 +48,11 @@ export interface OidcLogoutConfig {
   /** Post-logout redirect URI. Must be registered with the provider. */
   postLogoutRedirectUri: string;
 
-  /** Session encryption secret. Defaults to {@link getSessionSecret}. */
-  secret?: string | Uint8Array;
+  /** Session encryption secret for the default cookie persistence. Defaults to {@link getSessionSecret}. */
+  secret?: SessionSecret;
+
+  /** Where the session lives. Defaults to the cookies under `secret`; see `serverPersistence`. */
+  persistence?: SessionPersistence;
 
   /** Optional rate-limit gate. When it resolves false, the handler responds 429. */
   rateLimit?: () => boolean | Promise<boolean>;
@@ -96,7 +100,6 @@ export async function handleOidcLogout(
     oauthConfig,
     cookies,
     postLogoutRedirectUri,
-    secret = getSessionSecret(),
     rateLimit,
     state,
     logoutHint,
@@ -105,6 +108,7 @@ export async function handleOidcLogout(
     allowedMethods = ['POST'],
     applicationUrl,
   } = config;
+  const persistence = config.persistence ?? config.secret ?? getSessionSecret();
 
   if (!allowedMethods.includes(request.method)) {
     return new Response(null, {
@@ -126,16 +130,17 @@ export async function handleOidcLogout(
     return new Response('Too many requests', { status: 429 });
   }
 
-  // Read before clearing. Deliberately not readSession: that returns null once the
-  // access token has expired, which is exactly when the hint still matters.
-  const idTokenHint = await readIdToken(cookies, secret);
-
-  // Best-effort correlation id, so the logout line joins the rest of this
-  // session's events. A session too broken to read still logs out fine.
-  const sid = (await tryReadSession(cookies, secret)).session?.sid;
+  // Read before clearing. A session too broken to read still logs out fine,
+  // and the hint matters most exactly then — so fall back to the raw ID token.
+  // The sid is best-effort correlation, so the logout line joins the rest of
+  // this session's events.
+  const read = await tryReadSession(cookies, persistence);
+  const idTokenHint =
+    read.session?.tokens?.idToken ?? (await readIdToken(cookies, persistence));
+  const sid = read.session?.sid;
 
   try {
-    await clearSession(cookies, { trigger: 'logout', sid });
+    await clearSession(cookies, { trigger: 'logout', sid, persistence });
   } catch (error) {
     // Never redirect to the provider on a half-cleared local session — the user
     // would come back looking logged in.

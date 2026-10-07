@@ -99,7 +99,9 @@ The ID token is also read independently of session validity. `readSession` retur
 null once the access token has expired, but the hint is needed precisely then: an
 idle user coming back to a stale tab and clicking log out still has a live session at
 the provider. `readIdToken` reads the `session_it` cookie directly, and
-`handleOidcLogout` uses it rather than going through the session.
+`handleOidcLogout` falls back to it when the session itself won't read. Under
+[server persistence](./server-sessions.md) the hint comes from the stored
+record, which outlives the access token the same way.
 
 ## Correlating the response with `state`
 

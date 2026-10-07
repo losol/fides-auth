@@ -9,8 +9,12 @@ vi.mock('../oauth', () => ({ buildOidcLogoutUrl: vi.fn() }));
 import { handleOidcLogout } from './oidc-logout';
 import { buildOidcLogoutUrl } from '../oauth';
 import { persistSession } from './session';
+import { serverPersistence } from './session-persistence';
+import { createMemorySessionStore } from './session-store';
 import type { CookieStore } from './cookie-store';
 import type { Session } from '../types';
+import { SESSION_EVENT } from '../session-events';
+import { sha256 } from '../utils';
 
 const mockedBuildLogoutUrl = vi.mocked(buildOidcLogoutUrl);
 const secret = 'a'.repeat(64);
@@ -213,5 +217,30 @@ describe('handleOidcLogout', () => {
 
     expect(response.status).toBe(302);
     expect(jar.size).toBe(0);
+  });
+});
+
+describe('handleOidcLogout — server persistence', () => {
+  it('deletes the stored session and still sends the ID token hint', async () => {
+    const sessionStore = createMemorySessionStore();
+    const persistence = serverPersistence({ store: sessionStore, secret });
+    const { store, jar } = memoryStore();
+    const session: Session = {
+      sid: 'sid-1',
+      tokens: { accessToken: jwtWithExp(-60), refreshToken: 'r', idToken: 'the-id-token' },
+      user: { name: 'Ada', email: 'ada@example.test' },
+    };
+    await persistSession(store, session, persistence, { event: SESSION_EVENT.CREATED });
+    const key = await sha256(jar.get('session_ref')!);
+
+    const response = await handleOidcLogout(request, { ...baseConfig(store), persistence });
+
+    expect(response.status).toBe(302);
+    expect(mockedBuildLogoutUrl).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ idTokenHint: 'the-id-token' }),
+    );
+    expect(jar.has('session_ref')).toBe(false);
+    expect(await sessionStore.get(key)).toBeNull();
   });
 });

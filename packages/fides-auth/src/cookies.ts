@@ -127,6 +127,13 @@ export const ID_TOKEN_COOKIE_NAME = 'session_it';
 export const SESSION_COOKIE_NAME = 'session';
 
 /**
+ * Name of the cookie holding the opaque session handle under server
+ * persistence, where the session itself lives in a `SessionStore` and no token
+ * reaches the browser. See `server/session-persistence.ts`.
+ */
+export const SESSION_REF_COOKIE_NAME = 'session_ref';
+
+/**
  * Serialized byte size of a `name=value` cookie pair. The browser per-cookie
  * limit applies to the serialized pair, so the `=` separator is counted too —
  * otherwise a borderline pair (name+value === 4095) would slip through only to be

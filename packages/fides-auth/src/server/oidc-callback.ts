@@ -17,6 +17,7 @@ import { SESSION_EVENT } from '../session-events';
 import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
 import { persistSession } from './session';
+import type { SessionPersistence, SessionSecret } from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-callback' });
 
@@ -33,8 +34,11 @@ export interface OidcCallbackConfig {
   /** Optional rate-limit gate. When it resolves false, the handler responds 429. */
   rateLimit?: () => boolean | Promise<boolean>;
 
-  /** Session encryption secret. Defaults to {@link getSessionSecret}. */
-  secret?: string | Uint8Array;
+  /** Session encryption secret for the default cookie persistence. Defaults to {@link getSessionSecret}. */
+  secret?: SessionSecret;
+
+  /** Where the session lives. Defaults to the cookies under `secret`; see `serverPersistence`. */
+  persistence?: SessionPersistence;
 
   /**
    * Name of the ID token claim that contains user roles.
@@ -68,11 +72,11 @@ export async function handleOidcCallback(
     applicationUrl,
     cookies,
     rateLimit,
-    secret = getSessionSecret(),
     rolesClaim = 'roles',
     defaultRedirectPath = '/',
     validateReturnTo,
   } = config;
+  const persistence = config.persistence ?? config.secret ?? getSessionSecret();
 
   if (rateLimit && !(await rateLimit())) {
     logger.warn('Rate limit exceeded');
@@ -108,7 +112,7 @@ export async function handleOidcCallback(
     // what the session cost in cookie bytes, and a login that comes back without
     // a refresh token (no offline_access) is visible there on day one.
     const session = buildSessionFromTokens(tokens, rolesClaim);
-    await persistSession(cookies, session, secret, { event: SESSION_EVENT.CREATED });
+    await persistSession(cookies, session, persistence, { event: SESSION_EVENT.CREATED });
 
     // Clean up PKCE & returnTo cookies (read returnTo first).
     const returnTo = await cookies.get('returnTo');
@@ -135,7 +139,8 @@ export async function handleOidcCallback(
     });
   } catch (error) {
     // The session was too large for a cookie — surface this distinctly instead of
-    // hiding it in a generic 500, so it's diagnosable in production.
+    // hiding it in a generic 500, so it's diagnosable in production. Server
+    // persistence is the fix; see docs/server-sessions.md.
     if (error instanceof CookieTooLargeError) {
       logger.error(
         { error, cookieName: error.cookieName, size: error.size },
