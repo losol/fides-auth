@@ -1,5 +1,12 @@
 # @eventuras/fides-auth-store
 
+## 0.2.4
+
+### Patch Changes
+
+- Updated dependencies [c2fa830]
+  - @eventuras/fides-auth@0.15.0
+
 ## 0.2.3
 
 ### Patch Changes

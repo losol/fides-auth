@@ -1,5 +1,13 @@
 # @eventuras/fides-auth
 
+## 0.15.0
+
+### Minor Changes
+
+- c2fa830: Opt-in server-side sessions. `serverPersistence({ store, secret })` keeps the
+  session in a `SessionStore` and gives the browser a random handle, for providers
+  whose tokens don't fit a cookie.
+
 ## 0.14.1
 
 ### Patch Changes
