@@ -23,8 +23,8 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.0(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))
       '@vitejs/plugin-react':
-        specifier: ^6.1.1
-        version: 6.1.1(vite@8.3.0(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^6.1.2
+        version: 6.1.2(vite@8.3.0(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))
       '@vitejs/plugin-react-swc':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.0(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))
@@ -122,8 +122,8 @@ importers:
         specifier: workspace:*
         version: link:../fides-auth-store
       '@eventuras/logger':
-        specifier: ^0.9.1
-        version: 0.9.1
+        specifier: ^0.9.2
+        version: 0.9.2
       '@xstate/store-react':
         specifier: ^2.0.0
         version: 2.0.0(react@19.3.0)
@@ -159,8 +159,8 @@ importers:
         specifier: workspace:*
         version: link:../fides-auth
       '@eventuras/logger':
-        specifier: ^0.9.1
-        version: 0.9.1
+        specifier: ^0.9.2
+        version: 0.9.2
       '@xstate/store':
         specifier: ^4.2.3
         version: 4.2.3
@@ -321,8 +321,8 @@ packages:
   '@emnapi/runtime@1.11.1':
     resolution: {integrity: sha512-vgj7R3y3Wgx24IQaGPA/R6YFXLHVMOZ0uVEyIQPaWs+rd1AzfEMXlAC22FYwO1XkKR6NPsq7mUandH8oIRdZFw==}
 
-  '@eventuras/logger@0.9.1':
-    resolution: {integrity: sha512-v1To7+EF/SEPrlwi1RBTQmXLSUqr12rUcszNGXy/hc2kME8FmX1JhbObv5BcbCf5hSI7Pdba1ayrVzDWw7sX9Q==}
+  '@eventuras/logger@0.9.2':
+    resolution: {integrity: sha512-KTkQ9eKviChduHh36KuA7GcCC2HB3CRxrok5pvyt6gspTz7YCv/0c3U8ZdWIo8dCbQkzoEs98NayDaTMNITu6A==}
     engines: {node: '>=20'}
     peerDependencies:
       '@opentelemetry/sdk-logs': '>=0.200.0 <1.0.0'
@@ -1076,13 +1076,13 @@ packages:
     peerDependencies:
       vite: ^4 || ^5 || ^6 || ^7 || ^8
 
-  '@vitejs/plugin-react@6.1.1':
-    resolution: {integrity: sha512-yxLaQV9gkhS8ezJqCM6+ndU7mDY6gqAg75NQ+0IjwEI8IYOmQCgkRwHKVSfWXW076DsqMo0Dk+0FK1U+M5RgFw==}
+  '@vitejs/plugin-react@6.1.2':
+    resolution: {integrity: sha512-fhJNGUdscQa4HkI0xFxwonWyhnVReCPDbXI7FH7jmzpnVCrFQI7PRrhWecO263610vOrs9tr2Y4xcf8uAdFxbw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@rolldown/plugin-babel': ^0.1.7 || ^0.2.0
       babel-plugin-react-compiler: ^1.0.0
-      oxc-transform-react: ^0.145.0
+      oxc-transform-react: ^0.152.0
       vite: ^8.0.0
     peerDependenciesMeta:
       '@rolldown/plugin-babel':
@@ -1563,8 +1563,8 @@ packages:
   pino-std-serializers@7.1.0:
     resolution: {integrity: sha512-BndPH67/JxGExRgiX1dX0w1FvZck5Wa4aal9198SrRhZjH3GxKQUKIBnYJTdj2HDN3UQAS06HlfcSbQj2OHmaw==}
 
-  pino@10.3.1:
-    resolution: {integrity: sha512-r34yH/GlQpKZbU1BvFFqOjhISRo1MNx1tWYsYvmj6KIRHSPMT2+yHOEb1SG6NMvRoHRF0a07kCOox/9yakl1vg==}
+  pino@10.4.0:
+    resolution: {integrity: sha512-bk1ZMTwG/Vymx+zPoa28MhNzucFvXJWp3csrSuxuHPSMeUettaCoQ5Jvg07mtC4JGNpcfTwz41oVCnNgBK9+vA==}
     hasBin: true
 
   postcss@8.4.31:
@@ -1600,10 +1600,6 @@ packages:
   react@19.3.0:
     resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
     engines: {node: '>=0.10.0'}
-
-  real-require@0.2.0:
-    resolution: {integrity: sha512-57frrGM/OCTLqLOAh0mhVA9VBMHd+9U7Zb2THMGdBUoZVOtGbJzjxsYGDJ3A9AYYCP4hn6y1TVbaOfzWtm5GFg==}
-    engines: {node: '>= 12.13.0'}
 
   real-require@1.0.0:
     resolution: {integrity: sha512-P4nbQYQfePJxRSmY+v/KINxVucm4NF3p3s7pJveMTtom52FR4YGltUQLB8idDXwDDWW+eYrWDFbuzUnjoWHF7g==}
@@ -2051,10 +2047,10 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@eventuras/logger@0.9.1':
+  '@eventuras/logger@0.9.2':
     dependencies:
       '@opentelemetry/api-logs': 0.222.0
-      pino: 10.3.1
+      pino: 10.4.0
 
   '@exodus/bytes@1.16.0': {}
 
@@ -2541,7 +2537,7 @@ snapshots:
     transitivePeerDependencies:
       - '@swc/helpers'
 
-  '@vitejs/plugin-react@6.1.1(vite@8.3.0(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))':
+  '@vitejs/plugin-react@6.1.2(vite@8.3.0(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
       vite: 8.3.0(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1)
@@ -2941,7 +2937,7 @@ snapshots:
 
   pino-std-serializers@7.1.0: {}
 
-  pino@10.3.1:
+  pino@10.4.0:
     dependencies:
       '@pinojs/redact': 0.4.0
       atomic-sleep: 1.0.0
@@ -2950,7 +2946,7 @@ snapshots:
       pino-std-serializers: 7.1.0
       process-warning: 5.1.0
       quick-format-unescaped: 4.0.4
-      real-require: 0.2.0
+      real-require: 1.0.0
       safe-stable-stringify: 2.5.0
       sonic-boom: 4.2.1
       thread-stream: 4.2.0
@@ -2987,8 +2983,6 @@ snapshots:
   react-is@17.0.2: {}
 
   react@19.3.0: {}
-
-  real-require@0.2.0: {}
 
   real-require@1.0.0: {}
 
