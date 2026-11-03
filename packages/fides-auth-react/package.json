@@ -47,20 +47,20 @@
   "dependencies": {
     "@eventuras/fides-auth": "workspace:*",
     "@eventuras/fides-auth-store": "workspace:*",
-    "@eventuras/logger": "^0.9.1",
-    "@xstate/store-react": "^2.0.0"
+    "@eventuras/logger": "^0.9.2",
+    "@xstate/store-react": "^2.1.0"
   },
   "peerDependencies": {
-    "@xstate/store": "^4.2.3",
-    "@xstate/store-react": "^2.0.0",
+    "@xstate/store": "^4.3.0",
+    "@xstate/store-react": "^2.1.0",
     "react": "^19.0.0"
   },
   "devDependencies": {
     "@eventuras/typescript-config": "workspace:*",
     "@eventuras/vite-config": "workspace:*",
     "@types/react": "^19.3.0",
-    "@xstate/store": "^4.2.3",
-    "@xstate/store-react": "^2.0.0",
+    "@xstate/store": "^4.3.0",
+    "@xstate/store-react": "^2.1.0",
     "react": "^19.3.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
