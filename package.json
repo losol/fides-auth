@@ -6,11 +6,13 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "lint": "biome lint",
     "changeset": "changeset",
     "changeset:version": "changeset version",
     "changeset:tag": "changeset git-tag"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.6",
     "@changesets/cli": "^3.0.3",
     "turbo": "^2.11.10"
   }

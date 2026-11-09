@@ -64,6 +64,7 @@ export function createAuthStoreHooks(store: ReturnType<typeof createAuthStore>) 
   /**
    * Hook to access the auth store state
    */
+  // biome-ignore lint/correctness/noComponentHookFactories: the factory is called once at module scope
   function useAuthStore(): AuthStoreSelector {
     const snapshot = useStoreSelector(store, (snapshot) => snapshot);
     return snapshot.context;
@@ -72,6 +73,7 @@ export function createAuthStoreHooks(store: ReturnType<typeof createAuthStore>) 
   /**
    * Hook to get auth store actions
    */
+  // biome-ignore lint/correctness/noComponentHookFactories: the factory is called once at module scope
   function useAuthActions(): AuthStoreActions {
     return {
       loginSuccess: (user: SessionUser) => store.send({ type: 'loginSuccess', user }),

@@ -212,6 +212,7 @@ export async function sha512(data: string | Uint8Array): Promise<string> {
  * @returns {string} The session secret.
  */
 export function getSessionSecret(): string {
+  // biome-ignore lint/style/noRestrictedGlobals: getSessionSecret is removed in #117
   const secret = process.env.SESSION_SECRET;
   if (!secret) {
     throw new Error('SESSION_SECRET is not defined');
