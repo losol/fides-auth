@@ -1,14 +1,8 @@
 /**
  * Browser-compatible OAuth 2.0 + PKCE helpers
  *
- * This module provides OAuth 2.0 helpers that work in browser environments.
- * Unlike `oauth.ts` which uses openid-client (Node.js only), this uses
- * browser-native Web Crypto API for PKCE generation.
- *
- * **Use this in:**
- * - Vite/React SPAs
- * - Browser-only applications
- * - Any frontend that can't use Node.js APIs
+ * Deprecated and will be removed in a later minor. Use the server flow instead:
+ * `handleOidcLogin` / `handleOidcCallback` from `@eventuras/fides-auth/server`.
  *
  * **Usage:**
  * ```typescript
@@ -30,7 +24,10 @@
  * ```
  */
 
-/** Configuration for browser-side OAuth / OIDC flows (no client secret). */
+/**
+ * Configuration for browser-side OAuth / OIDC flows (no client secret).
+ * @deprecated Only used by the deprecated `oauth-browser` helpers. Use `handleOidcLogin` / `handleOidcCallback`.
+ */
 export interface OAuthConfig {
   issuer: string;
   clientId: string;
@@ -38,7 +35,10 @@ export interface OAuthConfig {
   scope: string;
 }
 
-/** PKCE parameters for a browser-initiated authorization request. */
+/**
+ * PKCE parameters for a browser-initiated authorization request.
+ * @deprecated Only used by the deprecated `oauth-browser` helpers. Use `handleOidcLogin`.
+ */
 export interface PKCEParams {
   code_verifier: string;
   code_challenge: string;
@@ -76,6 +76,7 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
 
 /**
  * Generate PKCE parameters for OAuth flow
+ * @deprecated The random strings have modulo bias. Use `handleOidcLogin`, which builds PKCE server-side.
  */
 export async function generatePKCE(): Promise<PKCEParams> {
   const code_verifier = generateRandomString(128);
@@ -91,6 +92,7 @@ export async function generatePKCE(): Promise<PKCEParams> {
 
 /**
  * Build authorization URL for OAuth flow
+ * @deprecated Hardcodes `${issuer}/auth` instead of using discovery. Use `handleOidcLogin`.
  */
 export function buildAuthorizationUrl(
   config: OAuthConfig,
@@ -111,6 +113,7 @@ export function buildAuthorizationUrl(
 
 /**
  * Exchange authorization code for tokens
+ * @deprecated Hardcodes `${issuer}/token` and doesn't validate the response. Use `handleOidcCallback`.
  */
 export async function exchangeCodeForTokens(
   config: OAuthConfig,
