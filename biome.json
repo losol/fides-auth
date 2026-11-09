@@ -1,0 +1,84 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "root": true,
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "assist": {
+    "enabled": false
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "packages/fides-auth/src/**",
+        "!packages/fides-auth/src/server/**",
+        "packages/fides-auth-store/src/**",
+        "packages/fides-auth-react/src/**"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "error"
+          },
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "Buffer": "Node-only. Use Uint8Array and TextEncoder.",
+                  "process": "Node-only. Take config as an argument instead.",
+                  "require": "Use an ESM import.",
+                  "__dirname": "Node-only. Use import.meta.url."
+                }
+              }
+            },
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["node:*"],
+                    "message": "Node built-ins don't run in browsers or edge runtimes."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/*.test.ts", "**/*.test.tsx"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "off"
+          },
+          "style": {
+            "noRestrictedGlobals": "off",
+            "noRestrictedImports": "off",
+            "noNonNullAssertion": "off"
+          },
+          "suspicious": {
+            "noExplicitAny": "off",
+            "useIterableCallbackReturn": "warn"
+          }
+        }
+      }
+    }
+  ]
+}
