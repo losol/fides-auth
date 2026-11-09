@@ -132,6 +132,17 @@ describe('handleOidcCallback — proxy callback path', () => {
 });
 
 describe('handleOidcCallback — guards', () => {
+  it('rejects an empty secret before reading the transaction', async () => {
+    const { store, jar } = memoryStore();
+    await startLogin(store);
+
+    await expect(
+      handleOidcCallback(callback('code=abc&state=xyz'), { ...baseConfig(store), secret: '' }),
+    ).rejects.toThrow('fides-auth: session secret is missing or empty');
+    expect(mockedExchange).not.toHaveBeenCalled();
+    expect(transactionCookies(jar)).toHaveLength(1);
+  });
+
   it('returns 429 when rate-limited', async () => {
     const { store } = memoryStore();
 

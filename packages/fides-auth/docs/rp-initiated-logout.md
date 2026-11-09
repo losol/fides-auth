@@ -21,13 +21,14 @@ import { handleOidcLogout } from "@eventuras/fides-auth/server";
 return handleOidcLogout(request, {
   oauthConfig,
   cookies,
+  secret: process.env.SESSION_SECRET!,
   postLogoutRedirectUri: "https://app.example.com/",
 });
 ```
 
 That reads the session's ID token, clears the local cookies, and redirects to the
-provider's end-session endpoint. Next.js apps can use the wrapper at
-`@eventuras/fides-auth-next/oidc-logout`.
+provider's end-session endpoint. Next.js apps get it from `createFidesAuth` in
+`@eventuras/fides-auth-next`, with the config and secret bound.
 
 ## Building the URL yourself
 

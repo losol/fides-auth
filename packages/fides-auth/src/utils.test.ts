@@ -10,8 +10,6 @@ import {
   sha512,
   generateToken,
   accessTokenExpires,
-  getSessionSecret,
-  getSessionSecretUint8Array,
   hasScope,
 } from './utils';
 
@@ -335,51 +333,6 @@ describe('accessTokenExpires', () => {
 
   it('returns true for a malformed token', () => {
     expect(accessTokenExpires('not-a-valid-jwt')).toBe(true);
-  });
-});
-
-// ────────────────────────────────────────────
-// getSessionSecret / getSessionSecretUint8Array
-// ────────────────────────────────────────────
-
-describe('getSessionSecret', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it('returns SESSION_SECRET from env', () => {
-    vi.stubEnv('SESSION_SECRET', TEST_SECRET);
-    expect(getSessionSecret()).toBe(TEST_SECRET);
-  });
-
-  it('throws when SESSION_SECRET is empty', () => {
-    vi.stubEnv('SESSION_SECRET', '');
-    expect(() => getSessionSecret()).toThrow('SESSION_SECRET is not defined');
-  });
-});
-
-describe('getSessionSecretUint8Array', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it('returns a Uint8Array derived from SESSION_SECRET', () => {
-    vi.stubEnv('SESSION_SECRET', TEST_SECRET);
-    const result = getSessionSecretUint8Array();
-    expect(result).toBeInstanceOf(Uint8Array);
-    expect(result.length).toBe(32); // 64 hex chars → 32 bytes
-  });
-
-  it('produces the same bytes as hexToUint8Array on the same secret', () => {
-    vi.stubEnv('SESSION_SECRET', TEST_SECRET);
-    const result = getSessionSecretUint8Array();
-    const expected = hexToUint8Array(TEST_SECRET);
-    expect(Array.from(result)).toEqual(Array.from(expected));
-  });
-
-  it('throws when SESSION_SECRET is not set', () => {
-    vi.stubEnv('SESSION_SECRET', '');
-    expect(() => getSessionSecretUint8Array()).toThrow('SESSION_SECRET is not defined');
   });
 });
 

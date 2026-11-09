@@ -206,34 +206,6 @@ export async function sha512(data: string | Uint8Array): Promise<string> {
 }
 
 /**
- * Retrieves the session secret from environment variables.
- * Throws an error if the SESSION_SECRET is not defined.
- *
- * @returns {string} The session secret.
- */
-export function getSessionSecret(): string {
-  // biome-ignore lint/style/noRestrictedGlobals: getSessionSecret is removed in #117
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) {
-    throw new Error('SESSION_SECRET is not defined');
-  }
-  return secret;
-}
-
-/**
- * Retrieves the session secret from environment variables as Uint8Array .
- * Throws an error if the SESSION_SECRET is not defined.
- *
- * @returns {Uint8Array} The session secret as Uint8Array.
- */
-export function getSessionSecretUint8Array(): Uint8Array {
-  const secret = getSessionSecret();
-  const keyData = hexToUint8Array(secret);
-  // Ensure it's backed by a regular ArrayBuffer (not SharedArrayBuffer)
-  return new Uint8Array([...keyData]);
-}
-
-/**
  * Converts a Uint8Array to a lowercase hexadecimal string.
  */
 export function toHex(bytes: Uint8Array): string {

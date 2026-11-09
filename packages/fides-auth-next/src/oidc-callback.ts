@@ -4,7 +4,10 @@
  * Next cookie store and the global GET rate limiter.
  */
 
-import { handleOidcCallback as coreHandleOidcCallback } from '@eventuras/fides-auth/server';
+import {
+  handleOidcCallback as coreHandleOidcCallback,
+  type SessionSecret,
+} from '@eventuras/fides-auth/server';
 import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
 
 import { nextCookieStore } from './cookie-store';
@@ -13,6 +16,9 @@ import { globalGETRateLimit } from './request';
 export interface OidcCallbackConfig {
   /** OAuth/OIDC configuration (issuer, clientId, clientSecret, redirect_uri, scope) */
   oauthConfig: OAuthConfig;
+
+  /** Opens the login transaction and encrypts the session. Must match the login's. */
+  secret: SessionSecret;
 
   /** Public application URL (used to reconstruct the callback URL and validate redirects) */
   applicationUrl: string;
@@ -43,7 +49,8 @@ export interface OidcCallbackConfig {
 }
 
 /**
- * Handles the OIDC callback in a Next.js route handler.
+ * Handles the OIDC callback in a Next.js route handler. `createFidesAuth` returns
+ * this with `oauthConfig` and `secret` bound.
  *
  * @example
  * ```ts
@@ -53,6 +60,7 @@ export interface OidcCallbackConfig {
  * export async function GET(request: Request) {
  *   return handleOidcCallback(request, {
  *     oauthConfig,
+ *     secret: process.env.SESSION_SECRET!,
  *     applicationUrl: 'https://example.com',
  *     rolesClaim: 'roles',
  *   });
@@ -67,6 +75,7 @@ export async function handleOidcCallback(
   // backwards compatibility but the core handler doesn't take it.
   return coreHandleOidcCallback(request, {
     oauthConfig: config.oauthConfig,
+    secret: config.secret,
     applicationUrl: config.applicationUrl,
     rolesClaim: config.rolesClaim,
     defaultRedirectPath: config.defaultRedirectPath,

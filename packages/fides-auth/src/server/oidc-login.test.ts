@@ -208,16 +208,33 @@ describe('handleOidcLogin', () => {
     expect(transaction?.returnTo).toBeUndefined();
   });
 
-  it('defaults the secret to SESSION_SECRET', async () => {
-    vi.stubEnv('SESSION_SECRET', secret);
+  it('seals with the configured secret, never SESSION_SECRET', async () => {
+    const envSecret = 'b'.repeat(64);
+    vi.stubEnv('SESSION_SECRET', envSecret);
     const { store } = memoryStore();
 
-    await handleOidcLogin(new Request('https://app.test/api/auth/login'), {
-      oauthConfig,
-      cookies: store,
-    });
+    await login(store);
 
     expect(await readTransaction(store, 'st', secret)).not.toBeNull();
+    expect(await readTransaction(store, 'st', envSecret)).toBeNull();
+  });
+
+  it.each([
+    ['an empty', '', 'missing or empty'],
+    ['a short', 'a'.repeat(32), 'must be 32 bytes'],
+  ])('rejects %s secret before contacting the provider', async (_, badSecret, message) => {
+    const { store, jar } = memoryStore();
+
+    await expect(
+      handleOidcLogin(new Request('https://app.test/api/auth/login'), {
+        oauthConfig,
+        cookies: store,
+        secret: badSecret,
+      }),
+    ).rejects.toThrow(message);
+    expect(mockedPkce).not.toHaveBeenCalled();
+    expect(mockedAuthUrl).not.toHaveBeenCalled();
+    expect(jar.size).toBe(0);
   });
 
   it('passes no extra parameters by default', async () => {
@@ -247,6 +264,7 @@ describe('handleOidcLogin', () => {
     const response = await handleOidcLogin(new Request('https://app.test/api/auth/login'), {
       oauthConfig,
       cookies: store,
+      secret,
       rateLimit: async () => false,
     });
 

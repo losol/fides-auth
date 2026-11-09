@@ -10,7 +10,7 @@ import { createLogger } from '../logger';
 import type { PKCEOptions } from '../oauth';
 import { createEncryptedJWT, decryptJWT, hexToUint8Array } from '../utils';
 import type { CookieStore } from './cookie-store';
-import type { SessionSecret } from './session-persistence';
+import { assertSessionSecret, type SessionSecret } from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:login-transaction' });
 
@@ -196,6 +196,8 @@ export function validateCallback(
 
 /** HKDF-SHA-256 of the secret, so a transaction and a session never share a key. */
 async function transactionKey(secret: SessionSecret): Promise<Uint8Array> {
+  // HKDF takes a key of any length; the session encryption doesn't.
+  assertSessionSecret(secret);
   const ikm = typeof secret === 'string' ? hexToUint8Array(secret) : secret;
   const base = await crypto.subtle.importKey('raw', ikm as BufferSource, 'HKDF', false, [
     'deriveBits',

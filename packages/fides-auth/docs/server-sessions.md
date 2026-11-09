@@ -23,13 +23,15 @@ import {
   clearSession,
 } from "@eventuras/fides-auth/server";
 
+const secret = process.env.SESSION_SECRET!;
 const persistence = serverPersistence({
   store: sessionStore, // your SessionStore — see below
-  secret: process.env.SESSION_SECRET!,
+  secret,
 });
 
-// Handlers: pass `persistence` where you passed `secret`.
-handleOidcCallback(request, { oauthConfig, applicationUrl, cookies, persistence });
+// Handlers: pass `persistence` where you passed `secret`. Login and callback
+// still take `secret`, which seals the login transaction.
+handleOidcCallback(request, { oauthConfig, applicationUrl, cookies, secret, persistence });
 handleHeartbeat(request, { oauthConfig, cookies, persistence });
 handleOidcLogout(request, { oauthConfig, cookies, postLogoutRedirectUri, persistence });
 
@@ -40,6 +42,9 @@ await clearSession(cookies, { trigger: "logout", persistence });
 
 Cookie persistence stays the default: a bare secret means
 `cookiePersistence(secret)`, and nothing changes for consumers that don't opt in.
+
+The secret is checked on first use, not when the persistence is created, so a
+module can build it at import time in a build that runs without the secret.
 
 `serverPersistence` takes two more options: `cookieName` (default
 `session_ref`) and `sessionDurationDays` (default 30), the absolute lifetime of

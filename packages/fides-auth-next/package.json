@@ -18,9 +18,9 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./session": {
-      "types": "./dist/session.d.ts",
-      "import": "./dist/session.js"
+    "./auth": {
+      "types": "./dist/auth.d.ts",
+      "import": "./dist/auth.js"
     },
     "./cookie-store": {
       "types": "./dist/cookie-store.d.ts",

@@ -17,6 +17,7 @@ export {
   serverPersistence,
   type ServerPersistenceOptions,
   type SessionPersistence,
+  type SessionPersistenceConfig,
   type SessionSecret,
 } from './session-persistence';
 

@@ -16,6 +16,7 @@ import type { Session } from '../types';
 import { createEncryptedJWT, sha256 } from '../utils';
 import type { CookieStore } from './cookie-store';
 import {
+  assertSessionSecret,
   cookiePersistence,
   serverPersistence,
   type ServerPersistenceOptions,
@@ -36,6 +37,65 @@ const secret = 'a'.repeat(64);
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe('assertSessionSecret', () => {
+  it.each([
+    ['64 hex characters', 'aB'.repeat(32)],
+    ['a 32-byte Uint8Array', new Uint8Array(32)],
+  ])('accepts %s', (_, value) => {
+    expect(() => assertSessionSecret(value)).not.toThrow();
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['an empty string', ''],
+    ['an empty Uint8Array', new Uint8Array(0)],
+  ])('reports %s as missing', (_, value) => {
+    expect(() => assertSessionSecret(value as never)).toThrow(
+      'fides-auth: session secret is missing or empty',
+    );
+  });
+
+  it.each([
+    ['a 16-byte hex key', 'a'.repeat(32)],
+    ['a 33-byte hex key', 'a'.repeat(66)],
+    ['non-hex text', 'z'.repeat(64)],
+    ['a 31-byte Uint8Array', new Uint8Array(31)],
+  ])('rejects %s as the wrong size', (_, value) => {
+    expect(() => assertSessionSecret(value)).toThrow('fides-auth: session secret must be 32 bytes');
+  });
+
+  it('fails session reads loudly instead of reporting no session', async () => {
+    const { cookies } = cookieJar({ session: 'anything', session_ref: 'handle' });
+    const unsetServer = serverPersistence({ store: createMemorySessionStore(), secret: '' });
+
+    for (const unset of [undefined, '', unsetServer]) {
+      await expect(tryReadSession(cookies, unset as never)).rejects.toThrow('missing or empty');
+      await expect(readIdToken(cookies, unset as never)).rejects.toThrow('missing or empty');
+      await expect(persistSession(cookies, baseSession(), unset as never)).rejects.toThrow(
+        'missing or empty',
+      );
+    }
+  });
+
+  it('accepts an unset secret at creation and rejects it on first use', async () => {
+    // Modules build these at import time, which a build may run without the secret.
+    const unset = undefined as never;
+    const server = serverPersistence({ store: createMemorySessionStore(), secret: unset });
+    const cookie = cookiePersistence(unset);
+    const { cookies } = cookieJar();
+
+    for (const persistence of [server, cookie]) {
+      await expect(persistence.read(cookies)).rejects.toThrow('missing or empty');
+      await expect(persistence.write(cookies, baseSession())).rejects.toThrow('missing or empty');
+      await expect(persistence.readIdToken(cookies)).rejects.toThrow('missing or empty');
+      await expect(persistence.clear(cookies)).rejects.toThrow('missing or empty');
+    }
+    await expect(server.exclusive?.(cookies, async () => 'ran')).rejects.toThrow(
+      'missing or empty',
+    );
+  });
 });
 
 /** An in-memory CookieStore that also remembers the options each cookie was set with. */

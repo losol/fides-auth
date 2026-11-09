@@ -183,6 +183,7 @@ const pkce = await buildPKCEOptions(oauthConfig, {
 return handleOidcLogin(request, {
   oauthConfig,
   cookies,
+  secret: process.env.SESSION_SECRET!,
   authorizationParameters: (request) =>
     new URL(request.url).searchParams.has("reauth") ? { prompt: "login" } : {},
 });
@@ -249,7 +250,7 @@ const logoutUrl = await buildOidcLogoutUrl(oauthConfig, {
 ```
 
 The `/server` entry point wraps the whole dance — read the hint, clear the cookies,
-redirect:
+redirect. Its handlers never read the environment; pass the session `secret` in:
 
 ```typescript
 import { handleOidcLogout } from "@eventuras/fides-auth/server";
@@ -257,6 +258,7 @@ import { handleOidcLogout } from "@eventuras/fides-auth/server";
 return handleOidcLogout(request, {
   oauthConfig,
   cookies,
+  secret: process.env.SESSION_SECRET!,
   postLogoutRedirectUri: "https://app.example.com/",
 });
 ```
@@ -281,7 +283,8 @@ const persistence = serverPersistence({
 return handleHeartbeat(request, { oauthConfig, cookies, persistence });
 ```
 
-Every handler and session helper takes `persistence` where it took `secret`.
+Logout, heartbeat and the session helpers take `persistence` in place of
+`secret`. The callback takes both: `secret` also opens the login transaction.
 The store gets encrypted records keyed by a hash of the handle; `clearSession`
 deletes the record, so logout revokes a copied cookie too. See
 [docs/server-sessions.md](./docs/server-sessions.md).
@@ -293,10 +296,9 @@ into one of three `__Host-oauth_tx_<n>` cookies, so parallel logins don't
 collide; a fourth evicts the oldest, and a `returnTo` over 1 KB as JSON is dropped. With
 an `http:` `redirect_uri` (plain-http development) the cookie is a plain,
 non-Secure `oauth_tx_<n>`. `handleOidcCallback` rejects it after 10 minutes and
-deletes it whatever the outcome. Pass both handlers the same `secret` (default
-`SESSION_SECRET`). A denied or cancelled login redirects to
-`defaultRedirectPath` with `?login=error&error=<code>`, or
-`error=login_expired` once the login has ended.
+deletes it whatever the outcome. Pass both handlers the same `secret`. A denied
+or cancelled login redirects to `defaultRedirectPath` with
+`?login=error&error=<code>`, or `error=login_expired` once the login has ended.
 
 Custom flows use the same helpers. Pass them the handlers' cookie options, so a
 custom login and the built-in callback (or the reverse) agree on the cookie:

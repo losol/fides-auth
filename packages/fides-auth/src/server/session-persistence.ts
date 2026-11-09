@@ -34,6 +34,37 @@ const logger = createLogger({ namespace: 'fides-auth:server:session-persistence'
 /** A session encryption key: 32 bytes for A256GCM, as hex or raw bytes. */
 export type SessionSecret = string | Uint8Array;
 
+/** A missing or malformed session secret: a configuration error, never a bad cookie. */
+export class SessionSecretError extends TypeError {
+  override name = 'SessionSecretError';
+}
+
+/** Throws unless `secret` is the 32 bytes A256GCM needs. Never echoes the secret. */
+export function assertSessionSecret(secret: SessionSecret): void {
+  if (!secret || secret.length === 0) {
+    throw new SessionSecretError('fides-auth: session secret is missing or empty');
+  }
+  const valid =
+    secret instanceof Uint8Array
+      ? secret.length === 32
+      : typeof secret === 'string' && /^[0-9a-fA-F]{64}$/.test(secret);
+  if (!valid) {
+    throw new SessionSecretError(
+      'fides-auth: session secret must be 32 bytes (64 hex characters or a Uint8Array)',
+    );
+  }
+}
+
+/** Where a handler finds the session: the cookies under `secret`, or `persistence`. One is required. */
+export type SessionPersistenceConfig =
+  | {
+    /** Session encryption secret for the default cookie persistence. */
+    secret: SessionSecret;
+    /** Where the session lives; wins over `secret`. See {@link serverPersistence}. */
+    persistence?: SessionPersistence;
+  }
+  | { secret?: undefined; persistence: SessionPersistence };
+
 /** Outcome of reading the session: a session, or why there isn't one. */
 export type ReadSessionResult =
   | { session: Session; reason?: undefined }
@@ -84,9 +115,16 @@ export interface SessionPersistence {
 
 /** Accepts the pre-0.15 bare secret wherever a persistence is expected. */
 export function resolvePersistence(value: SessionSecret | SessionPersistence): SessionPersistence {
-  return typeof value === 'string' || value instanceof Uint8Array
-    ? cookiePersistence(value)
-    : value;
+  // Anything but a persistence is a secret, so an unset one reaches the check.
+  return typeof value === 'object' && value !== null && !(value instanceof Uint8Array)
+    ? value
+    : cookiePersistence(value);
+}
+
+/** The configured `persistence`, else the bare `secret`. */
+export function persistenceFrom(config: SessionPersistenceConfig): SessionSecret | SessionPersistence {
+  if (config.secret === undefined) return config.persistence;
+  return config.persistence ?? config.secret;
 }
 
 const SPLIT_COOKIE_NAMES = [SESSION_COOKIE_NAME, ACCESS_TOKEN_COOKIE_NAME, ID_TOKEN_COOKIE_NAME];
@@ -114,10 +152,12 @@ function checkSize(name: string, value: string): number {
  * `session_it` cookies.
  */
 export function cookiePersistence(secret: SessionSecret): SessionPersistence {
+  // Checked on use, so a module may build this at import time without the secret.
   return {
     mode: 'cookie',
 
     async write(cookies, session) {
+      assertSessionSecret(secret);
       const encoded = await encodeSessionCookies(session, secret);
       const values: Array<[string, string | undefined]> = [
         [SESSION_COOKIE_NAME, encoded.session],
@@ -146,6 +186,7 @@ export function cookiePersistence(secret: SessionSecret): SessionPersistence {
     },
 
     async read(cookies) {
+      assertSessionSecret(secret);
       return tryDecodeSessionCookies(
         {
           session: (await cookies.get(SESSION_COOKIE_NAME)) ?? null,
@@ -157,11 +198,15 @@ export function cookiePersistence(secret: SessionSecret): SessionPersistence {
     },
 
     async readIdToken(cookies) {
+      assertSessionSecret(secret);
       const raw = await cookies.get(ID_TOKEN_COOKIE_NAME);
       return raw ? decodeIdTokenCookie(raw, secret) : undefined;
     },
 
-    clear: clearSessionCookies,
+    async clear(cookies) {
+      assertSessionSecret(secret);
+      await clearSessionCookies(cookies);
+    },
   };
 }
 
@@ -196,6 +241,7 @@ export function serverPersistence(options: ServerPersistenceOptions): SessionPer
     cookieName = SESSION_REF_COOKIE_NAME,
     sessionDurationDays = 30,
   } = options;
+  // Checked on use, so a module may build this at import time without the secret.
   const maxAge = sessionDurationDays * 24 * 60 * 60;
   const inflight = new Map<string, Promise<unknown>>();
 
@@ -241,6 +287,7 @@ export function serverPersistence(options: ServerPersistenceOptions): SessionPer
     mode: 'server',
 
     async write(cookies, session, { continuation = false } = {}) {
+      assertSessionSecret(secret);
       // Same rule as on read, so a session is never stored that reads back as null.
       if (!isSession(session)) {
         throw new TypeError('A session needs a tokens or user object');
@@ -275,6 +322,7 @@ export function serverPersistence(options: ServerPersistenceOptions): SessionPer
     },
 
     async read(cookies) {
+      assertSessionSecret(secret);
       const current = await locate(cookies);
       if (!current) {
         // Split cookies but no handle: a consumer that just switched modes.
@@ -286,12 +334,14 @@ export function serverPersistence(options: ServerPersistenceOptions): SessionPer
     },
 
     async readIdToken(cookies) {
+      assertSessionSecret(secret);
       const current = await locate(cookies);
       if (!current) return undefined;
       return (await readRecord(current.key)).session?.tokens?.idToken;
     },
 
     async clear(cookies) {
+      assertSessionSecret(secret);
       // Record first: once it is gone a copied cookie is dead, whatever
       // happens to the cookie itself.
       const current = await locate(cookies);
@@ -303,6 +353,7 @@ export function serverPersistence(options: ServerPersistenceOptions): SessionPer
     },
 
     async exclusive<T>(cookies: CookieStore, fn: () => Promise<T>): Promise<T> {
+      assertSessionSecret(secret);
       const current = await locate(cookies);
       if (!current) return fn();
 

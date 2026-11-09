@@ -4,7 +4,10 @@
  * Next cookie store and the global POST rate limiter.
  */
 
-import { handleOidcLogout as coreHandleOidcLogout } from '@eventuras/fides-auth/server';
+import {
+  handleOidcLogout as coreHandleOidcLogout,
+  type SessionSecret,
+} from '@eventuras/fides-auth/server';
 import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
 
 import { nextCookieStore } from './cookie-store';
@@ -13,6 +16,9 @@ import { globalPOSTRateLimit } from './request';
 export interface OidcLogoutConfig {
   /** OAuth/OIDC configuration */
   oauthConfig: OAuthConfig;
+
+  /** Session encryption secret. */
+  secret: SessionSecret;
 
   /**
    * URI the provider redirects back to after logout. Must be registered with the
@@ -45,6 +51,7 @@ export interface OidcLogoutConfig {
 /**
  * Handles logout in a Next.js route handler: clears the session cookies and
  * redirects to the provider's end-session endpoint with `id_token_hint`.
+ * `createFidesAuth` returns this with `oauthConfig` and `secret` bound.
  *
  * @example
  * ```ts
@@ -54,6 +61,7 @@ export interface OidcLogoutConfig {
  * export async function POST(request: Request) {
  *   return handleOidcLogout(request, {
  *     oauthConfig,
+ *     secret: process.env.SESSION_SECRET!,
  *     postLogoutRedirectUri: 'https://example.com/',
  *   });
  * }
@@ -65,6 +73,7 @@ export async function handleOidcLogout(
 ): Promise<Response> {
   return coreHandleOidcLogout(request, {
     oauthConfig: config.oauthConfig,
+    secret: config.secret,
     postLogoutRedirectUri: config.postLogoutRedirectUri,
     state: config.state,
     logoutHint: config.logoutHint,
