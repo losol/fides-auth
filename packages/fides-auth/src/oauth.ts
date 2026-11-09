@@ -50,6 +50,12 @@ export type OAuthConfig = ClientAuthConfig & {
    * `pushed_authorization_request_endpoint` in its discovery metadata.
    */
   usePar?: boolean;
+  /**
+   * Server metadata to use instead of OIDC discovery, e.g. an RFC 8414 document.
+   * Must include `issuer` when `scope` has `openid`. `issuer` above is then used
+   * only for logs and caching.
+   */
+  serverMetadata?: openid.ServerMetadata;
 };
 
 /**

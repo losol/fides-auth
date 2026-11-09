@@ -127,6 +127,26 @@ for `client_secret_post`:
 
 `clientCredentialsGrant` takes the same options except `none`.
 
+#### Server metadata instead of discovery
+
+If the server publishes its metadata somewhere other than
+`/.well-known/openid-configuration` (an RFC 8414 document, say), fetch it
+yourself and pass it as `serverMetadata`. fides-auth then skips discovery:
+
+```typescript
+const oauthConfig: OAuthConfig = {
+  issuer: "https://auth.example.com",
+  clientId: "your-client-id",
+  clientAuth: "none",
+  redirect_uri: "https://app.example.com/callback",
+  scope: "openid profile",
+  serverMetadata: await fetch(metadataUrl).then((r) => r.json()),
+};
+```
+
+With `openid` in the scope the metadata must include `issuer`, so the ID token's
+`iss` can be checked.
+
 #### Pushed Authorization Requests (PAR, RFC 9126)
 
 Opt in by setting `usePar: true` on your `OAuthConfig`. The convenience

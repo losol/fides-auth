@@ -9,6 +9,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('openid-client', () => ({
   discovery: vi.fn(),
+  Configuration: vi.fn(function (this: Record<string, unknown>, server: unknown) {
+    this.server = server;
+  }),
   refreshTokenGrant: vi.fn(),
   ClientSecretPost: vi.fn(() => () => undefined),
   ClientSecretBasic: vi.fn(() => () => undefined),
@@ -190,6 +193,69 @@ describe('discoverConfiguration — caching', () => {
     await discoverConfiguration(keyConfig({ key: keyA, kid: '2' }));
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('discoverConfiguration — serverMetadata', () => {
+  const metadata = {
+    issuer: config.issuer,
+    token_endpoint: `${config.issuer}/token`,
+  } as openid.ServerMetadata;
+  const withMetadata: OAuthConfig = { ...config, serverMetadata: metadata };
+
+  it('builds the configuration without discovering', async () => {
+    await discoverConfiguration(withMetadata);
+
+    expect(openid.discovery).not.toHaveBeenCalled();
+    expect(openid.Configuration).toHaveBeenCalledWith(
+      metadata,
+      config.clientId,
+      'secret-a',
+      expect.any(Function),
+    );
+  });
+
+  it('caches it like a discovered configuration', async () => {
+    const a = await discoverConfiguration(withMetadata);
+    const b = await discoverConfiguration(withMetadata);
+
+    expect(openid.Configuration).toHaveBeenCalledTimes(1);
+    expect(b).toBe(a);
+  });
+
+  it('does not serve a discovered entry once serverMetadata is set', async () => {
+    vi.mocked(openid.discovery).mockResolvedValue(discovered('discovered'));
+
+    await discoverConfiguration(config);
+    const built = await discoverConfiguration(withMetadata);
+
+    expect(openid.Configuration).toHaveBeenCalledTimes(1);
+    expect(built).not.toEqual(discovered('discovered'));
+  });
+
+  it('treats new metadata as a new entry', async () => {
+    await discoverConfiguration(withMetadata);
+    await discoverConfiguration({ ...config, serverMetadata: { ...metadata } });
+
+    expect(openid.Configuration).toHaveBeenCalledTimes(2);
+  });
+
+  it('requires issuer when the scope includes openid', async () => {
+    // Without it the ID token's `iss` cannot be checked.
+    const noIssuer = { token_endpoint: metadata.token_endpoint } as openid.ServerMetadata;
+
+    await expect(
+      discoverConfiguration({ ...config, scope: 'profile openid', serverMetadata: noIssuer }),
+    ).rejects.toThrow(/serverMetadata\.issuer is required/);
+    expect(openid.Configuration).not.toHaveBeenCalled();
+  });
+
+  it('allows a missing issuer when openid is not requested', async () => {
+    const noIssuer = { token_endpoint: metadata.token_endpoint } as openid.ServerMetadata;
+
+    await discoverConfiguration({ ...config, scope: 'api:read', serverMetadata: noIssuer });
+
+    expect(openid.Configuration).toHaveBeenCalledTimes(1);
   });
 });
 

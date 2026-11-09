@@ -40,8 +40,9 @@ interface CacheEntry {
   configuration: Promise<openid.Configuration>;
   expiresAt: number;
   /**
-   * The secret or private key this entry was built with, compared on lookup so a
-   * rotated credential invalidates the entry without going into the cache key.
+   * The server metadata and secret or private key this entry was built with,
+   * compared on lookup so a change invalidates the entry without the credential
+   * going into the cache key.
    */
   inputs: readonly unknown[];
 }
@@ -142,16 +143,17 @@ function cacheKey(config: OAuthConfig): string {
 
 /** The values an entry must have been built from, compared by identity. */
 function cacheInputs(config: OAuthConfig): readonly unknown[] {
+  const metadata = config.serverMetadata;
   switch (config.clientAuth) {
     case 'none':
-      return [];
+      return [metadata];
     case 'private_key_jwt': {
       // A `{ key, kid }` wrapper may be rebuilt per call; compare what it holds.
       const pk = config.privateKey;
-      return 'key' in pk ? [pk.key, pk.kid] : [pk, undefined];
+      return 'key' in pk ? [metadata, pk.key, pk.kid] : [metadata, pk, undefined];
     }
     default:
-      return [config.clientSecret];
+      return [metadata, config.clientSecret];
   }
 }
 
@@ -159,19 +161,38 @@ function sameInputs(a: readonly unknown[], b: readonly unknown[]): boolean {
   return a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
 }
 
+/** Unset scope means `defaultScope`, which includes `openid`. */
+function requestsOpenId(scope: string | undefined): boolean {
+  return scope === undefined || scope.split(/\s+/).includes('openid');
+}
+
 /** Async so a bad config rejects like a failed discovery and is never cached. */
 async function buildConfiguration(config: OAuthConfig): Promise<openid.Configuration> {
   const { clientSecret, clientAuthentication } = resolveClientAuth(config);
-  return openid.discovery(
-    new URL(config.issuer),
-    config.clientId,
-    clientSecret,
-    clientAuthentication,
-  );
+  const metadata = config.serverMetadata;
+
+  if (!metadata) {
+    return openid.discovery(
+      new URL(config.issuer),
+      config.clientId,
+      clientSecret,
+      clientAuthentication,
+    );
+  }
+
+  // Don't fall back to `config.issuer`: the ID token's `iss` must match the server's own.
+  if (!metadata.issuer && requestsOpenId(config.scope)) {
+    throw new TypeError(
+      'serverMetadata.issuer is required when scope includes "openid", to check the ID token',
+    );
+  }
+
+  return new openid.Configuration(metadata, config.clientId, clientSecret, clientAuthentication);
 }
 
 /**
- * Discovers the provider's OpenID configuration, reusing a recent result.
+ * Discovers the provider's OpenID configuration, or builds it from
+ * `config.serverMetadata`, reusing a recent result.
  *
  * @param config - OAuth configuration identifying the provider and client.
  * @returns The openid-client `Configuration` for this provider and client.
@@ -188,7 +209,12 @@ export async function discoverConfiguration(
     return cached.configuration;
   }
 
-  logger.debug({ issuer: config.issuer }, 'Discovering OpenID configuration');
+  logger.debug(
+    { issuer: config.issuer },
+    config.serverMetadata
+      ? 'Building configuration from server metadata'
+      : 'Discovering OpenID configuration',
+  );
 
   const configuration = buildConfiguration(config);
 
