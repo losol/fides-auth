@@ -11,6 +11,7 @@ vi.mock('../oauth', () => ({
 
 import { handleOidcLogin } from './oidc-login';
 import { buildPKCEOptions, discoverAndBuildAuthorizationUrl } from '../oauth';
+import type { CookieOptions } from '../cookies';
 import type { CookieStore } from './cookie-store';
 import { readTransaction } from './login-transaction';
 
@@ -21,12 +22,16 @@ const secret = 'a'.repeat(64);
 
 function memoryStore() {
   const jar = new Map<string, string>();
+  const options = new Map<string, CookieOptions | undefined>();
   const store: CookieStore = {
     get: (name) => jar.get(name) ?? null,
-    set: (name, value) => { jar.set(name, value); },
+    set: (name, value, opts) => {
+      jar.set(name, value);
+      options.set(name, opts);
+    },
     delete: (name) => { jar.delete(name); },
   };
-  return { store, jar };
+  return { store, jar, options };
 }
 
 const oauthConfig = {
@@ -56,16 +61,36 @@ afterEach(() => {
 
 describe('handleOidcLogin', () => {
   it('seals the login transaction and redirects to the authorization endpoint', async () => {
-    const { store, jar } = memoryStore();
+    const { store, jar, options } = memoryStore();
     const response = await login(store);
 
     expect(response.status).toBe(302);
     expect(response.headers.get('Location')).toBe('https://id.example.test/authorize?x=1');
-    expect([...jar.keys()]).toEqual([expect.stringMatching(/^oauth_tx_/)]);
+    expect([...jar.keys()]).toEqual(['__Host-oauth_tx_0']);
+    expect(options.get('__Host-oauth_tx_0')).toEqual({
+      path: '/',
+      maxAge: 600,
+      sameSite: 'lax',
+      httpOnly: true,
+      secure: true,
+    });
 
     const transaction = await readTransaction(store, 'st', secret);
     expect(transaction).toMatchObject({ state: 'st', codeVerifier: 'cv' });
     expect(transaction?.returnTo).toBeUndefined();
+  });
+
+  it('uses a plain, non-Secure cookie when the redirect_uri is http', async () => {
+    const { store, options } = memoryStore();
+    await handleOidcLogin(new Request('http://dev.test/api/auth/login'), {
+      oauthConfig: { ...oauthConfig, redirect_uri: 'http://dev.test/api/auth/callback/oidc' },
+      cookies: store,
+      secret,
+    });
+
+    expect([...options.keys()]).toEqual(['oauth_tx_0']);
+    expect(options.get('oauth_tx_0')?.secure).toBe(false);
+    expect(await readTransaction(store, 'st', secret, { secure: false })).not.toBeNull();
   });
 
   it('seals a valid returnTo into the transaction', async () => {

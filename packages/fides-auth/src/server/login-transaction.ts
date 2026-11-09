@@ -16,6 +16,10 @@ const logger = createLogger({ namespace: 'fides-auth:server:login-transaction' }
 
 const COOKIE_NAME = 'oauth_tx_';
 
+// Only a Secure cookie with Path=/ and no Domain may carry it, so a sibling
+// subdomain cannot plant a transaction.
+const HOST_PREFIX = '__Host-';
+
 /** Live logins per browser. Another login evicts the oldest. */
 const MAX_TRANSACTIONS = 3;
 
@@ -59,6 +63,11 @@ export interface CreateTransactionOptions {
   returnTo?: string | null;
 }
 
+export interface TransactionCookieOptions {
+  /** A Secure, `__Host-` prefixed cookie. Turn off only for plain-http development. @default true */
+  secure?: boolean;
+}
+
 export interface ValidateCallbackOptions {
   /** @default 600000 (10 minutes) */
   maxAgeMs?: number;
@@ -83,16 +92,17 @@ export function createTransaction(
 }
 
 /**
- * Seals the transaction into a free `oauth_tx_<n>` slot, or the oldest login's.
- * Throws `CookieTooLargeError` if it would not fit in a cookie.
+ * Seals the transaction into a free `__Host-oauth_tx_<n>` slot, or the oldest
+ * login's. Throws `CookieTooLargeError` if it would not fit in a cookie.
  */
 export async function persistTransaction(
   cookies: CookieStore,
   transaction: LoginTransaction,
   secret: SessionSecret,
+  { secure = true }: TransactionCookieOptions = {},
 ): Promise<void> {
   const key = await transactionKey(secret);
-  const slots = await readSlots(cookies, key);
+  const slots = await readSlots(cookies, key, secure);
   const slot =
     slots.find((candidate) => !candidate.transaction) ??
     slots.reduce((oldest, candidate) =>
@@ -103,7 +113,7 @@ export async function persistTransaction(
 
   const value = await createEncryptedJWT(transaction, key);
   assertCookieWithinLimit(slot.name, value);
-  await cookies.set(slot.name, value, defaultOAuthCookieOptions);
+  await cookies.set(slot.name, value, { ...defaultOAuthCookieOptions, secure });
 }
 
 /** The transaction for `state`, or null when none is stored or it does not open under `secret`. */
@@ -111,8 +121,9 @@ export async function readTransaction(
   cookies: CookieStore,
   state: string,
   secret: SessionSecret,
+  { secure = true }: TransactionCookieOptions = {},
 ): Promise<LoginTransaction | null> {
-  const slots = await readSlots(cookies, await transactionKey(secret));
+  const slots = await readSlots(cookies, await transactionKey(secret), secure);
   const match = findSlot(slots, state);
   if (match) return match.transaction;
 
@@ -128,9 +139,21 @@ export async function clearTransaction(
   cookies: CookieStore,
   state: string,
   secret: SessionSecret,
+  { secure = true }: TransactionCookieOptions = {},
 ): Promise<void> {
-  const match = findSlot(await readSlots(cookies, await transactionKey(secret)), state);
-  if (match) await cookies.delete(match.name);
+  const match = findSlot(await readSlots(cookies, await transactionKey(secret), secure), state);
+  if (!match) return;
+  if (secure) {
+    // A plain delete is not Secure, and the browser ignores it for a __Host- cookie.
+    await cookies.set(match.name, '', { ...defaultOAuthCookieOptions, secure, maxAge: 0 });
+  } else {
+    await cookies.delete(match.name);
+  }
+}
+
+/** Handler default: Secure unless the callback itself is plain http. */
+export function transactionCookieOptions(redirectUri: string): TransactionCookieOptions {
+  return { secure: !/^http:/i.test(redirectUri) };
 }
 
 /**
@@ -186,8 +209,9 @@ interface Slot {
   transaction: LoginTransaction | null;
 }
 
-async function readSlots(cookies: CookieStore, key: Uint8Array): Promise<Slot[]> {
-  const names = Array.from({ length: MAX_TRANSACTIONS }, (_, i) => `${COOKIE_NAME}${i}`);
+async function readSlots(cookies: CookieStore, key: Uint8Array, secure: boolean): Promise<Slot[]> {
+  const prefix = secure ? HOST_PREFIX : '';
+  const names = Array.from({ length: MAX_TRANSACTIONS }, (_, i) => `${prefix}${COOKIE_NAME}${i}`);
   return Promise.all(
     names.map(async (name) => {
       const value = await cookies.get(name);

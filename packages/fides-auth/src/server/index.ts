@@ -44,6 +44,7 @@ export {
   type CallbackValidationReason,
   type CreateTransactionOptions,
   type LoginTransaction,
+  type TransactionCookieOptions,
   type ValidateCallbackOptions,
 } from './login-transaction';
 
