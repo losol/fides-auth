@@ -75,6 +75,10 @@
       "types": "./dist/oauth-logging.d.ts",
       "import": "./dist/oauth-logging.js"
     },
+    "./pkce": {
+      "types": "./dist/pkce.d.ts",
+      "import": "./dist/pkce.js"
+    },
     "./oauth-browser": {
       "types": "./dist/oauth-browser.d.ts",
       "import": "./dist/oauth-browser.js"

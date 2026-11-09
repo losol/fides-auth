@@ -5,6 +5,7 @@ import * as openid from 'openid-client';
 import { createLogger } from './logger';
 import { getOAuthErrorLogContext } from './oauth-logging';
 import { discoverConfiguration, resolveClientAuth } from './oidc-discovery';
+import { createPkcePair, createState } from './pkce';
 import { newSessionId } from './session-events';
 import type { Session } from './types';
 
@@ -119,6 +120,7 @@ export interface PKCEOptions {
 
 /**
  * Creates PKCE parameters for an OAuth flow.
+ * For the verifier, challenge or state alone, use `createPkcePair` / `createState` from `/pkce`.
  *
  * @param config - OAuthConfig configuration including the redirect URI and scope.
  * @returns A promise that resolves to an object containing:
@@ -128,9 +130,8 @@ export interface PKCEOptions {
  *  - parameters: A Record<string,string> with the assembled parameters.
  */
 export async function buildPKCEOptions(config: OAuthConfig): Promise<PKCEOptions> {
-  const code_verifier = openid.randomPKCECodeVerifier();
-  const code_challenge = await openid.calculatePKCECodeChallenge(code_verifier);
-  const state = openid.randomState();
+  const { verifier: code_verifier, challenge: code_challenge } = await createPkcePair();
+  const state = createState();
 
   const parameters: Record<string, string> = {
     redirect_uri: config.redirect_uri,
@@ -140,7 +141,7 @@ export async function buildPKCEOptions(config: OAuthConfig): Promise<PKCEOptions
     state,
   };
 
-  logger.info(
+  logger.debug(
     { redirectUri: config.redirect_uri, scope: parameters.scope },
     'PKCE parameters generated'
   );

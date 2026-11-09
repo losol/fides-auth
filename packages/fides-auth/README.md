@@ -77,6 +77,7 @@ Each module is available as a separate entry point for tree-shaking:
 | ------------------------------------------ | ----------- | ----------------------------------------------------- |
 | `@eventuras/fides-auth`                    | Node.js     | Main entry — re-exports utils, session, types, logger |
 | `@eventuras/fides-auth/oauth`              | Node.js     | OAuth/OIDC flows with `openid-client`                 |
+| `@eventuras/fides-auth/pkce`               | Universal   | PKCE verifier/challenge and `state` (Web Crypto)      |
 | `@eventuras/fides-auth/oauth-browser`      | Browser     | **Deprecated** — OAuth/OIDC flows with Web Crypto API |
 | `@eventuras/fides-auth/session-validation` | Node.js     | Encrypted JWT session validation                      |
 | `@eventuras/fides-auth/session-refresh`    | Node.js     | Automatic token refresh for sessions                  |
@@ -146,6 +147,20 @@ const oauthConfig: OAuthConfig = {
 
 With `openid` in the scope the metadata must include `issuer`, so the ID token's
 `iss` can be checked.
+
+#### PKCE and state (`/pkce`)
+
+For flows that manage their own login transaction. Web Crypto only, so it also
+runs in the browser and on edge runtimes:
+
+```typescript
+import { createPkcePair, createState } from "@eventuras/fides-auth/pkce";
+
+const { verifier, challenge } = await createPkcePair(); // S256
+const state = createState();
+```
+
+`buildPKCEOptions` is built on the same two functions.
 
 #### Pushed Authorization Requests (PAR, RFC 9126)
 

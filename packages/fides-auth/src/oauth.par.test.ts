@@ -16,9 +16,6 @@ vi.mock('openid-client', () => ({
   buildAuthorizationUrl: vi.fn(),
   buildAuthorizationUrlWithPAR: vi.fn(),
   ClientSecretPost: vi.fn(() => () => undefined),
-  randomPKCECodeVerifier: vi.fn(() => 'verifier-123'),
-  calculatePKCECodeChallenge: vi.fn(async () => 'challenge-abc'),
-  randomState: vi.fn(() => 'state-xyz'),
 }));
 
 import * as openid from 'openid-client';
