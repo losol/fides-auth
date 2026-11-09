@@ -153,6 +153,28 @@ describe('handleOidcLogin', () => {
     expect(await readTransaction(store, 'st', secret)).not.toBeNull();
   });
 
+  it('passes no extra parameters by default', async () => {
+    const { store } = memoryStore();
+    await login(store);
+
+    expect(mockedPkce).toHaveBeenCalledWith(oauthConfig, { parameters: undefined });
+  });
+
+  it('passes per-request authorization parameters to buildPKCEOptions', async () => {
+    const { store } = memoryStore();
+    const request = new Request('https://app.test/api/auth/login?hint=user%40example.com');
+    const authorizationParameters = vi.fn(async (req: Request) => ({
+      login_hint: new URL(req.url).searchParams.get('hint') ?? '',
+    }));
+
+    await handleOidcLogin(request, { oauthConfig, cookies: store, secret, authorizationParameters });
+
+    expect(authorizationParameters).toHaveBeenCalledWith(request);
+    expect(mockedPkce).toHaveBeenCalledWith(oauthConfig, {
+      parameters: { login_hint: 'user@example.com' },
+    });
+  });
+
   it('returns 429 when rate-limited, without touching cookies', async () => {
     const { store, jar } = memoryStore();
     const response = await handleOidcLogin(new Request('https://app.test/api/auth/login'), {

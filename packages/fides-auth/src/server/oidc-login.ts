@@ -39,6 +39,15 @@ export interface OidcLoginConfig {
    * @default Only allows relative paths starting with a single `/`.
    */
   validateReturnTo?: (rawReturnTo: string) => string | null;
+
+  /**
+   * Per-request authorization parameters, merged over `oauthConfig.authorizationParameters`.
+   * Reserved keys throw: `state`, `code_challenge`, `code_challenge_method`, `redirect_uri`,
+   * `client_id`, `response_type`, `request`, `request_uri` and `nonce`.
+   */
+  authorizationParameters?: (
+    request: Request,
+  ) => Record<string, string> | Promise<Record<string, string>>;
 }
 
 const defaultValidateReturnTo = (raw: string): string | null =>
@@ -63,7 +72,8 @@ export async function handleOidcLogin(
   const rawReturnTo = url.searchParams.get('returnTo');
   const returnTo = rawReturnTo ? validateReturnTo(rawReturnTo) : null;
 
-  const pkce = await buildPKCEOptions(oauthConfig);
+  const parameters = await config.authorizationParameters?.(request);
+  const pkce = await buildPKCEOptions(oauthConfig, { parameters });
   const authorizationUrl = await discoverAndBuildAuthorizationUrl(oauthConfig, pkce);
 
   await persistTransaction(

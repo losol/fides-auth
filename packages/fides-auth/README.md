@@ -162,6 +162,41 @@ const state = createState();
 
 `buildPKCEOptions` is built on the same two functions.
 
+#### Scope and extra authorization parameters
+
+`scope` takes a string or an array. Other authorization parameters (`prompt`,
+`login_hint`, `resource`, …) can be set on the config, per call, or per request
+in `handleOidcLogin`. They go through PAR too.
+
+```typescript
+const oauthConfig = {
+  // …
+  scope: ["openid", "profile", "offline_access"],
+  authorizationParameters: { resource: "https://api.example.com" },
+};
+
+const pkce = await buildPKCEOptions(oauthConfig, {
+  parameters: { login_hint: "user@example.com" },
+});
+
+// Or per request in the server handler
+return handleOidcLogin(request, {
+  oauthConfig,
+  cookies,
+  authorizationParameters: (request) =>
+    new URL(request.url).searchParams.has("reauth") ? { prompt: "login" } : {},
+});
+```
+
+Per-call parameters override the config's, and a `scope` among them replaces
+`OAuthConfig.scope`. These keys are reserved, and passing one throws:
+
+- `state`, `code_challenge`, `code_challenge_method` and `redirect_uri`, which
+  fides-auth sets.
+- `client_id` and `response_type`, which openid-client sets.
+- `request` and `request_uri`, which would bypass PKCE and `state`.
+- `nonce`, which the callback doesn't check, so the login would fail.
+
 #### Pushed Authorization Requests (PAR, RFC 9126)
 
 Opt in by setting `usePar: true` on your `OAuthConfig`. The convenience

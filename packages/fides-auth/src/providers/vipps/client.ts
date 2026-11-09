@@ -11,6 +11,8 @@ import { createLogger } from '../../logger';
 import {
   buildAuthorizationUrl,
   buildPKCEOptions,
+  joinScope,
+  type AuthorizationRequestOptions,
   type OAuthConfig,
   type PKCEOptions,
 } from '../../oauth';
@@ -36,24 +38,22 @@ export class VippsLoginClient {
   private readonly oauthConfig: OAuthConfig;
 
   constructor(config: VippsLoginConfig) {
-    this.config = {
-      ...config,
-      scope: config.scope ?? defaultVippsLoginScope,
-    };
+    const scope = joinScope(config.scope ?? defaultVippsLoginScope);
+    this.config = { ...config, scope };
 
     this.oauthConfig = {
       issuer: config.issuer,
       clientId: config.clientId,
       clientSecret: config.clientSecret,
       redirect_uri: config.redirectUri,
-      scope: this.config.scope!,
+      scope,
     };
 
     logger.info(
       {
         issuer: config.issuer,
         redirectUri: config.redirectUri,
-        scope: this.config.scope,
+        scope,
       },
       'VippsLoginClient initialized'
     );
@@ -74,11 +74,12 @@ export class VippsLoginClient {
   /**
    * Build PKCE options for authorization flow
    *
+   * @param options - Per-request extra authorization parameters
    * @returns PKCE options including code_verifier, code_challenge, and state
    */
-  async buildPKCEOptions(): Promise<PKCEOptions> {
+  async buildPKCEOptions(options?: AuthorizationRequestOptions): Promise<PKCEOptions> {
     logger.debug('Building PKCE options');
-    return buildPKCEOptions(this.oauthConfig);
+    return buildPKCEOptions(this.oauthConfig, options);
   }
 
   /**

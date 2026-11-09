@@ -15,9 +15,9 @@ const RFC_7636_OCTETS = [
 const RFC_7636_VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
 const RFC_7636_CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
 
-const logs: { level: string; msg?: string }[] = [];
+const logs: { level: string; msg?: string; data?: Record<string, unknown> }[] = [];
 const record = (level: string) => (data?: Record<string, unknown> | string, msg?: string) => {
-  logs.push({ level, msg: typeof data === 'string' ? data : msg });
+  logs.push(typeof data === 'string' ? { level, msg: data } : { level, msg, data });
 };
 configureLogger({
   create: () => ({
@@ -90,6 +90,84 @@ describe('buildPKCEOptions', () => {
   it('logs at debug, not info', async () => {
     await buildPKCEOptions(oauthConfig);
 
-    expect(logs).toEqual([{ level: 'debug', msg: 'PKCE parameters generated' }]);
+    expect(logs).toEqual([
+      expect.objectContaining({ level: 'debug', msg: 'PKCE parameters generated' }),
+    ]);
+  });
+
+  it('joins an array scope with spaces', async () => {
+    const pkce = await buildPKCEOptions({ ...oauthConfig, scope: ['openid', 'profile', 'email'] });
+
+    expect(pkce.parameters.scope).toBe('openid profile email');
+  });
+});
+
+describe('buildPKCEOptions — extra authorization parameters', () => {
+  it('adds OAuthConfig.authorizationParameters', async () => {
+    const pkce = await buildPKCEOptions({
+      ...oauthConfig,
+      authorizationParameters: { prompt: 'login', resource: 'https://api.example.com' },
+    });
+
+    expect(pkce.parameters).toMatchObject({
+      prompt: 'login',
+      resource: 'https://api.example.com',
+      state: pkce.state,
+      code_challenge: pkce.code_challenge,
+    });
+  });
+
+  it('merges per-request parameters over the config ones', async () => {
+    const pkce = await buildPKCEOptions(
+      { ...oauthConfig, authorizationParameters: { prompt: 'login', ui_locales: 'nb' } },
+      { parameters: { prompt: 'consent', login_hint: 'user@example.com' } },
+    );
+
+    expect(pkce.parameters).toMatchObject({
+      prompt: 'consent',
+      ui_locales: 'nb',
+      login_hint: 'user@example.com',
+    });
+  });
+
+  it('lets an extra scope replace OAuthConfig.scope', async () => {
+    const pkce = await buildPKCEOptions(oauthConfig, { parameters: { scope: 'openid admin' } });
+
+    expect(pkce.parameters.scope).toBe('openid admin');
+  });
+
+  it.each([
+    'state',
+    'code_challenge',
+    'code_challenge_method',
+    'redirect_uri',
+    'client_id',
+    'response_type',
+    'request',
+    'request_uri',
+    'nonce',
+  ])(
+    'rejects reserved key %s from either source',
+    async (key) => {
+      await expect(
+        buildPKCEOptions({ ...oauthConfig, authorizationParameters: { [key]: 'x' } }),
+      ).rejects.toThrow(`Reserved authorization parameters can't be overridden: ${key}`);
+      await expect(
+        buildPKCEOptions(oauthConfig, { parameters: { [key]: 'x' } }),
+      ).rejects.toThrow(`Reserved authorization parameters can't be overridden: ${key}`);
+    },
+  );
+
+  it('names every reserved key it rejects', async () => {
+    await expect(
+      buildPKCEOptions(oauthConfig, { parameters: { state: 'a', prompt: 'login', redirect_uri: 'b' } }),
+    ).rejects.toThrow("Reserved authorization parameters can't be overridden: state, redirect_uri");
+  });
+
+  it('logs the extra parameter names, not their values', async () => {
+    await buildPKCEOptions(oauthConfig, { parameters: { login_hint: 'user@example.com' } });
+
+    expect(logs[0]?.data).toMatchObject({ extraParameters: ['login_hint'] });
+    expect(JSON.stringify(logs)).not.toContain('user@example.com');
   });
 });
