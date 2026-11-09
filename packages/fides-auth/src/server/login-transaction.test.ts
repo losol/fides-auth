@@ -4,6 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
+import { CookieTooLargeError } from '../cookies';
 import { decryptJWT } from '../utils';
 import type { CookieStore } from './cookie-store';
 import {
@@ -51,7 +52,7 @@ describe('login transaction cookie', () => {
 
     const names = [...jar.keys()];
     expect(names).toHaveLength(1);
-    expect(names[0]).toMatch(/^oauth_tx_[0-9a-f]{32}$/);
+    expect(names[0]).toBe('oauth_tx_0');
     expect(jar.get(names[0]!)).not.toContain('verifier-for-st');
     expect(await readTransaction(store, 'st', secret)).toEqual(transaction);
   });
@@ -75,10 +76,51 @@ describe('login transaction cookie', () => {
     await persistTransaction(store, createTransaction(pkce('two')), secret);
     expect(jar.size).toBe(2);
 
-    await clearTransaction(store, 'one');
+    await clearTransaction(store, 'one', secret);
+    await clearTransaction(store, 'unknown', secret);
 
+    expect(jar.size).toBe(1);
     expect(await readTransaction(store, 'one', secret)).toBeNull();
     expect((await readTransaction(store, 'two', secret))?.codeVerifier).toBe('verifier-for-two');
+  });
+
+  it('keeps at most three logins, evicting the oldest', async () => {
+    const { store, jar } = memoryStore();
+    const startedAt = { a: 4000, b: 1000, c: 3000, d: 5000 };
+    for (const [state, createdAt] of Object.entries(startedAt)) {
+      await persistTransaction(store, { ...createTransaction(pkce(state)), createdAt }, secret);
+    }
+
+    expect([...jar.keys()].sort()).toEqual(['oauth_tx_0', 'oauth_tx_1', 'oauth_tx_2']);
+    expect(await readTransaction(store, 'b', secret)).toBeNull();
+    for (const state of ['a', 'c', 'd']) {
+      expect(await readTransaction(store, state, secret)).not.toBeNull();
+    }
+  });
+
+  it('reuses a slot holding an unreadable cookie', async () => {
+    const { store, jar } = memoryStore({ oauth_tx_0: 'garbage' });
+
+    await persistTransaction(store, createTransaction(pkce('st')), secret);
+
+    expect(jar.size).toBe(1);
+    expect(await readTransaction(store, 'st', secret)).not.toBeNull();
+  });
+
+  it('drops a returnTo over 1 KB', () => {
+    const fits = `/${'a'.repeat(1023)}`;
+    expect(createTransaction(pkce('st'), { returnTo: fits }).returnTo).toBe(fits);
+    expect(createTransaction(pkce('st'), { returnTo: `${fits}a` }).returnTo).toBeUndefined();
+  });
+
+  it('refuses to store a transaction too large for a cookie', async () => {
+    const { store, jar } = memoryStore();
+    const huge = { ...createTransaction(pkce('st')), returnTo: `/${'a'.repeat(4000)}` };
+
+    await expect(persistTransaction(store, huge, secret)).rejects.toBeInstanceOf(
+      CookieTooLargeError,
+    );
+    expect(jar.size).toBe(0);
   });
 
   it('returns null for a missing, tampered or foreign-secret cookie', async () => {

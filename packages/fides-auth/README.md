@@ -205,7 +205,8 @@ deletes the record, so logout revokes a copied cookie too. See
 #### Login transaction
 
 `handleOidcLogin` seals each login (state, PKCE verifier, returnTo, start time)
-into its own `oauth_tx_<hash>` cookie, so parallel logins don't collide.
+into one of three `oauth_tx_<n>` cookies, so parallel logins don't collide; a
+fourth evicts the oldest, and a `returnTo` over 1 KB is dropped.
 `handleOidcCallback` rejects it after 10 minutes and deletes it whatever the
 outcome. Pass both handlers the same `secret` (default `SESSION_SECRET`). A
 denied or cancelled login redirects to `defaultRedirectPath` with
@@ -233,7 +234,7 @@ try {
   validateCallback(query, transaction); // throws CallbackValidationError
   // … exchangeAuthorizationCode(oauthConfig, url, transaction.codeVerifier, transaction.state)
 } finally {
-  await clearTransaction(cookies, state);
+  await clearTransaction(cookies, state, secret);
 }
 ```
 

@@ -183,7 +183,7 @@ export async function handleOidcCallback(
     });
   } finally {
     // The login transaction is spent whatever the outcome.
-    if (state) await clearTransaction(cookies, state);
+    if (state) await clearTransaction(cookies, state, secret);
   }
 }
 

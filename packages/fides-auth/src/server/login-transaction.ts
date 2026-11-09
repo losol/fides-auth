@@ -1,20 +1,26 @@
 // server/login-transaction.ts
 //
 // One login between the authorize redirect and the callback: state, PKCE
-// verifier, returnTo and start time, sealed into a cookie named by a hash of
-// the state, so parallel logins in one browser don't overwrite each other. It is
+// verifier, returnTo and start time, sealed into one of a few cookie slots, so
+// parallel logins in one browser neither overwrite each other nor pile up. It is
 // sealed under a key derived from the secret, so it never opens as a session.
 
-import { defaultOAuthCookieOptions } from '../cookies';
+import { assertCookieWithinLimit, defaultOAuthCookieOptions } from '../cookies';
 import { createLogger } from '../logger';
 import type { PKCEOptions } from '../oauth';
-import { createEncryptedJWT, decryptJWT, hexToUint8Array, sha256 } from '../utils';
+import { createEncryptedJWT, decryptJWT, hexToUint8Array } from '../utils';
 import type { CookieStore } from './cookie-store';
 import type { SessionSecret } from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:login-transaction' });
 
-const COOKIE_PREFIX = 'oauth_tx_';
+const COOKIE_NAME = 'oauth_tx_';
+
+/** Live logins per browser. Another login evicts the oldest. */
+const MAX_TRANSACTIONS = 3;
+
+/** A longer returnTo is dropped, not stored in a cookie sent with every request. */
+const MAX_RETURN_TO_BYTES = 1024;
 
 const DEFAULT_MAX_AGE_MS = 10 * 60 * 1000;
 
@@ -63,60 +69,68 @@ export function createTransaction(
   pkce: Pick<PKCEOptions, 'state' | 'code_verifier'>,
   { returnTo }: CreateTransactionOptions = {},
 ): LoginTransaction {
+  let kept = returnTo || undefined;
+  if (kept && new TextEncoder().encode(kept).length > MAX_RETURN_TO_BYTES) {
+    logger.warn({ length: kept.length }, 'returnTo too long, dropped');
+    kept = undefined;
+  }
   return {
     state: pkce.state,
     codeVerifier: pkce.code_verifier,
-    ...(returnTo ? { returnTo } : {}),
+    ...(kept ? { returnTo: kept } : {}),
     createdAt: Date.now(),
   };
 }
 
-/** Seals the transaction into its own `oauth_tx_<hash>` cookie. */
+/**
+ * Seals the transaction into a free `oauth_tx_<n>` slot, or the oldest login's.
+ * Throws `CookieTooLargeError` if it would not fit in a cookie.
+ */
 export async function persistTransaction(
   cookies: CookieStore,
   transaction: LoginTransaction,
   secret: SessionSecret,
 ): Promise<void> {
-  const value = await createEncryptedJWT(transaction, await transactionKey(secret));
-  await cookies.set(await cookieName(transaction.state), value, defaultOAuthCookieOptions);
+  const key = await transactionKey(secret);
+  const slots = await readSlots(cookies, key);
+  const slot =
+    slots.find((candidate) => !candidate.transaction) ??
+    slots.reduce((oldest, candidate) =>
+      (candidate.transaction?.createdAt ?? 0) < (oldest.transaction?.createdAt ?? 0)
+        ? candidate
+        : oldest,
+    );
+
+  const value = await createEncryptedJWT(transaction, key);
+  assertCookieWithinLimit(slot.name, value);
+  await cookies.set(slot.name, value, defaultOAuthCookieOptions);
 }
 
-/** The transaction for `state`, or null when it is missing or does not open under `secret`. */
+/** The transaction for `state`, or null when none is stored or it does not open under `secret`. */
 export async function readTransaction(
   cookies: CookieStore,
   state: string,
   secret: SessionSecret,
 ): Promise<LoginTransaction | null> {
-  const name = await cookieName(state);
-  const value = await cookies.get(name);
-  if (!value) return null;
+  const slots = await readSlots(cookies, await transactionKey(secret));
+  const match = findSlot(slots, state);
+  if (match) return match.transaction;
 
-  try {
-    const sealed = await decryptJWT(value, await transactionKey(secret));
-    if (
-      typeof sealed.state === 'string' &&
-      typeof sealed.codeVerifier === 'string' &&
-      typeof sealed.createdAt === 'number' &&
-      (sealed.returnTo === undefined || typeof sealed.returnTo === 'string')
-    ) {
-      return {
-        state: sealed.state,
-        codeVerifier: sealed.codeVerifier,
-        returnTo: sealed.returnTo,
-        createdAt: sealed.createdAt,
-      };
-    }
-    logger.warn({ cookieName: name }, 'Malformed login transaction cookie');
-  } catch (error) {
+  if (slots.some((slot) => slot.value && !slot.transaction)) {
     // Usually a different secret at login and callback.
-    logger.warn({ error, cookieName: name }, 'Unreadable login transaction cookie');
+    logger.warn('Unreadable login transaction cookie');
   }
   return null;
 }
 
-/** Deletes the transaction cookie for `state`. */
-export async function clearTransaction(cookies: CookieStore, state: string): Promise<void> {
-  await cookies.delete(await cookieName(state));
+/** Deletes the transaction cookie for `state`, leaving other logins alone. */
+export async function clearTransaction(
+  cookies: CookieStore,
+  state: string,
+  secret: SessionSecret,
+): Promise<void> {
+  const match = findSlot(await readSlots(cookies, await transactionKey(secret)), state);
+  if (match) await cookies.delete(match.name);
 }
 
 /**
@@ -166,8 +180,52 @@ async function transactionKey(secret: SessionSecret): Promise<Uint8Array> {
   return new Uint8Array(bits);
 }
 
-async function cookieName(state: string): Promise<string> {
-  return COOKIE_PREFIX + (await sha256(state)).slice(0, 32);
+interface Slot {
+  name: string;
+  value: string | null | undefined;
+  transaction: LoginTransaction | null;
+}
+
+async function readSlots(cookies: CookieStore, key: Uint8Array): Promise<Slot[]> {
+  const names = Array.from({ length: MAX_TRANSACTIONS }, (_, i) => `${COOKIE_NAME}${i}`);
+  return Promise.all(
+    names.map(async (name) => {
+      const value = await cookies.get(name);
+      return { name, value, transaction: value ? await open(value, key) : null };
+    }),
+  );
+}
+
+function findSlot(slots: Slot[], state: string) {
+  for (const { name, transaction } of slots) {
+    if (transaction && timingSafeEqual(state, transaction.state)) {
+      return { name, transaction };
+    }
+  }
+  return undefined;
+}
+
+/** The sealed transaction, or null when the value is forged, malformed or under another key. */
+async function open(value: string, key: Uint8Array): Promise<LoginTransaction | null> {
+  try {
+    const sealed = await decryptJWT(value, key);
+    if (
+      typeof sealed.state === 'string' &&
+      typeof sealed.codeVerifier === 'string' &&
+      typeof sealed.createdAt === 'number' &&
+      (sealed.returnTo === undefined || typeof sealed.returnTo === 'string')
+    ) {
+      return {
+        state: sealed.state,
+        codeVerifier: sealed.codeVerifier,
+        returnTo: sealed.returnTo,
+        createdAt: sealed.createdAt,
+      };
+    }
+  } catch {
+    // Treated as an empty slot.
+  }
+  return null;
 }
 
 /** Compares in time that depends only on the expected value's length. */

@@ -96,6 +96,26 @@ describe('handleOidcLogin', () => {
     expect((await readTransaction(store, 'two', secret))?.returnTo).toBe('/b');
   });
 
+  it('keeps at most three logins in progress', async () => {
+    const { store, jar } = memoryStore();
+    for (const state of ['one', 'two', 'three', 'four']) {
+      mockedPkce.mockResolvedValueOnce({ state, code_verifier: `cv-${state}` } as any);
+      await login(store);
+    }
+
+    expect(jar.size).toBe(3);
+    expect(await readTransaction(store, 'four', secret)).not.toBeNull();
+  });
+
+  it('drops a returnTo over 1 KB but still starts the login', async () => {
+    const { store } = memoryStore();
+    await login(store, `?returnTo=%2F${'a'.repeat(1100)}`);
+
+    const transaction = await readTransaction(store, 'st', secret);
+    expect(transaction).not.toBeNull();
+    expect(transaction?.returnTo).toBeUndefined();
+  });
+
   it('defaults the secret to SESSION_SECRET', async () => {
     vi.stubEnv('SESSION_SECRET', secret);
     const { store } = memoryStore();
