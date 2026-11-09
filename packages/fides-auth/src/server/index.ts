@@ -1,7 +1,8 @@
 // Framework-agnostic server-side building blocks: a tiny CookieStore contract,
 // the two session persistences (cookies, or a server-side store behind a
-// handle), the session helpers over them, and the OIDC request handlers that
-// adapters like @eventuras/fides-auth-next wire to their cookie store.
+// handle), the session helpers over them, the login transaction, and the OIDC
+// request handlers that adapters like @eventuras/fides-auth-next wire to their
+// cookie store.
 
 export type { CookieStore } from './cookie-store';
 
@@ -32,6 +33,19 @@ export {
   type ReadSessionResult,
   type RefreshSessionResult,
 } from './session';
+
+export {
+  createTransaction,
+  persistTransaction,
+  readTransaction,
+  clearTransaction,
+  validateCallback,
+  CallbackValidationError,
+  type CallbackValidationReason,
+  type CreateTransactionOptions,
+  type LoginTransaction,
+  type ValidateCallbackOptions,
+} from './login-transaction';
 
 export { handleOidcLogin, type OidcLoginConfig } from './oidc-login';
 export { handleOidcCallback, type OidcCallbackConfig } from './oidc-callback';
