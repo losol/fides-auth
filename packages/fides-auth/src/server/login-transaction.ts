@@ -2,12 +2,13 @@
 //
 // One login between the authorize redirect and the callback: state, PKCE
 // verifier, returnTo and start time, sealed into a cookie named by a hash of
-// the state, so parallel logins in one browser don't overwrite each other.
+// the state, so parallel logins in one browser don't overwrite each other. It is
+// sealed under a key derived from the secret, so it never opens as a session.
 
 import { defaultOAuthCookieOptions } from '../cookies';
 import { createLogger } from '../logger';
 import type { PKCEOptions } from '../oauth';
-import { createEncryptedJWT, decryptJWT, sha256 } from '../utils';
+import { createEncryptedJWT, decryptJWT, hexToUint8Array, sha256 } from '../utils';
 import type { CookieStore } from './cookie-store';
 import type { SessionSecret } from './session-persistence';
 
@@ -16,6 +17,8 @@ const logger = createLogger({ namespace: 'fides-auth:server:login-transaction' }
 const COOKIE_PREFIX = 'oauth_tx_';
 
 const DEFAULT_MAX_AGE_MS = 10 * 60 * 1000;
+
+const KEY_INFO = 'fides-auth login-tx';
 
 export interface LoginTransaction {
   state: string;
@@ -74,7 +77,7 @@ export async function persistTransaction(
   transaction: LoginTransaction,
   secret: SessionSecret,
 ): Promise<void> {
-  const value = await createEncryptedJWT(transaction, secret);
+  const value = await createEncryptedJWT(transaction, await transactionKey(secret));
   await cookies.set(await cookieName(transaction.state), value, defaultOAuthCookieOptions);
 }
 
@@ -89,7 +92,7 @@ export async function readTransaction(
   if (!value) return null;
 
   try {
-    const sealed = await decryptJWT(value, secret);
+    const sealed = await decryptJWT(value, await transactionKey(secret));
     if (
       typeof sealed.state === 'string' &&
       typeof sealed.codeVerifier === 'string' &&
@@ -147,6 +150,20 @@ export function validateCallback(
     throw new CallbackValidationError('missing_code');
   }
   return code;
+}
+
+/** HKDF-SHA-256 of the secret, so a transaction and a session never share a key. */
+async function transactionKey(secret: SessionSecret): Promise<Uint8Array> {
+  const ikm = typeof secret === 'string' ? hexToUint8Array(secret) : secret;
+  const base = await crypto.subtle.importKey('raw', ikm as BufferSource, 'HKDF', false, [
+    'deriveBits',
+  ]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(), info: new TextEncoder().encode(KEY_INFO) },
+    base,
+    256,
+  );
+  return new Uint8Array(bits);
 }
 
 async function cookieName(state: string): Promise<string> {

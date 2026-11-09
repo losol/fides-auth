@@ -106,24 +106,18 @@ function computeAccessTokenExpiresIn(session: Session): number | undefined {
 
 /** Type guard that checks whether an unknown value conforms to the {@link Session} shape. */
 export function isSession(object: unknown): object is Session {
-  if (typeof object !== 'object' || object === null) {
+  if (!isObject(object)) {
     return false;
   }
 
-  if (
-    'tokens' in object &&
-    typeof (object as any).tokens !== 'object'
-  ) {
-    return false;
-  }
+  const { tokens, user } = object as { tokens?: unknown; user?: unknown };
+  if (tokens !== undefined && !isObject(tokens)) return false;
+  if (user !== undefined && !isObject(user)) return false;
 
-  if (
-    'user' in object &&
-    typeof (object as any).user !== 'object'
-  ) {
-    return false;
-  }
+  // Any other encrypted payload under the same key is not a session.
+  return isObject(tokens) || isObject(user);
+}
 
-  // Seems to be a real session
-  return true;
+function isObject(value: unknown): value is object {
+  return typeof value === 'object' && value !== null;
 }

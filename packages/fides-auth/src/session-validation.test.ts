@@ -142,17 +142,26 @@ describe('validateSessionJwt — failure cases', () => {
   });
 
   it('returns INVALID when payload is not a session-like object', async () => {
-    // Create a valid JWE but with a non-session payload (string)
     const jwe = await new EncryptJWT({ message: 'just a string payload' })
       .setProtectedHeader({ alg: 'dir', enc: 'A256GCM' })
       .setIssuedAt()
       .encrypt(SECRET_BYTES);
 
-    // This should validate fine (message is an object with neither tokens nor user)
-    // isSession accepts objects that don't have tokens/user (it's loose)
     const result = await validateSessionJwt(jwe, SECRET);
-    // It IS valid because isSession() allows any object
-    expect(result.status).toBe('VALID');
+
+    expect(result.status).toBe('INVALID');
+  });
+
+  it('returns INVALID for a login transaction sealed under the session key', async () => {
+    const jwe = await new EncryptJWT({ state: 'st', codeVerifier: 'cv', createdAt: Date.now() })
+      .setProtectedHeader({ alg: 'dir', enc: 'A256GCM' })
+      .setIssuedAt()
+      .encrypt(SECRET_BYTES);
+
+    const result = await validateSessionJwt(jwe, SECRET);
+
+    expect(result.status).toBe('INVALID');
+    expect(result.session).toBeUndefined();
   });
 
   it('returns INVALID when tokens is a non-object value', async () => {
@@ -189,8 +198,14 @@ describe('isSession', () => {
     expect(isSession(testSession)).toBe(true);
   });
 
-  it('returns true for an empty object (minimal valid session)', () => {
-    expect(isSession({})).toBe(true);
+  it('returns false for an object with neither tokens nor user', () => {
+    expect(isSession({})).toBe(false);
+    expect(isSession({ sid: 'x', data: {} })).toBe(false);
+  });
+
+  it('returns true when only one of tokens and user is present', () => {
+    expect(isSession({ tokens: {} })).toBe(true);
+    expect(isSession({ user: { name: 'n', email: 'e' } })).toBe(true);
   });
 
   it('returns true when tokens and user are both objects', () => {
@@ -215,6 +230,11 @@ describe('isSession', () => {
 
   it('returns false when user is a number', () => {
     expect(isSession({ user: 42 })).toBe(false);
+  });
+
+  it('returns false when tokens or user is null', () => {
+    expect(isSession({ tokens: null, user: {} })).toBe(false);
+    expect(isSession({ tokens: {}, user: null })).toBe(false);
   });
 });
 

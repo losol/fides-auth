@@ -4,6 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
+import { decryptJWT } from '../utils';
 import type { CookieStore } from './cookie-store';
 import {
   CallbackValidationError,
@@ -14,11 +15,12 @@ import {
   validateCallback,
   type LoginTransaction,
 } from './login-transaction';
+import { tryReadSession } from './session';
 
 const secret = 'a'.repeat(64);
 
-function memoryStore() {
-  const jar = new Map<string, string>();
+function memoryStore(initial?: Record<string, string>) {
+  const jar = new Map<string, string>(Object.entries(initial ?? {}));
   const store: CookieStore = {
     get: (name) => jar.get(name) ?? null,
     set: (name, value) => { jar.set(name, value); },
@@ -52,6 +54,19 @@ describe('login transaction cookie', () => {
     expect(names[0]).toMatch(/^oauth_tx_[0-9a-f]{32}$/);
     expect(jar.get(names[0]!)).not.toContain('verifier-for-st');
     expect(await readTransaction(store, 'st', secret)).toEqual(transaction);
+  });
+
+  it('is sealed under its own key, so it never opens as a session', async () => {
+    const { store, jar } = memoryStore();
+    await persistTransaction(store, createTransaction(pkce('st')), secret);
+    const [value] = [...jar.values()];
+
+    await expect(decryptJWT(value!, secret)).rejects.toThrow();
+    const { store: forged } = memoryStore({ session: value! });
+    expect(await tryReadSession(forged, secret)).toEqual({
+      session: null,
+      reason: 'unreadable_session',
+    });
   });
 
   it('keeps parallel logins apart', async () => {
