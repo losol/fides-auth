@@ -228,6 +228,41 @@ The store gets encrypted records keyed by a hash of the handle; `clearSession`
 deletes the record, so logout revokes a copied cookie too. See
 [docs/server-sessions.md](./docs/server-sessions.md).
 
+#### Login transaction
+
+`handleOidcLogin` seals each login (state, PKCE verifier, returnTo, start time)
+into its own `oauth_tx_<hash>` cookie, so parallel logins don't collide.
+`handleOidcCallback` rejects it after 10 minutes and deletes it whatever the
+outcome. Pass both handlers the same `secret` (default `SESSION_SECRET`). A
+denied or cancelled login redirects to `defaultRedirectPath` with
+`?login=error&error=<code>`.
+
+Custom flows use the same helpers:
+
+```typescript
+import {
+  createTransaction,
+  persistTransaction,
+  readTransaction,
+  clearTransaction,
+  validateCallback,
+} from "@eventuras/fides-auth/server";
+
+// Login
+const pkce = await buildPKCEOptions(oauthConfig);
+await persistTransaction(cookies, createTransaction(pkce, { returnTo }), secret);
+
+// Callback
+try {
+  const transaction = await readTransaction(cookies, state, secret);
+  if (!transaction) throw new Error("No login in progress");
+  validateCallback(query, transaction); // throws CallbackValidationError
+  // … exchangeAuthorizationCode(oauthConfig, url, transaction.codeVerifier, transaction.state)
+} finally {
+  await clearTransaction(cookies, state);
+}
+```
+
 ### OAuth — Browser (`/oauth-browser`)
 
 Lightweight browser-only flows using Web Crypto:

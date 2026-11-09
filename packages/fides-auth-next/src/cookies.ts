@@ -54,8 +54,8 @@ const logger = createLogger({ namespace: 'fides-auth-next:cookies' });
  * await setAuthCookie('session', encryptedJwt);
  *
  * // With custom options
- * await setAuthCookie('oauth_state', state, {
- *   maxAge: 60 * 10, // 10 minutes
+ * await setAuthCookie(ACCESS_TOKEN_COOKIE_NAME, encryptedAccessToken, {
+ *   maxAge: 60 * 60, // 1 hour
  * });
  * ```
  */
@@ -145,15 +145,14 @@ export async function deleteAuthCookie(name: string): Promise<void> {
 }
 
 /**
- * Deletes multiple cookies at once.
- * Useful for cleaning up OAuth flow cookies.
+ * Deletes multiple cookies at once. The login transaction cookie is cleared by
+ * `clearTransaction` from `@eventuras/fides-auth/server`.
  *
  * @param names - Array of cookie names to delete
  *
  * @example
  * ```ts
- * // Clean up OAuth cookies after callback
- * await deleteAuthCookies(['oauth_state', 'oauth_code_verifier', 'returnTo']);
+ * await deleteAuthCookies(['session', ACCESS_TOKEN_COOKIE_NAME, ID_TOKEN_COOKIE_NAME]);
  * ```
  */
 export async function deleteAuthCookies(names: string[]): Promise<void> {

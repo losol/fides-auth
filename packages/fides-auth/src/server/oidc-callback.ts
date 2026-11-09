@@ -1,9 +1,9 @@
 // server/oidc-callback.ts
 //
 // Framework-agnostic OIDC callback handler. Orchestrates the OIDC concerns —
-// rate limit, PKCE cookie read, code exchange, session persistence, safe redirect
-// — over the standard Request/Response and a CookieStore, delegating the protocol
-// to the core oauth module and persistence to the server session helpers.
+// rate limit, login transaction check, code exchange, session persistence, safe
+// redirect — over the standard Request/Response and a CookieStore, delegating the
+// protocol to the core oauth module and persistence to the server session helpers.
 
 import { CookieTooLargeError } from '../cookies';
 import { createLogger } from '../logger';
@@ -16,6 +16,12 @@ import {
 import { SESSION_EVENT } from '../session-events';
 import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
+import {
+  CallbackValidationError,
+  clearTransaction,
+  readTransaction,
+  validateCallback,
+} from './login-transaction';
 import { persistSession } from './session';
 import type { SessionPersistence, SessionSecret } from './session-persistence';
 
@@ -31,13 +37,16 @@ export interface OidcCallbackConfig {
   /** Public application URL (used to reconstruct the callback URL and validate redirects). */
   applicationUrl: string;
 
-  /** Cookie store holding the PKCE state and receiving the session cookies. */
+  /** Cookie store holding the login transaction and receiving the session cookies. */
   cookies: CookieStore;
 
   /** Optional rate-limit gate. When it resolves false, the handler responds 429. */
   rateLimit?: () => boolean | Promise<boolean>;
 
-  /** Session encryption secret for the default cookie persistence. Defaults to {@link getSessionSecret}. */
+  /**
+   * Opens the login transaction (must match `handleOidcLogin`'s) and encrypts the
+   * default cookie persistence. Defaults to {@link getSessionSecret}.
+   */
   secret?: SessionSecret;
 
   /** Where the session lives. Defaults to the cookies under `secret`; see `serverPersistence`. */
@@ -79,49 +88,38 @@ export async function handleOidcCallback(
     defaultRedirectPath = '/',
     validateReturnTo,
   } = config;
-  const persistence = config.persistence ?? config.secret ?? getSessionSecret();
+  const secret = config.secret ?? getSessionSecret();
+  const persistence = config.persistence ?? secret;
 
   if (rateLimit && !(await rateLimit())) {
     logger.warn('Rate limit exceeded');
     return new Response('Too many requests', { status: 429 });
   }
 
+  const currentUrl = new URL(request.url);
+  const state = currentUrl.searchParams.get('state');
+
   try {
     // Reconstruct the public callback URL. Behind a TLS-terminating proxy
     // applicationUrl is just the origin ("/"), and the token-exchange redirect_uri
     // must match the callback path used at authorize — so keep the request path.
-    const currentUrl = new URL(request.url);
     const publicUrl = new URL(applicationUrl);
     publicUrl.pathname = currentUrl.pathname;
     publicUrl.search = currentUrl.search;
 
-    const storedState = await cookies.get('oauth_state');
-    const storedCodeVerifier = await cookies.get('oauth_code_verifier');
-
-    if (!storedState || !storedCodeVerifier) {
-      logger.warn('Missing state or code verifier');
+    const transaction = state ? await readTransaction(cookies, state, secret) : null;
+    if (!transaction) {
+      logger.warn('Missing login transaction');
       return new Response('Please restart the login process.', { status: 400 });
     }
 
-    // A denied or cancelled login comes back as ?error=…, not as a code.
-    const idpError = currentUrl.searchParams.get('error');
-    if (idpError !== null) {
-      logger.warn(
-        {
-          reason: 'idp_error',
-          error: idpError,
-          errorDescription: currentUrl.searchParams.get('error_description'),
-        },
-        'Identity provider returned an error',
-      );
-      return loginErrorRedirect(applicationUrl, defaultRedirectPath, idpError);
-    }
+    validateCallback(currentUrl.searchParams, transaction);
 
     const tokens = await exchangeAuthorizationCode(
       oauthConfig,
       publicUrl,
-      storedCodeVerifier,
-      storedState,
+      transaction.codeVerifier,
+      transaction.state,
     );
 
     // Build the session and persist it (split across session/session_at).
@@ -131,9 +129,8 @@ export async function handleOidcCallback(
     const session = buildSessionFromTokens(tokens, rolesClaim);
     await persistSession(cookies, session, persistence, { event: SESSION_EVENT.CREATED });
 
-    const returnTo = await cookies.get('returnTo');
     const redirectUrl = validateReturnUrl(
-      returnTo ?? null,
+      transaction.returnTo ?? null,
       applicationUrl,
       defaultRedirectPath,
       validateReturnTo,
@@ -150,6 +147,23 @@ export async function handleOidcCallback(
       headers: { Location: redirectUrl.toString() },
     });
   } catch (error) {
+    if (error instanceof CallbackValidationError) {
+      // A denied or cancelled login: send the user home, not to an error page.
+      if (error.reason === 'idp_error') {
+        logger.warn(
+          {
+            reason: error.reason,
+            error: error.idpError,
+            errorDescription: error.idpErrorDescription,
+          },
+          'Identity provider returned an error',
+        );
+        return loginErrorRedirect(applicationUrl, defaultRedirectPath, error.idpError ?? '');
+      }
+      logger.warn({ reason: error.reason }, 'Rejected OIDC callback');
+      return new Response('Please restart the login process.', { status: 400 });
+    }
+
     // The session was too large for a cookie — surface this distinctly instead of
     // hiding it in a generic 500, so it's diagnosable in production. Server
     // persistence is the fix; see docs/server-sessions.md.
@@ -169,9 +183,7 @@ export async function handleOidcCallback(
     });
   } finally {
     // The login transaction is spent whatever the outcome.
-    await cookies.delete('oauth_state');
-    await cookies.delete('oauth_code_verifier');
-    await cookies.delete('returnTo');
+    if (state) await clearTransaction(cookies, state);
   }
 }
 
