@@ -133,3 +133,52 @@ describe('handleOidcCallback — server persistence', () => {
     expect((await store.get(await sha256(handle!)))?.sid).toBe('sid-1');
   });
 });
+
+describe('handleOidcCallback — IdP errors and cleanup', () => {
+  const pkceCookies = { oauth_state: 'xyz', oauth_code_verifier: 'verifier', returnTo: '/dash' };
+
+  it('redirects an IdP error to the default path with only the error code', async () => {
+    const { store, jar } = memoryStore(pkceCookies);
+    const request = new Request(
+      'http://internal/api/auth/callback/oidc?error=access_denied&error_description=User%20cancelled&state=xyz',
+    );
+
+    const response = await handleOidcCallback(request, baseConfig(store));
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get('Location')!);
+    expect(location.origin + location.pathname).toBe('https://host.example.test/');
+    expect(location.searchParams.get('login')).toBe('error');
+    expect(location.searchParams.get('error')).toBe('access_denied');
+    expect(location.search).not.toContain('cancelled');
+    expect(mockedExchange).not.toHaveBeenCalled();
+    expect([...jar.keys()]).toEqual([]);
+  });
+
+  it('replaces an error code outside the RFC 6749 charset', async () => {
+    const { store } = memoryStore(pkceCookies);
+    const request = new Request(
+      'http://internal/api/auth/callback/oidc?error=%22%3E%3Cscript%3E&state=xyz',
+    );
+
+    const response = await handleOidcCallback(request, {
+      ...baseConfig(store),
+      defaultRedirectPath: '/welcome',
+    });
+
+    const location = new URL(response.headers.get('Location')!);
+    expect(location.pathname).toBe('/welcome');
+    expect(location.searchParams.get('error')).toBe('idp_error');
+  });
+
+  it('clears the transaction cookies when the code exchange fails', async () => {
+    const { store, jar } = memoryStore(pkceCookies);
+    mockedExchange.mockRejectedValue(new Error('invalid_grant'));
+    const request = new Request('http://internal/api/auth/callback/oidc?code=abc&state=xyz');
+
+    const response = await handleOidcCallback(request, baseConfig(store));
+
+    expect(response.status).toBe(500);
+    expect([...jar.keys()]).toEqual([]);
+  });
+});
