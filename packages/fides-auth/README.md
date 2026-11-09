@@ -108,6 +108,11 @@ import {
 } from "@eventuras/fides-auth/oauth";
 ```
 
+`extractUserFromTokens` and `buildSessionFromTokens` only decode the ID token —
+they don't check its signature, `iss`, `aud` or `exp`. That is safe on tokens
+straight from `exchangeAuthorizationCode`. Verify tokens from anywhere else
+first (e.g. with jose's `jwtVerify`).
+
 #### Pushed Authorization Requests (PAR, RFC 9126)
 
 Opt in by setting `usePar: true` on your `OAuthConfig`. The convenience
