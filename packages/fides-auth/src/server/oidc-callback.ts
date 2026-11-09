@@ -21,6 +21,9 @@ import type { SessionPersistence, SessionSecret } from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-callback' });
 
+// RFC 6749 §4.1.2.1 error charset (NQSCHAR), capped so it can't bloat the URL.
+const IDP_ERROR_CODE = /^[\x20\x21\x23-\x5B\x5D-\x7E]{1,64}$/;
+
 export interface OidcCallbackConfig {
   /** OAuth/OIDC configuration. */
   oauthConfig: OAuthConfig;
@@ -100,6 +103,20 @@ export async function handleOidcCallback(
       return new Response('Please restart the login process.', { status: 400 });
     }
 
+    // A denied or cancelled login comes back as ?error=…, not as a code.
+    const idpError = currentUrl.searchParams.get('error');
+    if (idpError !== null) {
+      logger.warn(
+        {
+          reason: 'idp_error',
+          error: idpError,
+          errorDescription: currentUrl.searchParams.get('error_description'),
+        },
+        'Identity provider returned an error',
+      );
+      return loginErrorRedirect(applicationUrl, defaultRedirectPath, idpError);
+    }
+
     const tokens = await exchangeAuthorizationCode(
       oauthConfig,
       publicUrl,
@@ -114,12 +131,7 @@ export async function handleOidcCallback(
     const session = buildSessionFromTokens(tokens, rolesClaim);
     await persistSession(cookies, session, persistence, { event: SESSION_EVENT.CREATED });
 
-    // Clean up PKCE & returnTo cookies (read returnTo first).
     const returnTo = await cookies.get('returnTo');
-    await cookies.delete('oauth_state');
-    await cookies.delete('oauth_code_verifier');
-    await cookies.delete('returnTo');
-
     const redirectUrl = validateReturnUrl(
       returnTo ?? null,
       applicationUrl,
@@ -155,5 +167,22 @@ export async function handleOidcCallback(
     return new Response('An unexpected error occurred. Please restart the login process.', {
       status: 500,
     });
+  } finally {
+    // The login transaction is spent whatever the outcome.
+    await cookies.delete('oauth_state');
+    await cookies.delete('oauth_code_verifier');
+    await cookies.delete('returnTo');
   }
+}
+
+/** Redirects to the default path with `login=error` and the IdP's error code, never its description. */
+function loginErrorRedirect(
+  applicationUrl: string,
+  defaultRedirectPath: string,
+  idpError: string,
+): Response {
+  const redirectUrl = new URL(defaultRedirectPath, applicationUrl);
+  redirectUrl.searchParams.set('login', 'error');
+  redirectUrl.searchParams.set('error', IDP_ERROR_CODE.test(idpError) ? idpError : 'idp_error');
+  return new Response(null, { status: 302, headers: { Location: redirectUrl.toString() } });
 }
