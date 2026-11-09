@@ -3,7 +3,7 @@
  *
  * The behaviours that matter operationally: one round-trip serves a burst of
  * concurrent refreshes, a failed provider is retried rather than remembered as
- * broken, and a rotated secret is not served from a stale entry.
+ * broken, and a rotated secret or key is not served from a stale entry.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -11,6 +11,9 @@ vi.mock('openid-client', () => ({
   discovery: vi.fn(),
   refreshTokenGrant: vi.fn(),
   ClientSecretPost: vi.fn(() => () => undefined),
+  ClientSecretBasic: vi.fn(() => () => undefined),
+  None: vi.fn(() => () => undefined),
+  PrivateKeyJwt: vi.fn(() => () => undefined),
 }));
 
 import * as openid from 'openid-client';
@@ -29,6 +32,21 @@ const config: OAuthConfig = {
   redirect_uri: 'https://app.example.test/callback',
   scope: 'openid',
 };
+
+/** Stand-in keys: PrivateKeyJwt is mocked, so only their identity matters. */
+const keyA = { type: 'private' } as unknown as CryptoKey;
+const keyB = { type: 'private' } as unknown as CryptoKey;
+
+function keyConfig(privateKey: CryptoKey | openid.PrivateKey): OAuthConfig {
+  return {
+    issuer: config.issuer,
+    clientId: config.clientId,
+    redirect_uri: config.redirect_uri,
+    scope: config.scope,
+    clientAuth: 'private_key_jwt',
+    privateKey,
+  };
+}
 
 /** A distinct object per call, so tests can tell one discovery from another. */
 function discovered(tag: string) {
@@ -128,6 +146,50 @@ describe('discoverConfiguration — caching', () => {
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
     expect(after).toEqual(discovered('new'));
+  });
+
+  it('treats a change of auth method as a new entry', async () => {
+    vi.mocked(openid.discovery)
+      .mockResolvedValueOnce(discovered('post'))
+      .mockResolvedValueOnce(discovered('basic'));
+
+    await discoverConfiguration(config);
+    const basic = await discoverConfiguration({ ...config, clientAuth: 'client_secret_basic' });
+
+    expect(openid.discovery).toHaveBeenCalledTimes(2);
+    expect(basic).toEqual(discovered('basic'));
+  });
+
+  it('reuses an entry for the same private key', async () => {
+    vi.mocked(openid.discovery).mockResolvedValue(discovered('key'));
+
+    await discoverConfiguration(keyConfig(keyA));
+    await discoverConfiguration(keyConfig(keyA));
+
+    expect(openid.discovery).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not serve a stale entry after the private key rotates', async () => {
+    vi.mocked(openid.discovery)
+      .mockResolvedValueOnce(discovered('old'))
+      .mockResolvedValueOnce(discovered('new'));
+
+    await discoverConfiguration(keyConfig(keyA));
+    const after = await discoverConfiguration(keyConfig(keyB));
+
+    expect(openid.discovery).toHaveBeenCalledTimes(2);
+    expect(after).toEqual(discovered('new'));
+  });
+
+  it('compares a { key, kid } wrapper by what it holds', async () => {
+    // A wrapper rebuilt per call must not defeat the cache; a new kid must.
+    vi.mocked(openid.discovery).mockResolvedValue(discovered('key'));
+
+    await discoverConfiguration(keyConfig({ key: keyA, kid: '1' }));
+    await discoverConfiguration(keyConfig({ key: keyA, kid: '1' }));
+    await discoverConfiguration(keyConfig({ key: keyA, kid: '2' }));
+
+    expect(openid.discovery).toHaveBeenCalledTimes(2);
   });
 });
 

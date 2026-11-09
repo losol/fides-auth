@@ -113,6 +113,20 @@ they don't check its signature, `iss`, `aud` or `exp`. That is safe on tokens
 straight from `exchangeAuthorizationCode`. Verify tokens from anywhere else
 first (e.g. with jose's `jwtVerify`).
 
+#### Client authentication
+
+`clientAuth` sets how the client authenticates at the token endpoint. Omit it
+for `client_secret_post`:
+
+```typescript
+{ clientSecret: "…" }                                    // client_secret_post
+{ clientAuth: "client_secret_basic", clientSecret: "…" }
+{ clientAuth: "none" }                                   // public client, PKCE only
+{ clientAuth: "private_key_jwt", privateKey }            // CryptoKey or { key, kid }
+```
+
+`clientCredentialsGrant` takes the same options except `none`.
+
 #### Pushed Authorization Requests (PAR, RFC 9126)
 
 Opt in by setting `usePar: true` on your `OAuthConfig`. The convenience
