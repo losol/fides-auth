@@ -69,37 +69,6 @@ const jwt = await createEncryptedJWT({ user, tokens }, secret);
 const { status, session } = await validateSessionJwt(jwt, secret);
 ```
 
-### Browser — OAuth SPA Flow
-
-```typescript
-import {
-  generatePKCE,
-  buildAuthorizationUrl,
-  exchangeCodeForTokens,
-} from "@eventuras/fides-auth/oauth-browser";
-
-const config = {
-  issuer: "https://auth.example.com",
-  clientId: "my-client-id",
-  redirect_uri: "https://myapp.com/callback",
-  scope: "openid profile email",
-};
-
-// Start flow
-const pkce = await generatePKCE();
-sessionStorage.setItem("code_verifier", pkce.code_verifier);
-sessionStorage.setItem("state", pkce.state);
-window.location.href = buildAuthorizationUrl(config, pkce);
-
-// Handle callback
-const code = new URLSearchParams(location.search).get("code");
-const tokens = await exchangeCodeForTokens(
-  config,
-  code,
-  sessionStorage.getItem("code_verifier")!,
-);
-```
-
 ## Modules
 
 Each module is available as a separate entry point for tree-shaking:
@@ -108,7 +77,7 @@ Each module is available as a separate entry point for tree-shaking:
 | ------------------------------------------ | ----------- | ----------------------------------------------------- |
 | `@eventuras/fides-auth`                    | Node.js     | Main entry — re-exports utils, session, types, logger |
 | `@eventuras/fides-auth/oauth`              | Node.js     | OAuth/OIDC flows with `openid-client`                 |
-| `@eventuras/fides-auth/oauth-browser`      | Browser     | OAuth/OIDC flows with Web Crypto API                  |
+| `@eventuras/fides-auth/oauth-browser`      | Browser     | **Deprecated** — OAuth/OIDC flows with Web Crypto API |
 | `@eventuras/fides-auth/session-validation` | Node.js     | Encrypted JWT session validation                      |
 | `@eventuras/fides-auth/session-refresh`    | Node.js     | Automatic token refresh for sessions                  |
 | `@eventuras/fides-auth/silent-login`       | Node.js     | Silent login (`prompt=none`) utilities                |
@@ -229,6 +198,10 @@ deletes the record, so logout revokes a copied cookie too. See
 [docs/server-sessions.md](./docs/server-sessions.md).
 
 ### OAuth — Browser (`/oauth-browser`)
+
+> **Deprecated.** It hardcodes the provider endpoints and doesn't validate the
+> token response. Use the server flow instead (`handleOidcLogin` /
+> `handleOidcCallback` from `/server`). It will be removed in a later minor.
 
 Lightweight browser-only flows using Web Crypto:
 
