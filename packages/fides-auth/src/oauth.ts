@@ -314,6 +314,9 @@ export interface OidcUserInfo {
  * Extracts user information from an OIDC token response.
  * Decodes the ID token and extracts standard claims plus roles from a configurable claim.
  *
+ * Decodes only: the signature, `iss`, `aud` and `exp` are not checked. Safe on tokens
+ * straight from `exchangeAuthorizationCode`; verify any others first (e.g. jose `jwtVerify`).
+ *
  * @param tokens - Token response from the OIDC provider
  * @param rolesClaim - Name of the claim containing user roles (default: 'roles')
  * @returns Extracted user information
@@ -346,6 +349,9 @@ export function extractUserFromTokens(
 /**
  * Builds a Session object from an OIDC token response.
  * Maps provider tokens and user claims into the internal Session format.
+ *
+ * Reads claims via `extractUserFromTokens`, which doesn't verify the ID token. Pass tokens
+ * straight from `exchangeAuthorizationCode`, or verify them first.
  *
  * @param tokens - Token response from the OIDC provider
  * @param rolesClaim - Name of the claim containing user roles (default: 'roles')
