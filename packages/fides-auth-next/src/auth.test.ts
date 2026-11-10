@@ -5,30 +5,40 @@
  * getCurrentSession must reassemble the two — expired access token included —
  * and still read legacy single-cookie sessions with a live access token.
  */
-import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach, onTestFinished } from 'vitest';
 
 // In-memory cookie jar backing the mocked next/headers cookie store (hoisted so
 // the vi.mock factory can close over it). This exercises the real adapter path:
-// auth.ts -> nextCookieStore -> @eventuras/fides-auth/server.
-const { jar } = vi.hoisted(() => ({ jar: new Map<string, string>() }));
-
-vi.mock('next/headers', () => ({
-  cookies: vi.fn(async () => ({
+// auth.ts -> nextCookieStore -> @eventuras/fides-auth/server. Like Next, cookies()
+// returns one object per request; each test is a new request.
+const { jar, currentRequest } = vi.hoisted(() => {
+  const jar = new Map<string, string>();
+  const newRequestCookies = () => ({
     get: (name: string) => (jar.has(name) ? { value: jar.get(name) } : undefined),
     set: (name: string, value: string) => { jar.set(name, value); },
     delete: (name: string) => { jar.delete(name); },
-  })),
+  });
+  return { jar, currentRequest: { cookies: newRequestCookies(), newRequestCookies } };
+});
+
+vi.mock('next/headers', () => ({
+  cookies: vi.fn(async () => currentRequest.cookies),
   headers: vi.fn(async () => new Headers()),
 }));
 
-// Only the route handlers are stubbed; the session helpers stay real.
-vi.mock('@eventuras/fides-auth/server', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@eventuras/fides-auth/server')>()),
-  handleOidcLogin: vi.fn(async () => new Response(null, { status: 302 })),
-  handleOidcCallback: vi.fn(async () => new Response(null, { status: 302 })),
-  handleOidcLogout: vi.fn(async () => new Response(null, { status: 302 })),
-  handleHeartbeat: vi.fn(async () => new Response(null, { status: 200 })),
-}));
+// Only the route handlers are stubbed; the session helpers stay real, the
+// refresh behind a spy.
+vi.mock('@eventuras/fides-auth/server', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@eventuras/fides-auth/server')>();
+  return {
+    ...original,
+    tryRefreshSessionInStore: vi.fn(original.tryRefreshSessionInStore),
+    handleOidcLogin: vi.fn(async () => new Response(null, { status: 302 })),
+    handleOidcCallback: vi.fn(async () => new Response(null, { status: 302 })),
+    handleOidcLogout: vi.fn(async () => new Response(null, { status: 302 })),
+    handleHeartbeat: vi.fn(async () => new Response(null, { status: 200 })),
+  };
+});
 
 // getCurrentSession is wrapped in React's cache(); make it a pass-through.
 vi.mock('react', () => ({ cache: (fn: unknown) => fn }));
@@ -69,6 +79,7 @@ const baseSession = (accessToken?: string): Session => ({
 
 beforeEach(() => {
   jar.clear();
+  currentRequest.cookies = currentRequest.newRequestCookies();
   vi.clearAllMocks();
 });
 
@@ -230,5 +241,94 @@ describe('createFidesAuth — bound config', () => {
       request,
       expect.objectContaining({ applicationUrl: 'https://app.test' }),
     );
+  });
+
+  it('binds authorizedFetch to refresh the cookie session on a 401', async () => {
+    const refresh = vi.mocked(core.tryRefreshSessionInStore).mockResolvedValueOnce({
+      ok: true,
+      session: baseSession('new-token'),
+      rotatedRefreshToken: false,
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+    onTestFinished(() => fetchSpy.mockRestore());
+
+    const result = await auth.authorizedFetch(baseSession('old-token'), 'me', {
+      allowedBase: 'https://api.test/v1/',
+    });
+
+    expect(result.refreshed).toBe(true);
+    expect(refresh).toHaveBeenCalledWith(expect.anything(), oauthConfig, secret);
+    const retry = new Headers(fetchSpy.mock.calls[1]?.[1]?.headers);
+    expect(retry.get('Authorization')).toBe('Bearer new-token');
+  });
+
+  describe('authorizedFetch — one refresh per request', () => {
+    const refreshed = {
+      ok: true as const,
+      session: baseSession('new-token'),
+      rotatedRefreshToken: true,
+    };
+
+    /** An API that accepts only the refreshed token. */
+    const stubApi = () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) =>
+        new Headers(init?.headers).get('Authorization') === 'Bearer new-token'
+          ? new Response('{}', { status: 200 })
+          : new Response(null, { status: 401 }),
+      );
+      onTestFinished(() => fetchSpy.mockRestore());
+      return fetchSpy;
+    };
+
+    const options = { allowedBase: 'https://api.test/v1/' };
+
+    it('shares one refresh between parallel 401s', async () => {
+      const refresh = vi.mocked(core.tryRefreshSessionInStore).mockResolvedValueOnce(refreshed);
+      const fetchSpy = stubApi();
+      const stale = baseSession('old-token');
+
+      const results = await Promise.all([
+        auth.authorizedFetch(stale, 'a', options),
+        auth.authorizedFetch(stale, 'b', options),
+        auth.authorizedFetch(stale, 'c', options),
+      ]);
+
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(fetchSpy).toHaveBeenCalledTimes(6);
+      for (const result of results) {
+        expect(result.refreshed).toBe(true);
+        expect(result.session.tokens?.accessToken).toBe('new-token');
+      }
+    });
+
+    it('skips the refresh with refresh: false, so a 401 is an http_error', async () => {
+      const fetchSpy = stubApi();
+
+      const error = await auth
+        .authorizedFetch(baseSession('old-token'), 'a', { ...options, refresh: false })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(core.AuthorizedFetchError);
+      expect(error).toMatchObject({ reason: 'http_error', status: 401 });
+      expect(core.tryRefreshSessionInStore).not.toHaveBeenCalled();
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('refreshes again in the next request', async () => {
+      const refresh = vi
+        .mocked(core.tryRefreshSessionInStore)
+        .mockResolvedValueOnce(refreshed)
+        .mockResolvedValueOnce(refreshed);
+      stubApi();
+
+      await auth.authorizedFetch(baseSession('old-token'), 'a', options);
+      currentRequest.cookies = currentRequest.newRequestCookies();
+      await auth.authorizedFetch(baseSession('old-token'), 'a', options);
+
+      expect(refresh).toHaveBeenCalledTimes(2);
+    });
   });
 });

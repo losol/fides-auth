@@ -85,6 +85,24 @@ const refreshed = await auth.tryRefreshCurrentSession();
 await auth.clearCurrentSession();
 ```
 
+API calls with the access token. On a 401, `authorizedFetch` refreshes the
+session and retries once; parallel calls in one request share the refresh. The
+refresh writes cookies, so it works only in Server Actions and Route Handlers.
+In a Server Component pass `refresh: false`, and a 401 is an `http_error`:
+
+```typescript
+const api = { allowedBase: "https://api.example.com/v1/" };
+
+// Server Action or Route Handler
+const { data } = await auth.authorizedFetch(session, "users/me", {
+  ...api,
+  parse: (response) => response.json(),
+});
+
+// Server Component
+const { data } = await auth.authorizedFetch(session, "users/me", { ...api, refresh: false });
+```
+
 The handlers are also exported on their own (`@eventuras/fides-auth-next/oidc-login`
 and so on). Those take `oauthConfig` and `secret` in their config.
 
