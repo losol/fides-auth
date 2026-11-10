@@ -97,7 +97,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   random.mockReturnValue(0);
   mockedExchange.mockResolvedValue({ accessToken: 'a' } as any);
-  mockedBuildSession.mockReturnValue({} as any);
+  mockedBuildSession.mockReturnValue({ tokens: { accessToken: 'a' } } as any);
   mockedValidateReturnUrl.mockReturnValue(new URL('https://host.example.test/'));
 });
 
