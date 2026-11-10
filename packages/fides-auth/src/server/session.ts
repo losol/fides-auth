@@ -24,6 +24,7 @@ import type { CookieStore } from './cookie-store';
 import {
   clearSessionCookies,
   resolvePersistence,
+  SessionSecretError,
   type ReadSessionResult,
   type SessionPersistence,
   type SessionSecret,
@@ -115,6 +116,8 @@ export async function tryReadSession(
   try {
     return await resolvePersistence(persistence).read(store);
   } catch (error) {
+    // A bad secret must fail loudly, not log everyone out.
+    if (error instanceof SessionSecretError) throw error;
     // Worker thread errors (e.g. from the crypto worker) should not crash the app.
     if (error instanceof Error && error.message.includes('worker')) {
       logger.error({ error }, 'Worker thread error reading session');
@@ -311,6 +314,7 @@ export async function readIdToken(
   try {
     return await resolvePersistence(persistence).readIdToken(store);
   } catch (error) {
+    if (error instanceof SessionSecretError) throw error;
     logger.error({ error }, 'Unexpected error reading ID token');
     return undefined;
   }

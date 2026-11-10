@@ -8,14 +8,16 @@
 import { createLogger } from '../logger';
 import type { OAuthConfig } from '../oauth';
 import { SESSION_EVENT, logSessionEvent, type SessionRejectedReason } from '../session-events';
-import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
 import { tryRefreshSessionInStore } from './session';
-import type { SessionPersistence, SessionSecret } from './session-persistence';
+import { persistenceFrom, type SessionPersistenceConfig } from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:heartbeat' });
 
-export interface HeartbeatHandlerConfig {
+/** {@link handleHeartbeat} config. Takes `secret`, `persistence`, or both. */
+export type HeartbeatHandlerConfig = HeartbeatBaseConfig & SessionPersistenceConfig;
+
+interface HeartbeatBaseConfig {
   /** OAuth/OIDC configuration used to refresh the access token. */
   oauthConfig: OAuthConfig;
 
@@ -24,12 +26,6 @@ export interface HeartbeatHandlerConfig {
 
   /** Optional rate-limit gate. When it resolves false, the handler responds 429. */
   rateLimit?: () => boolean | Promise<boolean>;
-
-  /** Session encryption secret for the default cookie persistence. Defaults to {@link getSessionSecret}. */
-  secret?: SessionSecret;
-
-  /** Where the session lives. Defaults to the cookies under `secret`; see `serverPersistence`. */
-  persistence?: SessionPersistence;
 }
 
 /**
@@ -51,7 +47,7 @@ export async function handleHeartbeat(
   config: HeartbeatHandlerConfig,
 ): Promise<Response> {
   const { oauthConfig, cookies, rateLimit } = config;
-  const persistence = config.persistence ?? config.secret ?? getSessionSecret();
+  const persistence = persistenceFrom(config);
 
   if (request.method !== 'POST') {
     return new Response(null, { status: 405, headers: { Allow: 'POST' } });

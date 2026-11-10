@@ -8,7 +8,10 @@
  * fresh access token (and rotated refresh token, if the IdP rotates).
  */
 
-import { handleHeartbeat as coreHandleHeartbeat } from '@eventuras/fides-auth/server';
+import {
+  handleHeartbeat as coreHandleHeartbeat,
+  type SessionSecret,
+} from '@eventuras/fides-auth/server';
 import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
 
 import { nextCookieStore } from './cookie-store';
@@ -17,10 +20,14 @@ import { globalPOSTRateLimit } from './request';
 export interface HeartbeatHandlerConfig {
   /** OAuth/OIDC configuration used to refresh the access token. */
   oauthConfig: OAuthConfig;
+
+  /** Session encryption secret. */
+  secret: SessionSecret;
 }
 
 /**
- * Handles a heartbeat request in a Next.js route handler.
+ * Handles a heartbeat request in a Next.js route handler. `createFidesAuth`
+ * returns this with `oauthConfig` and `secret` bound.
  *
  * @example
  * ```ts
@@ -29,7 +36,7 @@ export interface HeartbeatHandlerConfig {
  * import { oauthConfig } from '@/utils/oauthConfig';
  *
  * export async function POST(request: Request) {
- *   return handleHeartbeat(request, { oauthConfig });
+ *   return handleHeartbeat(request, { oauthConfig, secret: process.env.SESSION_SECRET! });
  * }
  * ```
  */
@@ -39,6 +46,7 @@ export async function handleHeartbeat(
 ): Promise<Response> {
   return coreHandleHeartbeat(request, {
     oauthConfig: config.oauthConfig,
+    secret: config.secret,
     cookies: await nextCookieStore(),
     rateLimit: globalPOSTRateLimit,
   });

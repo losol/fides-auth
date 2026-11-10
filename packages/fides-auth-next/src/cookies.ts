@@ -179,7 +179,7 @@ export async function deleteAuthCookies(names: string[]): Promise<void> {
  *
  * @example
  * ```ts
- * const jwt = await createSession({ ... });
+ * const jwt = await createEncryptedJWT(session, secret);
  * await setSessionCookie(jwt);
  * ```
  */
@@ -235,7 +235,7 @@ export async function deleteAccessTokenCookie(): Promise<void> {
  * ```ts
  * const sessionToken = await getSessionCookie();
  * if (sessionToken) {
- *   const { status, session } = await validateSessionJwt(sessionToken);
+ *   const { status, session } = await validateSessionJwt(sessionToken, secret);
  *   // ...
  * }
  * ```

@@ -67,6 +67,15 @@ function rejection(query: string, transaction: LoginTransaction, maxAgeMs?: numb
 }
 
 describe('login transaction cookie', () => {
+  it('rejects a short secret, which HKDF alone would accept', async () => {
+    const { store, jar } = memoryStore();
+
+    await expect(
+      persistTransaction(store, createTransaction(pkce('st')), 'a'.repeat(32)),
+    ).rejects.toThrow('fides-auth: session secret must be 32 bytes');
+    expect(jar.size).toBe(0);
+  });
+
   it('seals one cookie per login and reads it back by state', async () => {
     const { store, jar, options } = memoryStore();
     const transaction = createTransaction(pkce('st'), { returnTo: '/dash' });

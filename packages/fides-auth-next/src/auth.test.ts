@@ -1,18 +1,15 @@
 // @vitest-environment node
 /**
- * Tests for the split-cookie session storage: the access token lives in its own
- * "session_at" cookie while the rest of the session lives in "session".
+ * Tests for createFidesAuth. Split-cookie storage: the access token lives in its
+ * own "session_at" cookie while the rest of the session lives in "session".
  * getCurrentSession must reassemble the two — expired access token included —
  * and still read legacy single-cookie sessions with a live access token.
  */
-import { vi, describe, it, expect, beforeEach } from 'vitest';
-
-// 32-byte (64 hex char) secret for A256GCM, set before any module reads it.
-process.env.SESSION_SECRET = 'a'.repeat(64);
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // In-memory cookie jar backing the mocked next/headers cookie store (hoisted so
 // the vi.mock factory can close over it). This exercises the real adapter path:
-// session.ts -> nextCookieStore -> @eventuras/fides-auth/server.
+// auth.ts -> nextCookieStore -> @eventuras/fides-auth/server.
 const { jar } = vi.hoisted(() => ({ jar: new Map<string, string>() }));
 
 vi.mock('next/headers', () => ({
@@ -21,19 +18,37 @@ vi.mock('next/headers', () => ({
     set: (name: string, value: string) => { jar.set(name, value); },
     delete: (name: string) => { jar.delete(name); },
   })),
+  headers: vi.fn(async () => new Headers()),
+}));
+
+// Only the route handlers are stubbed; the session helpers stay real.
+vi.mock('@eventuras/fides-auth/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@eventuras/fides-auth/server')>()),
+  handleOidcLogin: vi.fn(async () => new Response(null, { status: 302 })),
+  handleOidcCallback: vi.fn(async () => new Response(null, { status: 302 })),
+  handleOidcLogout: vi.fn(async () => new Response(null, { status: 302 })),
+  handleHeartbeat: vi.fn(async () => new Response(null, { status: 200 })),
 }));
 
 // getCurrentSession is wrapped in React's cache(); make it a pass-through.
 vi.mock('react', () => ({ cache: (fn: unknown) => fn }));
 
-import {
-  createAndPersistSession,
-  getCurrentSession,
-  tryGetCurrentSession,
-  clearCurrentSession,
-} from './session';
-import { createEncryptedJWT, getSessionSecret } from '@eventuras/fides-auth/utils';
+import { createFidesAuth } from './auth';
+import * as core from '@eventuras/fides-auth/server';
+import { createEncryptedJWT } from '@eventuras/fides-auth/utils';
 import type { Session } from '@eventuras/fides-auth/types';
+
+const secret = 'a'.repeat(64);
+const oauthConfig = {
+  issuer: 'https://id.example.test',
+  clientId: 'web',
+  clientSecret: 'shh',
+  redirect_uri: 'https://app.test/api/auth/callback/oidc',
+  scope: 'openid',
+};
+const auth = createFidesAuth({ secret, oauthConfig });
+const { createAndPersistSession, getCurrentSession, tryGetCurrentSession, clearCurrentSession } =
+  auth;
 
 /** Builds an unsigned JWT carrying only an `exp` claim (decoded, never verified). */
 function jwtWithExp(secondsFromNow: number): string {
@@ -55,6 +70,10 @@ const baseSession = (accessToken?: string): Session => ({
 beforeEach(() => {
   jar.clear();
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe('split-cookie session storage', () => {
@@ -113,7 +132,7 @@ describe('split-cookie session storage', () => {
   it('still reads a legacy session that holds the access token in the main cookie', async () => {
     // No session_at — the full session (incl. access token) lives in "session".
     const accessToken = jwtWithExp(3600);
-    const legacyJwt = await createEncryptedJWT(baseSession(accessToken), getSessionSecret());
+    const legacyJwt = await createEncryptedJWT(baseSession(accessToken), secret);
     jar.set('session', legacyJwt);
 
     const session = await getCurrentSession();
@@ -122,8 +141,7 @@ describe('split-cookie session storage', () => {
 });
 
 describe('tryGetCurrentSession — the reason-carrying read', () => {
-  // The Next surface is where eventuras's proxy and status route live, so the
-  // shared vocabulary has to be reachable from here without hand-rolling a
+  // Proxies and status routes need the shared vocabulary without hand-rolling a
   // CookieStore over next/headers.
   it('reports no_session_cookie for an anonymous request', async () => {
     expect(await tryGetCurrentSession()).toEqual({
@@ -159,5 +177,58 @@ describe('tryGetCurrentSession — the reason-carrying read', () => {
     ]);
 
     expect(viaTry.session).toEqual(viaLegacy);
+  });
+});
+
+describe('createFidesAuth — bound config', () => {
+  it('uses its own secret, not another instance\'s or SESSION_SECRET', async () => {
+    const other = 'b'.repeat(64);
+    vi.stubEnv('SESSION_SECRET', other);
+    await createAndPersistSession(baseSession(jwtWithExp(3600)));
+
+    expect((await tryGetCurrentSession()).session).not.toBeNull();
+    expect((await createFidesAuth({ secret: other, oauthConfig }).tryGetCurrentSession()).reason)
+      .toBe('unreadable_session');
+  });
+
+  it('takes an unset secret at creation and rejects it on first use', async () => {
+    // Next evaluates route modules during the build, often without the secret.
+    const unset = createFidesAuth({ secret: undefined as never, oauthConfig });
+
+    await expect(unset.tryGetCurrentSession()).rejects.toThrow('missing or empty');
+    await expect(unset.createAndPersistSession(baseSession('a'))).rejects.toThrow(
+      'missing or empty',
+    );
+  });
+
+  it('passes per-request authorization parameters to the login handler', async () => {
+    const request = new Request('https://app.test/api/auth/login?reauth');
+    const authorizationParameters = () => ({ prompt: 'login' });
+
+    await auth.handleOidcLogin(request, { authorizationParameters });
+
+    expect(core.handleOidcLogin).toHaveBeenCalledWith(
+      request,
+      expect.objectContaining({ authorizationParameters, oauthConfig, secret }),
+    );
+  });
+
+  it('passes oauthConfig and secret to every handler', async () => {
+    const request = new Request('https://app.test/api/auth');
+
+    await auth.handleOidcLogin(request);
+    await auth.handleOidcCallback(request, { applicationUrl: 'https://app.test' });
+    await auth.handleOidcLogout(request, { postLogoutRedirectUri: 'https://app.test/' });
+    await auth.handleHeartbeat(request);
+
+    const bound = expect.objectContaining({ oauthConfig, secret });
+    expect(core.handleOidcLogin).toHaveBeenCalledWith(request, bound);
+    expect(core.handleOidcCallback).toHaveBeenCalledWith(request, bound);
+    expect(core.handleOidcLogout).toHaveBeenCalledWith(request, bound);
+    expect(core.handleHeartbeat).toHaveBeenCalledWith(request, bound);
+    expect(core.handleOidcCallback).toHaveBeenCalledWith(
+      request,
+      expect.objectContaining({ applicationUrl: 'https://app.test' }),
+    );
   });
 });

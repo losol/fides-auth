@@ -43,32 +43,50 @@ const { logout } = useAuthActions();
 - **OAuth**: Complete OAuth flow with PKCE and RP-initiated logout
 - **TypeScript**: Full type safety
 
-## Core Functions
+## Server Setup
+
+Create one instance and import it where you need it. The library never reads
+the environment, so pass the secret in:
 
 ```typescript
-// Server-side
-import {
-  getCurrentSession,
-  createAndPersistSession,
-  clearCurrentSession,
-  setSessionCookie,
-  getSessionCookie,
-} from "@eventuras/fides-auth-next";
+// lib/auth.ts
+import { createFidesAuth } from "@eventuras/fides-auth-next";
 
-// Route handlers
-import { handleOidcLogin } from "@eventuras/fides-auth-next/oidc-login";
-import { handleOidcCallback } from "@eventuras/fides-auth-next/oidc-callback";
-import { handleOidcLogout } from "@eventuras/fides-auth-next/oidc-logout";
-
-// Client-side
-import { useAuthStore, useAuthActions } from "./auth-store";
+export const auth = createFidesAuth({
+  secret: process.env.SESSION_SECRET!, // openssl rand -hex 32
+  oauthConfig,
+});
 ```
 
-## Environment
+Route handlers:
 
-```bash
-SESSION_SECRET=your-32-byte-hex-secret  # openssl rand -hex 32
+```typescript
+// app/api/auth/login/route.ts
+export const GET = (request: Request) => auth.handleOidcLogin(request);
+
+// app/api/auth/callback/oidc/route.ts
+export const GET = (request: Request) =>
+  auth.handleOidcCallback(request, { applicationUrl: "https://app.example.com" });
+
+// app/api/auth/logout/route.ts
+export const POST = (request: Request) =>
+  auth.handleOidcLogout(request, { postLogoutRedirectUri: "https://app.example.com/" });
+
+// app/api/auth/heartbeat/route.ts
+export const POST = (request: Request) => auth.handleHeartbeat(request);
 ```
+
+Server components, server actions and route handlers:
+
+```typescript
+const session = await auth.getCurrentSession();
+const { reason } = await auth.tryGetCurrentSession();
+const refreshed = await auth.tryRefreshCurrentSession();
+await auth.clearCurrentSession();
+```
+
+The handlers are also exported on their own (`@eventuras/fides-auth-next/oidc-login`
+and so on). Those take `oauthConfig` and `secret` in their config.
 
 ## Documentation
 

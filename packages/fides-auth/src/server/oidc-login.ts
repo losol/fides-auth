@@ -9,14 +9,13 @@ import { CookieTooLargeError } from '../cookies';
 import { createLogger } from '../logger';
 import type { OAuthConfig } from '../oauth';
 import { buildPKCEOptions, discoverAndBuildAuthorizationUrl } from '../oauth';
-import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
 import {
   createTransaction,
   persistTransaction,
   transactionCookieOptions,
 } from './login-transaction';
-import type { SessionSecret } from './session-persistence';
+import { assertSessionSecret, type SessionSecret } from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-login' });
 
@@ -27,8 +26,8 @@ export interface OidcLoginConfig {
   /** Cookie store that receives the login transaction cookie. */
   cookies: CookieStore;
 
-  /** Seals the login transaction. Must match the callback's. Defaults to {@link getSessionSecret}. */
-  secret?: SessionSecret;
+  /** Seals the login transaction. Must match the callback's. */
+  secret: SessionSecret;
 
   /**
    * Optional rate-limit gate. When it resolves false, the handler responds 429.
@@ -63,6 +62,8 @@ export async function handleOidcLogin(
   config: OidcLoginConfig,
 ): Promise<Response> {
   const { oauthConfig, cookies, rateLimit, validateReturnTo = defaultValidateReturnTo } = config;
+  // Before discovery or PAR: a bad secret should fail without contacting the provider.
+  assertSessionSecret(config.secret);
 
   if (rateLimit && !(await rateLimit())) {
     logger.warn('Rate limit exceeded');
@@ -78,7 +79,7 @@ export async function handleOidcLogin(
   const authorizationUrl = await discoverAndBuildAuthorizationUrl(oauthConfig, pkce);
 
   const transaction = createTransaction(pkce, { returnTo });
-  const secret = config.secret ?? getSessionSecret();
+  const secret = config.secret;
   const cookieOptions = transactionCookieOptions(oauthConfig.redirect_uri);
   try {
     await persistTransaction(cookies, transaction, secret, cookieOptions);

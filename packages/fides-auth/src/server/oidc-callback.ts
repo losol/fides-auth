@@ -14,7 +14,6 @@ import {
   validateReturnUrl,
 } from '../oauth';
 import { SESSION_EVENT } from '../session-events';
-import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
 import {
   CallbackValidationError,
@@ -24,7 +23,11 @@ import {
   validateCallback,
 } from './login-transaction';
 import { persistSession } from './session';
-import type { SessionPersistence, SessionSecret } from './session-persistence';
+import {
+  assertSessionSecret,
+  type SessionPersistence,
+  type SessionSecret,
+} from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-callback' });
 
@@ -46,9 +49,9 @@ export interface OidcCallbackConfig {
 
   /**
    * Opens the login transaction (must match `handleOidcLogin`'s) and encrypts the
-   * default cookie persistence. Defaults to {@link getSessionSecret}.
+   * default cookie persistence. Required even with `persistence`.
    */
-  secret?: SessionSecret;
+  secret: SessionSecret;
 
   /** Where the session lives. Defaults to the cookies under `secret`; see `serverPersistence`. */
   persistence?: SessionPersistence;
@@ -84,12 +87,14 @@ export async function handleOidcCallback(
     oauthConfig,
     applicationUrl,
     cookies,
+    secret,
     rateLimit,
     rolesClaim = 'roles',
     defaultRedirectPath = '/',
     validateReturnTo,
   } = config;
-  const secret = config.secret ?? getSessionSecret();
+  // Up front, so a bad secret fails before the transaction is read or the code exchanged.
+  assertSessionSecret(secret);
   const persistence = config.persistence ?? secret;
   const txCookie = transactionCookieOptions(oauthConfig.redirect_uri);
 

@@ -7,10 +7,9 @@
 import { createLogger } from '../logger';
 import type { OAuthConfig } from '../oauth';
 import { buildOidcLogoutUrl } from '../oauth';
-import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
 import { clearSession, readIdToken, tryReadSession } from './session';
-import type { SessionPersistence, SessionSecret } from './session-persistence';
+import { persistenceFrom, type SessionPersistenceConfig } from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-logout' });
 
@@ -38,7 +37,10 @@ function isSameOrigin(request: Request, applicationUrl?: string): boolean {
   }
 }
 
-export interface OidcLogoutConfig {
+/** {@link handleOidcLogout} config. Takes `secret`, `persistence`, or both. */
+export type OidcLogoutConfig = OidcLogoutBaseConfig & SessionPersistenceConfig;
+
+interface OidcLogoutBaseConfig {
   /** OAuth/OIDC configuration. */
   oauthConfig: OAuthConfig;
 
@@ -47,12 +49,6 @@ export interface OidcLogoutConfig {
 
   /** Post-logout redirect URI. Must be registered with the provider. */
   postLogoutRedirectUri: string;
-
-  /** Session encryption secret for the default cookie persistence. Defaults to {@link getSessionSecret}. */
-  secret?: SessionSecret;
-
-  /** Where the session lives. Defaults to the cookies under `secret`; see `serverPersistence`. */
-  persistence?: SessionPersistence;
 
   /** Optional rate-limit gate. When it resolves false, the handler responds 429. */
   rateLimit?: () => boolean | Promise<boolean>;
@@ -108,7 +104,7 @@ export async function handleOidcLogout(
     allowedMethods = ['POST'],
     applicationUrl,
   } = config;
-  const persistence = config.persistence ?? config.secret ?? getSessionSecret();
+  const persistence = persistenceFrom(config);
 
   if (!allowedMethods.includes(request.method)) {
     return new Response(null, {

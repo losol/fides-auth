@@ -1,7 +1,7 @@
 // Next.js-specific bindings
 export * from './cookie-store';
 export * from './request';
-export * from './session';
+export * from './auth';
 export * from './cookies';
 export * from './oidc-callback';
 export * from './oidc-login';
