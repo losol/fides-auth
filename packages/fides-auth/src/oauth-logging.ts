@@ -4,8 +4,9 @@ import type { RefreshFailureCause } from './session-events';
 /**
  * Returns a structured, log-safe context describing an `OAuthConfig`.
  *
- * Excludes `clientSecret`. Use this to attach provider configuration to log
- * lines for debugging OAuth/OIDC flows without leaking credentials.
+ * Excludes credentials (`clientSecret`, `privateKey`). Use this to attach
+ * provider configuration to log lines for debugging OAuth/OIDC flows without
+ * leaking credentials.
  */
 export function getOAuthConfigLogContext(config: OAuthConfig) {
   return {

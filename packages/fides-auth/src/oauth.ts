@@ -4,7 +4,7 @@ import * as openid from 'openid-client';
 
 import { createLogger } from './logger';
 import { getOAuthErrorLogContext } from './oauth-logging';
-import { discoverConfiguration } from './oidc-discovery';
+import { discoverConfiguration, resolveClientAuth } from './oidc-discovery';
 import { newSessionId } from './session-events';
 import type { Session } from './types';
 
@@ -16,11 +16,30 @@ export type { Configuration, TokenEndpointResponse } from 'openid-client';
 /** Default OIDC scope requesting user identity, profile, email, and offline access. */
 export const defaultScope = 'openid profile email offline_access';
 
+/**
+ * How the client authenticates at the token endpoint. Omit `clientAuth` to use
+ * `client_secret_post`.
+ */
+export type ClientAuthConfig =
+  | {
+      /** @default 'client_secret_post' */
+      clientAuth?: 'client_secret_post' | 'client_secret_basic';
+      clientSecret: string;
+    }
+  | {
+      /** Public client: sends only `client_id`. Pair it with PKCE. */
+      clientAuth: 'none';
+    }
+  | {
+      clientAuth: 'private_key_jwt';
+      /** Signs the client assertion. Reuse one key object: a new one means a new cache entry. */
+      privateKey: openid.CryptoKey | openid.PrivateKey;
+    };
+
 /** Configuration for server-side OAuth / OIDC flows. */
-export type OAuthConfig = {
+export type OAuthConfig = ClientAuthConfig & {
   issuer: string;
   clientId: string;
-  clientSecret: string;
   redirect_uri: string;
   scope: string;
   /**
@@ -31,6 +50,12 @@ export type OAuthConfig = {
    * `pushed_authorization_request_endpoint` in its discovery metadata.
    */
   usePar?: boolean;
+  /**
+   * Server metadata to use instead of OIDC discovery, e.g. an RFC 8414 document.
+   * Must include `issuer` when `scope` has `openid`. `issuer` above is then used
+   * only for logs and caching.
+   */
+  serverMetadata?: openid.ServerMetadata;
 };
 
 /**
@@ -222,20 +247,19 @@ export async function discoverAndBuildAuthorizationUrl(
 }
 
 /**
- * Configuration for OAuth client credentials flow (machine-to-machine authentication)
+ * Configuration for OAuth client credentials flow (machine-to-machine authentication).
+ * Takes any {@link ClientAuthConfig} except `none`: the grant needs client authentication.
  */
-export type ClientCredentialsConfig = {
+export type ClientCredentialsConfig = Exclude<ClientAuthConfig, { clientAuth: 'none' }> & {
   /** OAuth token endpoint URL. Must be https. */
   tokenEndpoint: string;
   /** OAuth client ID */
   clientId: string;
-  /** OAuth client secret */
-  clientSecret: string;
   /** Optional scope for the access token */
   scope?: string;
   /**
-   * Issuer identifier. Only used to satisfy the server metadata; defaults to the
-   * token endpoint's origin, which is right for the common case.
+   * Issuer identifier; defaults to the token endpoint's origin. With
+   * `private_key_jwt` it is the client assertion's `aud`, so set it to what the server expects.
    */
   issuer?: string;
   /**
@@ -555,10 +579,10 @@ export async function buildOidcLogoutUrl(
 /**
  * Performs OAuth 2.0 client credentials grant flow for machine-to-machine authentication.
  *
- * Uses client_secret_post against the given token endpoint. The endpoint must be
- * https — the request carries the client secret.
+ * Authenticates with `config.clientAuth` (default client_secret_post). The
+ * endpoint must be https — the request carries the client credentials.
  *
- * @param config - Client credentials configuration including token endpoint, client ID, and secret
+ * @param config - Client credentials configuration: token endpoint, client ID and credentials
  * @returns Token response from the OAuth provider
  * @throws Error if the endpoint is not https, the request times out, or the grant fails
  *
@@ -580,16 +604,15 @@ export async function clientCredentialsGrant(
     // give us a token endpoint, not an issuer. Going through openid-client anyway
     // buys the https guard and the timeout, which a raw fetch of a caller-supplied
     // URL carrying a client secret would not have.
+    const { clientSecret, clientAuthentication } = resolveClientAuth(config);
     const openidConfig = new openid.Configuration(
       {
         issuer: config.issuer ?? new URL(config.tokenEndpoint).origin,
         token_endpoint: config.tokenEndpoint,
       },
       config.clientId,
-      config.clientSecret,
-      // Explicit rather than relying on openid-client's default, matching the
-      // discovery calls above: the JSDoc promises client_secret_post.
-      openid.ClientSecretPost(config.clientSecret),
+      clientSecret,
+      clientAuthentication,
     );
     openidConfig.timeout = config.timeout ?? 30;
 

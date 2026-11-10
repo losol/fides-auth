@@ -16,7 +16,7 @@
 import * as openid from 'openid-client';
 
 import { createLogger } from './logger';
-import type { OAuthConfig } from './oauth';
+import type { ClientAuthConfig, OAuthConfig } from './oauth';
 
 const logger = createLogger({ namespace: 'fides-auth:oidc-discovery' });
 
@@ -40,10 +40,11 @@ interface CacheEntry {
   configuration: Promise<openid.Configuration>;
   expiresAt: number;
   /**
-   * The secret this entry was built with, compared on lookup so a rotated client
-   * secret invalidates the entry without the secret going into the cache key.
+   * The server metadata and secret or private key this entry was built with,
+   * compared on lookup so a change invalidates the entry without the credential
+   * going into the cache key.
    */
-  clientSecret: string;
+  inputs: readonly unknown[];
 }
 
 const cache = new Map<string, CacheEntry>();
@@ -94,19 +95,104 @@ export function clearDiscoveryCache(): void {
 }
 
 /**
- * Issuer and client identify a configuration; the secret is checked separately.
- * JSON-encoded rather than concatenated so no separator can be forged by a
- * value that happens to contain it.
+ * Maps `clientAuth` to openid-client's client authentication. Every
+ * `Configuration` fides-auth builds gets its client authentication from here.
+ *
+ * @throws TypeError for an unknown `clientAuth`, rather than falling back to another method.
  */
-function cacheKey(config: OAuthConfig): string {
-  return JSON.stringify([config.issuer, config.clientId]);
+export function resolveClientAuth(config: ClientAuthConfig): {
+  /** Client metadata shorthand; set only for the secret methods. */
+  clientSecret: string | undefined;
+  clientAuthentication: openid.ClientAuth;
+} {
+  switch (config.clientAuth) {
+    case undefined:
+    case 'client_secret_post':
+      return {
+        clientSecret: config.clientSecret,
+        clientAuthentication: openid.ClientSecretPost(config.clientSecret),
+      };
+    case 'client_secret_basic':
+      return {
+        clientSecret: config.clientSecret,
+        clientAuthentication: openid.ClientSecretBasic(config.clientSecret),
+      };
+    case 'none':
+      return { clientSecret: undefined, clientAuthentication: openid.None() };
+    case 'private_key_jwt':
+      return {
+        clientSecret: undefined,
+        clientAuthentication: openid.PrivateKeyJwt(config.privateKey),
+      };
+    default:
+      throw new TypeError(
+        `Unsupported clientAuth: ${String((config as { clientAuth: unknown }).clientAuth)}`,
+      );
+  }
 }
 
 /**
- * Discovers the provider's OpenID configuration, reusing a recent result.
- *
- * Every fides-auth flow goes through here, so this is also the single place
- * where the client authentication method is decided.
+ * Issuer, client and auth method identify a configuration; the credential is
+ * checked separately. JSON-encoded rather than concatenated so no separator can
+ * be forged by a value that happens to contain it.
+ */
+function cacheKey(config: OAuthConfig): string {
+  const method = config.clientAuth ?? 'client_secret_post';
+  return JSON.stringify([config.issuer, config.clientId, method]);
+}
+
+/** The values an entry must have been built from, compared by identity. */
+function cacheInputs(config: OAuthConfig): readonly unknown[] {
+  const metadata = config.serverMetadata;
+  switch (config.clientAuth) {
+    case 'none':
+      return [metadata];
+    case 'private_key_jwt': {
+      // A `{ key, kid }` wrapper may be rebuilt per call; compare what it holds.
+      const pk = config.privateKey;
+      return 'key' in pk ? [metadata, pk.key, pk.kid] : [metadata, pk, undefined];
+    }
+    default:
+      return [metadata, config.clientSecret];
+  }
+}
+
+function sameInputs(a: readonly unknown[], b: readonly unknown[]): boolean {
+  return a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
+}
+
+/** Unset scope means `defaultScope`, which includes `openid`. */
+function requestsOpenId(scope: string | undefined): boolean {
+  return scope === undefined || scope.split(/\s+/).includes('openid');
+}
+
+/** Async so a bad config rejects like a failed discovery and is never cached. */
+async function buildConfiguration(config: OAuthConfig): Promise<openid.Configuration> {
+  const { clientSecret, clientAuthentication } = resolveClientAuth(config);
+  const metadata = config.serverMetadata;
+
+  if (!metadata) {
+    return openid.discovery(
+      new URL(config.issuer),
+      config.clientId,
+      clientSecret,
+      clientAuthentication,
+    );
+  }
+
+  // Don't fall back to `config.issuer`: the ID token's `iss` must match the server's own.
+  if (!metadata.issuer && requestsOpenId(config.scope)) {
+    throw new TypeError(
+      'serverMetadata.issuer is required when scope includes "openid", to check the ID token',
+    );
+  }
+
+  return new openid.Configuration(metadata, config.clientId, clientSecret, clientAuthentication);
+}
+
+/**
+ * Discovers the provider's OpenID configuration, or builds it from
+ * `config.serverMetadata`, reusing a recent result.
  *
  * @param config - OAuth configuration identifying the provider and client.
  * @returns The openid-client `Configuration` for this provider and client.
@@ -115,26 +201,25 @@ export async function discoverConfiguration(
   config: OAuthConfig,
 ): Promise<openid.Configuration> {
   const key = cacheKey(config);
+  const inputs = cacheInputs(config);
   const now = Date.now();
   const cached = cache.get(key);
 
-  if (cached && cached.expiresAt > now && cached.clientSecret === config.clientSecret) {
+  if (cached && cached.expiresAt > now && sameInputs(cached.inputs, inputs)) {
     return cached.configuration;
   }
 
-  logger.debug({ issuer: config.issuer }, 'Discovering OpenID configuration');
-
-  const configuration = openid.discovery(
-    new URL(config.issuer),
-    config.clientId,
-    config.clientSecret,
-    // openid-client's own default is client_secret_post; stating it keeps the
-    // method visible at the one place that would grow a `clientAuth` option.
-    openid.ClientSecretPost(config.clientSecret),
+  logger.debug(
+    { issuer: config.issuer },
+    config.serverMetadata
+      ? 'Building configuration from server metadata'
+      : 'Discovering OpenID configuration',
   );
 
+  const configuration = buildConfiguration(config);
+
   if (ttlMs > 0) {
-    cache.set(key, { configuration, expiresAt: now + ttlMs, clientSecret: config.clientSecret });
+    cache.set(key, { configuration, expiresAt: now + ttlMs, inputs });
 
     // Never cache a failure: a provider that was briefly unreachable must be
     // retried on the next call, not remembered as broken for the whole TTL.

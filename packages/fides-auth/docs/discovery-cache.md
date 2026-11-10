@@ -20,9 +20,13 @@ in-flight promise rather than waiting for a result to store.
 
 ## What is cached, and for how long
 
-Keyed by issuer and client id, for five minutes. The client secret is checked on
-every lookup: rotate it and the next call rediscovers rather than authenticating
-with a credential the provider has already retired.
+Keyed by issuer, client id and `clientAuth` method, for five minutes. The client
+secret or private key is checked on every lookup: rotate it and the next call
+rediscovers rather than authenticating with a credential the provider has
+already retired. Keys are compared by identity, so reuse one `CryptoKey` object.
+
+With `serverMetadata` nothing is fetched. The configuration is cached the same
+way, against that metadata object: pass the same one each time.
 
 Failures are never cached. A provider that was briefly unreachable is retried on
 the next call — caching the rejection would turn one blip into five minutes of
