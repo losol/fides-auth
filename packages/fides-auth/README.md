@@ -78,6 +78,7 @@ Each module is available as a separate entry point for tree-shaking:
 | `@eventuras/fides-auth`                    | Node.js     | Main entry — re-exports utils, session, types, logger |
 | `@eventuras/fides-auth/oauth`              | Node.js     | OAuth/OIDC flows with `openid-client`                 |
 | `@eventuras/fides-auth/pkce`               | Universal   | PKCE verifier/challenge and `state` (Web Crypto)      |
+| `@eventuras/fides-auth/id-token`           | Universal   | ID token verification against the provider JWKS       |
 | `@eventuras/fides-auth/oauth-browser`      | Browser     | **Deprecated** — OAuth/OIDC flows with Web Crypto API |
 | `@eventuras/fides-auth/session-validation` | Node.js     | Encrypted JWT session validation                      |
 | `@eventuras/fides-auth/session-refresh`    | Node.js     | Automatic token refresh for sessions                  |
@@ -112,7 +113,7 @@ import {
 `extractUserFromTokens` and `buildSessionFromTokens` only decode the ID token —
 they don't check its signature, `iss`, `aud` or `exp`. That is safe on tokens
 straight from `exchangeAuthorizationCode`. Verify tokens from anywhere else
-first (e.g. with jose's `jwtVerify`).
+first with `verifyIdToken` from `@eventuras/fides-auth/id-token`.
 
 #### Client authentication
 
@@ -161,6 +162,23 @@ const state = createState();
 ```
 
 `buildPKCEOptions` is built on the same two functions.
+
+#### ID token verification (`/id-token`)
+
+Checks an ID token's signature, `iss`, `aud` and `exp` against the provider's
+JWKS and returns the claims. Also runs in the browser:
+
+```typescript
+import { verifyIdToken } from "@eventuras/fides-auth/id-token";
+
+const claims = await verifyIdToken(idToken, {
+  issuer: "https://auth.example.com",
+  audience: "your-client-id",
+  oauthConfig, // or jwksUri: "https://auth.example.com/jwks"
+});
+```
+
+`algorithms` defaults to `RS*`, `PS*`, `ES*` and `EdDSA`. The JWKS is cached per URI.
 
 #### Scope and extra authorization parameters
 

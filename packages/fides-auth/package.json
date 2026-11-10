@@ -71,6 +71,10 @@
       "types": "./dist/oidc-discovery.d.ts",
       "import": "./dist/oidc-discovery.js"
     },
+    "./id-token": {
+      "types": "./dist/id-token.d.ts",
+      "import": "./dist/id-token.js"
+    },
     "./oauth-logging": {
       "types": "./dist/oauth-logging.d.ts",
       "import": "./dist/oauth-logging.js"
