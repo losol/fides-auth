@@ -156,7 +156,7 @@ export async function clearTransaction(
   }
 }
 
-/** Handler default: Secure unless the callback itself is plain http. */
+/** What the handlers use: Secure and `__Host-` unless the callback is plain http. */
 export function transactionCookieOptions(redirectUri: string): TransactionCookieOptions {
   return { secure: !/^http:/i.test(redirectUri) };
 }

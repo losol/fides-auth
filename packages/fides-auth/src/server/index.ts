@@ -40,6 +40,7 @@ export {
   readTransaction,
   clearTransaction,
   validateCallback,
+  transactionCookieOptions,
   CallbackValidationError,
   type CallbackValidationReason,
   type CreateTransactionOptions,

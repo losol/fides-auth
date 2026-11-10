@@ -31,6 +31,7 @@ import {
   readTransaction,
   type LoginTransaction,
 } from './login-transaction';
+import { transactionCookieOptions } from './index';
 import { serverPersistence } from './session-persistence';
 import { createMemorySessionStore } from './session-store';
 import { sha256 } from '../utils';
@@ -200,12 +201,18 @@ describe('handleOidcCallback — login transaction', () => {
     );
   });
 
-  it('finds a plain cookie when the redirect_uri is http', async () => {
+  it('pairs a custom login using transactionCookieOptions with an http callback', async () => {
     const { store, jar } = memoryStore();
-    const transaction = createTransaction({ state: 'xyz', code_verifier: 'verifier' });
-    await persistTransaction(store, transaction, secret, { secure: false });
     const config = baseConfig(store);
     config.oauthConfig.redirect_uri = 'http://dev.test/api/auth/callback/oidc';
+    const transaction = createTransaction({ state: 'xyz', code_verifier: 'verifier' });
+    await persistTransaction(
+      store,
+      transaction,
+      secret,
+      transactionCookieOptions(config.oauthConfig.redirect_uri),
+    );
+    expect(transactionCookies(jar)).toEqual(['oauth_tx_0']);
 
     const response = await handleOidcCallback(callback('code=abc&state=xyz'), config);
 

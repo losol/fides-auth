@@ -290,7 +290,7 @@ deletes the record, so logout revokes a copied cookie too. See
 
 `handleOidcLogin` seals each login (state, PKCE verifier, returnTo, start time)
 into one of three `__Host-oauth_tx_<n>` cookies, so parallel logins don't
-collide; a fourth evicts the oldest, and a `returnTo` over 1 KB is dropped. With
+collide; a fourth evicts the oldest, and a `returnTo` over 1 KB as JSON is dropped. With
 an `http:` `redirect_uri` (plain-http development) the cookie is a plain,
 non-Secure `oauth_tx_<n>`. `handleOidcCallback` rejects it after 10 minutes and
 deletes it whatever the outcome. Pass both handlers the same `secret` (default
@@ -298,7 +298,8 @@ deletes it whatever the outcome. Pass both handlers the same `secret` (default
 `defaultRedirectPath` with `?login=error&error=<code>`, or
 `error=login_expired` once the login has ended.
 
-Custom flows use the same helpers:
+Custom flows use the same helpers. Pass them the handlers' cookie options, so a
+custom login and the built-in callback (or the reverse) agree on the cookie:
 
 ```typescript
 import {
@@ -307,20 +308,23 @@ import {
   readTransaction,
   clearTransaction,
   validateCallback,
+  transactionCookieOptions,
 } from "@eventuras/fides-auth/server";
+
+const txCookie = transactionCookieOptions(oauthConfig.redirect_uri);
 
 // Login
 const pkce = await buildPKCEOptions(oauthConfig);
-await persistTransaction(cookies, createTransaction(pkce, { returnTo }), secret);
+await persistTransaction(cookies, createTransaction(pkce, { returnTo }), secret, txCookie);
 
 // Callback
 try {
-  const transaction = await readTransaction(cookies, state, secret);
+  const transaction = await readTransaction(cookies, state, secret, txCookie);
   if (!transaction) throw new Error("No login in progress");
   validateCallback(query, transaction); // throws CallbackValidationError
   // … exchangeAuthorizationCode(oauthConfig, url, transaction.codeVerifier, transaction.state)
 } finally {
-  await clearTransaction(cookies, state, secret);
+  await clearTransaction(cookies, state, secret, txCookie);
 }
 ```
 

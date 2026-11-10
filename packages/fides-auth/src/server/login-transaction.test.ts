@@ -13,6 +13,7 @@ import {
   createTransaction,
   persistTransaction,
   readTransaction,
+  transactionCookieOptions,
   validateCallback,
   type LoginTransaction,
 } from './login-transaction';
@@ -104,6 +105,12 @@ describe('login transaction cookie', () => {
 
     await clearTransaction(store, 'st', secret, { secure: false });
     expect(jar.size).toBe(0);
+  });
+
+  it('derives the handlers\' cookie options from the redirect_uri', () => {
+    expect(transactionCookieOptions('https://app.test/cb')).toEqual({ secure: true });
+    expect(transactionCookieOptions('http://localhost:3000/cb')).toEqual({ secure: false });
+    expect(transactionCookieOptions('HTTP://dev.test/cb')).toEqual({ secure: false });
   });
 
   it('ignores an unprefixed cookie when secure, so a subdomain cannot plant one', async () => {
