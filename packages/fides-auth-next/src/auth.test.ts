@@ -36,6 +36,7 @@ vi.mock('react', () => ({ cache: (fn: unknown) => fn }));
 import { createFidesAuth } from './auth';
 import * as core from '@eventuras/fides-auth/server';
 import { createEncryptedJWT } from '@eventuras/fides-auth/utils';
+import type { MapSession } from '@eventuras/fides-auth/oauth';
 import type { Session } from '@eventuras/fides-auth/types';
 
 const secret = 'a'.repeat(64);
@@ -210,6 +211,18 @@ describe('createFidesAuth — bound config', () => {
     expect(core.handleOidcLogin).toHaveBeenCalledWith(
       request,
       expect.objectContaining({ authorizationParameters, oauthConfig, secret }),
+    );
+  });
+
+  it('passes mapSession to the callback handler', async () => {
+    const request = new Request('https://app.test/api/auth/callback/oidc');
+    const mapSession: MapSession = (_tokens, _claims, session) => session;
+
+    await auth.handleOidcCallback(request, { applicationUrl: 'https://app.test', mapSession });
+
+    expect(core.handleOidcCallback).toHaveBeenCalledWith(
+      request,
+      expect.objectContaining({ mapSession, oauthConfig, secret }),
     );
   });
 

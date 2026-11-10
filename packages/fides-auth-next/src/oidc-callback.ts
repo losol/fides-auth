@@ -8,7 +8,7 @@ import {
   handleOidcCallback as coreHandleOidcCallback,
   type SessionSecret,
 } from '@eventuras/fides-auth/server';
-import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
+import type { MapSession, OAuthConfig } from '@eventuras/fides-auth/oauth';
 
 import { nextCookieStore } from './cookie-store';
 import { globalGETRateLimit } from './request';
@@ -28,6 +28,9 @@ export interface OidcCallbackConfig {
    * @default 'roles'
    */
   rolesClaim?: string;
+
+  /** Changes the session before it is stored, e.g. to add `data`. See {@link MapSession}. */
+  mapSession?: MapSession;
 
   /**
    * Default path to redirect to after login if no returnTo cookie is set.
@@ -78,6 +81,7 @@ export async function handleOidcCallback(
     secret: config.secret,
     applicationUrl: config.applicationUrl,
     rolesClaim: config.rolesClaim,
+    mapSession: config.mapSession,
     defaultRedirectPath: config.defaultRedirectPath,
     validateReturnTo: config.validateReturnTo,
     cookies: await nextCookieStore(),
