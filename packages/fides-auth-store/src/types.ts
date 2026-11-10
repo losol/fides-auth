@@ -9,7 +9,7 @@
  */
 export type SessionUser = {
   name: string;
-  email: string;
+  email?: string;
   roles: string[];
 };
 

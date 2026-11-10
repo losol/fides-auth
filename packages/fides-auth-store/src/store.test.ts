@@ -42,6 +42,19 @@ describe('createAuthStore', () => {
     expect(ctx.isAdmin).toBe(false);
   });
 
+  it('loginSuccess takes a user without email and logs the name', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const store = createAuthStore({ checkAuthStatus: async () => ({ authenticated: true }) });
+    const user: SessionUser = { name: 'Cy', roles: [] };
+
+    store.send({ type: 'loginSuccess', user });
+
+    expect(store.getSnapshot().context.user).toEqual(user);
+    const entries = info.mock.calls.map(([line]) => JSON.parse(String(line)));
+    expect(entries).toContainEqual(expect.objectContaining({ msg: 'Login successful', user: 'Cy' }));
+    info.mockRestore();
+  });
+
   it('logout and sessionExpired clear the user', () => {
     const store = createAuthStore({ checkAuthStatus: async () => ({ authenticated: true }) });
     store.send({ type: 'authSuccess', user: admin });
