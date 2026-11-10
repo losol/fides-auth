@@ -205,11 +205,14 @@ deletes the record, so logout revokes a copied cookie too. See
 #### Login transaction
 
 `handleOidcLogin` seals each login (state, PKCE verifier, returnTo, start time)
-into its own `oauth_tx_<hash>` cookie, so parallel logins don't collide.
-`handleOidcCallback` rejects it after 10 minutes and deletes it whatever the
-outcome. Pass both handlers the same `secret` (default `SESSION_SECRET`). A
-denied or cancelled login redirects to `defaultRedirectPath` with
-`?login=error&error=<code>`.
+into one of three `__Host-oauth_tx_<n>` cookies, so parallel logins don't
+collide; a fourth evicts the oldest, and a `returnTo` over 1 KB is dropped. With
+an `http:` `redirect_uri` (plain-http development) the cookie is a plain,
+non-Secure `oauth_tx_<n>`. `handleOidcCallback` rejects it after 10 minutes and
+deletes it whatever the outcome. Pass both handlers the same `secret` (default
+`SESSION_SECRET`). A denied or cancelled login redirects to
+`defaultRedirectPath` with `?login=error&error=<code>`, or
+`error=login_expired` once the login has ended.
 
 Custom flows use the same helpers:
 
@@ -233,7 +236,7 @@ try {
   validateCallback(query, transaction); // throws CallbackValidationError
   // … exchangeAuthorizationCode(oauthConfig, url, transaction.codeVerifier, transaction.state)
 } finally {
-  await clearTransaction(cookies, state);
+  await clearTransaction(cookies, state, secret);
 }
 ```
 

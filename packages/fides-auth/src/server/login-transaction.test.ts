@@ -4,6 +4,8 @@
  */
 import { describe, it, expect } from 'vitest';
 
+import { CookieTooLargeError, type CookieOptions } from '../cookies';
+import { decryptJWT } from '../utils';
 import type { CookieStore } from './cookie-store';
 import {
   CallbackValidationError,
@@ -14,18 +16,29 @@ import {
   validateCallback,
   type LoginTransaction,
 } from './login-transaction';
+import { tryReadSession } from './session';
 
 const secret = 'a'.repeat(64);
 
-function memoryStore() {
-  const jar = new Map<string, string>();
+/** Records options and, like a browser, ignores a plain (non-Secure) delete of a __Host- cookie. */
+function memoryStore(initial?: Record<string, string>) {
+  const jar = new Map<string, string>(Object.entries(initial ?? {}));
+  const options = new Map<string, CookieOptions | undefined>();
   const store: CookieStore = {
     get: (name) => jar.get(name) ?? null,
-    set: (name, value) => { jar.set(name, value); },
-    delete: (name) => { jar.delete(name); },
+    set: (name, value, opts) => {
+      if (opts?.maxAge === 0) jar.delete(name);
+      else jar.set(name, value);
+      options.set(name, opts);
+    },
+    delete: (name) => {
+      if (!name.startsWith('__Host-')) jar.delete(name);
+    },
   };
-  return { store, jar };
+  return { store, jar, options };
 }
+
+const SLOT_0 = '__Host-oauth_tx_0';
 
 const pkce = (state: string) => ({ state, code_verifier: `verifier-for-${state}` });
 
@@ -42,16 +55,63 @@ function rejection(query: string, transaction: LoginTransaction, maxAgeMs?: numb
 
 describe('login transaction cookie', () => {
   it('seals one cookie per login and reads it back by state', async () => {
-    const { store, jar } = memoryStore();
+    const { store, jar, options } = memoryStore();
     const transaction = createTransaction(pkce('st'), { returnTo: '/dash' });
 
     await persistTransaction(store, transaction, secret);
 
-    const names = [...jar.keys()];
-    expect(names).toHaveLength(1);
-    expect(names[0]).toMatch(/^oauth_tx_[0-9a-f]{32}$/);
-    expect(jar.get(names[0]!)).not.toContain('verifier-for-st');
+    expect([...jar.keys()]).toEqual([SLOT_0]);
+    expect(jar.get(SLOT_0)).not.toContain('verifier-for-st');
+    expect(options.get(SLOT_0)).toEqual({
+      path: '/',
+      maxAge: 600,
+      sameSite: 'lax',
+      httpOnly: true,
+      secure: true,
+    });
     expect(await readTransaction(store, 'st', secret)).toEqual(transaction);
+  });
+
+  it('clears a __Host- cookie with a Secure, expired cookie', async () => {
+    const { store, jar, options } = memoryStore();
+    await persistTransaction(store, createTransaction(pkce('st')), secret);
+
+    await clearTransaction(store, 'st', secret);
+
+    expect(jar.size).toBe(0);
+    expect(options.get(SLOT_0)).toMatchObject({ path: '/', secure: true, maxAge: 0 });
+  });
+
+  it('uses a plain, non-Secure cookie when secure is off', async () => {
+    const { store, jar, options } = memoryStore();
+    await persistTransaction(store, createTransaction(pkce('st')), secret, { secure: false });
+
+    expect([...jar.keys()]).toEqual(['oauth_tx_0']);
+    expect(options.get('oauth_tx_0')?.secure).toBe(false);
+    expect(await readTransaction(store, 'st', secret, { secure: false })).not.toBeNull();
+
+    await clearTransaction(store, 'st', secret, { secure: false });
+    expect(jar.size).toBe(0);
+  });
+
+  it('ignores an unprefixed cookie when secure, so a subdomain cannot plant one', async () => {
+    const { store } = memoryStore();
+    await persistTransaction(store, createTransaction(pkce('st')), secret, { secure: false });
+
+    expect(await readTransaction(store, 'st', secret)).toBeNull();
+  });
+
+  it('is sealed under its own key, so it never opens as a session', async () => {
+    const { store, jar } = memoryStore();
+    await persistTransaction(store, createTransaction(pkce('st')), secret);
+    const [value] = [...jar.values()];
+
+    await expect(decryptJWT(value!, secret)).rejects.toThrow();
+    const { store: forged } = memoryStore({ session: value! });
+    expect(await tryReadSession(forged, secret)).toEqual({
+      session: null,
+      reason: 'unreadable_session',
+    });
   });
 
   it('keeps parallel logins apart', async () => {
@@ -60,10 +120,51 @@ describe('login transaction cookie', () => {
     await persistTransaction(store, createTransaction(pkce('two')), secret);
     expect(jar.size).toBe(2);
 
-    await clearTransaction(store, 'one');
+    await clearTransaction(store, 'one', secret);
+    await clearTransaction(store, 'unknown', secret);
 
+    expect(jar.size).toBe(1);
     expect(await readTransaction(store, 'one', secret)).toBeNull();
     expect((await readTransaction(store, 'two', secret))?.codeVerifier).toBe('verifier-for-two');
+  });
+
+  it('keeps at most three logins, evicting the oldest', async () => {
+    const { store, jar } = memoryStore();
+    const startedAt = { a: 4000, b: 1000, c: 3000, d: 5000 };
+    for (const [state, createdAt] of Object.entries(startedAt)) {
+      await persistTransaction(store, { ...createTransaction(pkce(state)), createdAt }, secret);
+    }
+
+    expect([...jar.keys()].sort()).toEqual([SLOT_0, '__Host-oauth_tx_1', '__Host-oauth_tx_2']);
+    expect(await readTransaction(store, 'b', secret)).toBeNull();
+    for (const state of ['a', 'c', 'd']) {
+      expect(await readTransaction(store, state, secret)).not.toBeNull();
+    }
+  });
+
+  it('reuses a slot holding an unreadable cookie', async () => {
+    const { store, jar } = memoryStore({ [SLOT_0]: 'garbage' });
+
+    await persistTransaction(store, createTransaction(pkce('st')), secret);
+
+    expect(jar.size).toBe(1);
+    expect(await readTransaction(store, 'st', secret)).not.toBeNull();
+  });
+
+  it('drops a returnTo over 1 KB', () => {
+    const fits = `/${'a'.repeat(1023)}`;
+    expect(createTransaction(pkce('st'), { returnTo: fits }).returnTo).toBe(fits);
+    expect(createTransaction(pkce('st'), { returnTo: `${fits}a` }).returnTo).toBeUndefined();
+  });
+
+  it('refuses to store a transaction too large for a cookie', async () => {
+    const { store, jar } = memoryStore();
+    const huge = { ...createTransaction(pkce('st')), returnTo: `/${'a'.repeat(4000)}` };
+
+    await expect(persistTransaction(store, huge, secret)).rejects.toBeInstanceOf(
+      CookieTooLargeError,
+    );
+    expect(jar.size).toBe(0);
   });
 
   it('returns null for a missing, tampered or foreign-secret cookie', async () => {

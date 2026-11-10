@@ -10,7 +10,11 @@ import type { OAuthConfig } from '../oauth';
 import { buildPKCEOptions, discoverAndBuildAuthorizationUrl } from '../oauth';
 import { getSessionSecret } from '../utils';
 import type { CookieStore } from './cookie-store';
-import { createTransaction, persistTransaction } from './login-transaction';
+import {
+  createTransaction,
+  persistTransaction,
+  transactionCookieOptions,
+} from './login-transaction';
 import type { SessionSecret } from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-login' });
@@ -66,6 +70,7 @@ export async function handleOidcLogin(
     cookies,
     createTransaction(pkce, { returnTo }),
     config.secret ?? getSessionSecret(),
+    transactionCookieOptions(oauthConfig.redirect_uri),
   );
 
   logger.info('Redirecting to OIDC provider for login');

@@ -20,6 +20,7 @@ import {
   CallbackValidationError,
   clearTransaction,
   readTransaction,
+  transactionCookieOptions,
   validateCallback,
 } from './login-transaction';
 import { persistSession } from './session';
@@ -27,8 +28,8 @@ import type { SessionPersistence, SessionSecret } from './session-persistence';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-callback' });
 
-// RFC 6749 §4.1.2.1 error charset (NQSCHAR), capped so it can't bloat the URL.
-const IDP_ERROR_CODE = /^[\x20\x21\x23-\x5B\x5D-\x7E]{1,64}$/;
+// Registered OAuth/OIDC error codes are snake_case; nothing else is echoed.
+const IDP_ERROR_CODE = /^[a-z0-9_]{1,64}$/;
 
 export interface OidcCallbackConfig {
   /** OAuth/OIDC configuration. */
@@ -90,6 +91,7 @@ export async function handleOidcCallback(
   } = config;
   const secret = config.secret ?? getSessionSecret();
   const persistence = config.persistence ?? secret;
+  const txCookie = transactionCookieOptions(oauthConfig.redirect_uri);
 
   if (rateLimit && !(await rateLimit())) {
     logger.warn('Rate limit exceeded');
@@ -98,6 +100,14 @@ export async function handleOidcCallback(
 
   const currentUrl = new URL(request.url);
   const state = currentUrl.searchParams.get('state');
+  const idpError = currentUrl.searchParams.get('error') ?? undefined;
+
+  // A cancel after the login ended still redirects, but with a fixed code:
+  // without a live transaction nothing in the query is trusted.
+  const loginEnded = (): Response =>
+    idpError === undefined
+      ? new Response('Please restart the login process.', { status: 400 })
+      : loginErrorRedirect(applicationUrl, defaultRedirectPath, 'login_expired');
 
   try {
     // Reconstruct the public callback URL. Behind a TLS-terminating proxy
@@ -107,10 +117,10 @@ export async function handleOidcCallback(
     publicUrl.pathname = currentUrl.pathname;
     publicUrl.search = currentUrl.search;
 
-    const transaction = state ? await readTransaction(cookies, state, secret) : null;
+    const transaction = state ? await readTransaction(cookies, state, secret, txCookie) : null;
     if (!transaction) {
-      logger.warn('Missing login transaction');
-      return new Response('Please restart the login process.', { status: 400 });
+      logger.warn({ error: idpError }, 'Missing login transaction');
+      return loginEnded();
     }
 
     validateCallback(currentUrl.searchParams, transaction);
@@ -158,10 +168,17 @@ export async function handleOidcCallback(
           },
           'Identity provider returned an error',
         );
-        return loginErrorRedirect(applicationUrl, defaultRedirectPath, error.idpError ?? '');
+        const code = error.idpError ?? '';
+        return loginErrorRedirect(
+          applicationUrl,
+          defaultRedirectPath,
+          IDP_ERROR_CODE.test(code) ? code : 'idp_error',
+        );
       }
-      logger.warn({ reason: error.reason }, 'Rejected OIDC callback');
-      return new Response('Please restart the login process.', { status: 400 });
+      logger.warn({ reason: error.reason, error: idpError }, 'Rejected OIDC callback');
+      return error.reason === 'transaction_expired'
+        ? loginEnded()
+        : new Response('Please restart the login process.', { status: 400 });
     }
 
     // The session was too large for a cookie — surface this distinctly instead of
@@ -183,18 +200,18 @@ export async function handleOidcCallback(
     });
   } finally {
     // The login transaction is spent whatever the outcome.
-    if (state) await clearTransaction(cookies, state);
+    if (state) await clearTransaction(cookies, state, secret, txCookie);
   }
 }
 
-/** Redirects to the default path with `login=error` and the IdP's error code, never its description. */
+/** Redirects to the default path with `login=error` and a safe error code, never a description. */
 function loginErrorRedirect(
   applicationUrl: string,
   defaultRedirectPath: string,
-  idpError: string,
+  code: string,
 ): Response {
   const redirectUrl = new URL(defaultRedirectPath, applicationUrl);
   redirectUrl.searchParams.set('login', 'error');
-  redirectUrl.searchParams.set('error', IDP_ERROR_CODE.test(idpError) ? idpError : 'idp_error');
+  redirectUrl.searchParams.set('error', code);
   return new Response(null, { status: 302, headers: { Location: redirectUrl.toString() } });
 }

@@ -23,6 +23,7 @@ import {
   buildSessionFromTokens,
   validateReturnUrl,
 } from '../oauth';
+import type { CookieOptions } from '../cookies';
 import type { CookieStore } from './cookie-store';
 import {
   createTransaction,
@@ -40,14 +41,22 @@ const mockedValidateReturnUrl = vi.mocked(validateReturnUrl);
 
 const secret = 'a'.repeat(64);
 
+/** Records options and, like a browser, ignores a plain (non-Secure) delete of a __Host- cookie. */
 function memoryStore() {
   const jar = new Map<string, string>();
+  const options = new Map<string, CookieOptions | undefined>();
   const store: CookieStore = {
     get: (name) => jar.get(name) ?? null,
-    set: (name, value) => { jar.set(name, value); },
-    delete: (name) => { jar.delete(name); },
+    set: (name, value, opts) => {
+      if (opts?.maxAge === 0) jar.delete(name);
+      else jar.set(name, value);
+      options.set(name, opts);
+    },
+    delete: (name) => {
+      if (!name.startsWith('__Host-')) jar.delete(name);
+    },
   };
-  return { store, jar };
+  return { store, jar, options };
 }
 
 /** Starts a login the way handleOidcLogin does: a sealed transaction for `state`. */
@@ -61,7 +70,7 @@ async function startLogin(
 }
 
 const transactionCookies = (jar: Map<string, string>) =>
-  [...jar.keys()].filter((name) => name.startsWith('oauth_tx_'));
+  [...jar.keys()].filter((name) => name.includes('oauth_tx_'));
 
 const callback = (query: string) =>
   new Request(`http://internal/api/auth/callback/oidc?${query}`);
@@ -90,7 +99,7 @@ beforeEach(() => {
 
 describe('handleOidcCallback — proxy callback path', () => {
   it('passes the full callback path and https scheme to the token exchange', async () => {
-    const { store, jar } = memoryStore();
+    const { store, jar, options } = memoryStore();
     await startLogin(store);
     // Internal hop arrives over http at the callback path with the auth code.
     const response = await handleOidcCallback(callback('code=abc&state=xyz'), baseConfig(store));
@@ -109,6 +118,7 @@ describe('handleOidcCallback — proxy callback path', () => {
     // The session is persisted and the login transaction is spent.
     expect(jar.has('session')).toBe(true);
     expect(transactionCookies(jar)).toEqual([]);
+    expect(options.get('__Host-oauth_tx_0')).toMatchObject({ secure: true, maxAge: 0 });
   });
 });
 
@@ -182,6 +192,19 @@ describe('handleOidcCallback — login transaction', () => {
     );
   });
 
+  it('finds a plain cookie when the redirect_uri is http', async () => {
+    const { store, jar } = memoryStore();
+    const transaction = createTransaction({ state: 'xyz', code_verifier: 'verifier' });
+    await persistTransaction(store, transaction, secret, { secure: false });
+    const config = baseConfig(store);
+    config.oauthConfig.redirect_uri = 'http://dev.test/api/auth/callback/oidc';
+
+    const response = await handleOidcCallback(callback('code=abc&state=xyz'), config);
+
+    expect(response.status).toBe(302);
+    expect(transactionCookies(jar)).toEqual([]);
+  });
+
   it('completes one of two parallel logins without touching the other', async () => {
     const { store, jar } = memoryStore();
     await startLogin(store, 'one');
@@ -215,29 +238,56 @@ describe('handleOidcCallback — IdP errors and cleanup', () => {
     expect(transactionCookies(jar)).toEqual([]);
   });
 
-  it('replaces an error code outside the RFC 6749 charset', async () => {
+  it.each([
+    ['"><script>', 'idp_error'],
+    ['<img src=x onerror=alert(1)>', 'idp_error'],
+    ['ACCESS_DENIED', 'idp_error'],
+    ['a'.repeat(65), 'idp_error'],
+    ['a'.repeat(64), 'a'.repeat(64)],
+    ['login_required', 'login_required'],
+  ])('passes on error=%s as %s', async (code, expected) => {
     const { store } = memoryStore();
     await startLogin(store);
 
-    const response = await handleOidcCallback(callback('error=%22%3E%3Cscript%3E&state=xyz'), {
-      ...baseConfig(store),
-      defaultRedirectPath: '/welcome',
-    });
+    const response = await handleOidcCallback(
+      callback(`error=${encodeURIComponent(code)}&state=xyz`),
+      { ...baseConfig(store), defaultRedirectPath: '/welcome' },
+    );
 
     const location = new URL(response.headers.get('Location')!);
     expect(location.pathname).toBe('/welcome');
-    expect(location.searchParams.get('error')).toBe('idp_error');
+    expect(location.searchParams.get('error')).toBe(expected);
   });
 
-  it('ignores an IdP error whose state matches no login', async () => {
+  it.each([
+    ['whose state matches no login', 'error=access_denied&state=xyz'],
+    ['without a state', 'error=access_denied'],
+  ])('redirects an IdP error %s with a fixed code', async (_, query) => {
     const { store } = memoryStore();
+
+    const response = await handleOidcCallback(callback(query), baseConfig(store));
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get('Location')!);
+    expect(location.searchParams.get('login')).toBe('error');
+    expect(location.searchParams.get('error')).toBe('login_expired');
+  });
+
+  it('redirects an IdP error on an expired transaction with a fixed code', async () => {
+    const { store, jar } = memoryStore();
+    await startLogin(store, 'xyz', { createdAt: Date.now() - 11 * 60_000 });
 
     const response = await handleOidcCallback(
       callback('error=access_denied&state=xyz'),
       baseConfig(store),
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(302);
+    expect(new URL(response.headers.get('Location')!).searchParams.get('error')).toBe(
+      'login_expired',
+    );
+    expect(mockedExchange).not.toHaveBeenCalled();
+    expect(transactionCookies(jar)).toEqual([]);
   });
 
   it('clears the transaction when the code exchange fails', async () => {
