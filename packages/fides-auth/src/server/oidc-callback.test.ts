@@ -9,7 +9,7 @@
  * The OAuth machinery (tested elsewhere) is mocked; we assert on the URL handed
  * to exchangeAuthorizationCode and that the session is persisted via the store.
  */
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterAll } from 'vitest';
 
 vi.mock('../oauth', () => ({
   exchangeAuthorizationCode: vi.fn(),
@@ -90,11 +90,19 @@ const baseConfig = (store: CookieStore) => ({
   secret,
 });
 
+// The first free transaction slot.
+const random = vi.spyOn(Math, 'random');
+
 beforeEach(() => {
   vi.clearAllMocks();
+  random.mockReturnValue(0);
   mockedExchange.mockResolvedValue({ accessToken: 'a' } as any);
   mockedBuildSession.mockReturnValue({} as any);
   mockedValidateReturnUrl.mockReturnValue(new URL('https://host.example.test/'));
+});
+
+afterAll(() => {
+  random.mockRestore();
 });
 
 describe('handleOidcCallback — proxy callback path', () => {

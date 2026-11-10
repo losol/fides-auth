@@ -2,7 +2,7 @@
  * Tests for the OIDC login handler — focused on the login transaction cookie.
  * The OAuth machinery is mocked (tested elsewhere).
  */
-import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 
 vi.mock('../oauth', () => ({
   buildPKCEOptions: vi.fn(),
@@ -49,14 +49,22 @@ const login = (store: CookieStore, query = '') =>
     secret,
   });
 
+// The first free transaction slot, unless a test draws otherwise.
+const random = vi.spyOn(Math, 'random');
+
 beforeEach(() => {
   vi.clearAllMocks();
+  random.mockReturnValue(0);
   mockedPkce.mockResolvedValue({ state: 'st', code_verifier: 'cv' } as any);
   mockedAuthUrl.mockResolvedValue(new URL('https://id.example.test/authorize?x=1'));
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+afterAll(() => {
+  random.mockRestore();
 });
 
 describe('handleOidcLogin', () => {
@@ -119,6 +127,27 @@ describe('handleOidcLogin', () => {
     expect(jar.size).toBe(2);
     expect((await readTransaction(store, 'one', secret))?.returnTo).toBe('/a');
     expect((await readTransaction(store, 'two', secret))?.returnTo).toBe('/b');
+  });
+
+  it('lets two logins started at the same moment both complete', async () => {
+    // Both requests carry the same empty Cookie header; the browser keeps both responses.
+    const browser = new Map<string, string>();
+    const request = (): CookieStore => ({
+      get: () => null,
+      set: (name, value) => { browser.set(name, value); },
+      delete: (name) => { browser.delete(name); },
+    });
+    mockedPkce
+      .mockResolvedValueOnce({ state: 'one', code_verifier: 'cv1' } as any)
+      .mockResolvedValueOnce({ state: 'two', code_verifier: 'cv2' } as any);
+    random.mockReturnValueOnce(0).mockReturnValueOnce(0.5);
+
+    await Promise.all([login(request()), login(request())]);
+
+    const { store } = memoryStore();
+    for (const [name, value] of browser) await store.set(name, value);
+    expect(await readTransaction(store, 'one', secret)).not.toBeNull();
+    expect(await readTransaction(store, 'two', secret)).not.toBeNull();
   });
 
   it('keeps at most three logins in progress', async () => {

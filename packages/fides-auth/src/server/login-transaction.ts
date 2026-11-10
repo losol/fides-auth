@@ -95,8 +95,8 @@ export function createTransaction(
 }
 
 /**
- * Seals the transaction into a free `__Host-oauth_tx_<n>` slot, or the oldest
- * login's. Throws `CookieTooLargeError` if it would not fit in a cookie.
+ * Seals the transaction into a random free `__Host-oauth_tx_<n>` slot, or the
+ * oldest login's. Throws `CookieTooLargeError` if it would not fit in a cookie.
  */
 export async function persistTransaction(
   cookies: CookieStore,
@@ -106,8 +106,10 @@ export async function persistTransaction(
 ): Promise<void> {
   const key = await transactionKey(secret);
   const slots = await readSlots(cookies, key, secure);
+  const free = slots.filter((candidate) => !candidate.transaction);
+  // A random free slot, so two logins started at the same moment rarely share one.
   const slot =
-    slots.find((candidate) => !candidate.transaction) ??
+    free[Math.floor(Math.random() * free.length)] ??
     slots.reduce((oldest, candidate) =>
       (candidate.transaction?.createdAt ?? 0) < (oldest.transaction?.createdAt ?? 0)
         ? candidate
