@@ -5,11 +5,16 @@
  */
 
 import {
+  authorizedFetch,
+  AuthorizedFetchError,
   clearSession,
   persistSession,
   refreshSessionInStore,
   tryReadSession,
   tryRefreshSessionInStore,
+  type AuthorizedFetchErrorReason,
+  type AuthorizedFetchOptions,
+  type AuthorizedFetchResult,
   type ClearSessionOptions,
   type ReadSessionResult,
   type RefreshSessionResult,
@@ -17,6 +22,7 @@ import {
 } from '@eventuras/fides-auth/server';
 import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
 import type { CreateSessionOptions, Session } from '@eventuras/fides-auth/types';
+import { cookies } from 'next/headers';
 import { cache } from 'react';
 
 import { nextCookieStore } from './cookie-store';
@@ -27,6 +33,8 @@ import { handleOidcLogout, type OidcLogoutConfig } from './oidc-logout';
 
 // So consumers can name the helpers' types without reaching past this package.
 export type { ClearSessionOptions, ReadSessionResult, RefreshSessionResult, SessionSecret };
+export type { AuthorizedFetchErrorReason, AuthorizedFetchOptions, AuthorizedFetchResult };
+export { AuthorizedFetchError };
 
 export interface FidesAuthConfig {
   /** Session encryption secret, e.g. 64 hex chars. Also seals the login transaction. */
@@ -38,6 +46,17 @@ export interface FidesAuthConfig {
 
 /** A handler's config minus what the factory binds. */
 type Bound<T> = Omit<T, 'oauthConfig' | 'secret'>;
+
+export type BoundAuthorizedFetchOptions<T = undefined> = Omit<
+  AuthorizedFetchOptions<T>,
+  'refresh'
+> & {
+  /**
+   * `false` skips the refresh, so a 401 is an `http_error`. Use it in a Server Component:
+   * Next won't let it write cookies, and a refresh that can't be saved spends the refresh token.
+   */
+  refresh?: false;
+};
 
 export interface FidesAuth {
   /** The current session, or null. Cached per render; the access token may have expired. */
@@ -57,6 +76,17 @@ export interface FidesAuth {
 
   /** Deletes the session cookies. `trigger` defaults to `logout`. */
   clearCurrentSession(options?: ClearSessionOptions): Promise<void>;
+
+  /**
+   * `authorizedFetch` that, on a 401, refreshes the session in the cookies and retries once.
+   * Parallel calls in one request share one refresh. The refresh writes cookies, so it works
+   * only in Server Actions and Route Handlers; pass `refresh: false` in a Server Component.
+   */
+  authorizedFetch<T = undefined>(
+    session: Session,
+    url: string | URL,
+    options: BoundAuthorizedFetchOptions<T>,
+  ): Promise<AuthorizedFetchResult<T>>;
 
   handleOidcLogin(request: Request, options?: Bound<OidcLoginConfig>): Promise<Response>;
   handleOidcCallback(request: Request, options: Bound<OidcCallbackConfig>): Promise<Response>;
@@ -85,6 +115,20 @@ export function createFidesAuth({ secret, oauthConfig }: FidesAuthConfig): Fides
   );
   const getCurrentSession = cache(async () => (await tryGetCurrentSession()).session);
 
+  // Keyed by the request's cookies, so parallel 401s don't each spend the refresh token.
+  const refreshes = new WeakMap<object, Promise<RefreshSessionResult>>();
+  const refreshOncePerRequest = async (): Promise<RefreshSessionResult> => {
+    const requestCookies = await cookies();
+    let refresh = refreshes.get(requestCookies);
+    if (!refresh) {
+      refresh = nextCookieStore().then((store) =>
+        tryRefreshSessionInStore(store, oauthConfig, secret),
+      );
+      refreshes.set(requestCookies, refresh);
+    }
+    return refresh;
+  };
+
   return {
     getCurrentSession,
     tryGetCurrentSession,
@@ -103,6 +147,12 @@ export function createFidesAuth({ secret, oauthConfig }: FidesAuthConfig): Fides
       const sid = options.sid ?? (await tryGetCurrentSession()).session?.sid;
       await clearSession(await nextCookieStore(), { trigger: options.trigger ?? 'logout', sid });
     },
+
+    authorizedFetch: (session, url, options) =>
+      authorizedFetch(session, url, {
+        ...options,
+        refresh: options.refresh === false ? undefined : refreshOncePerRequest,
+      }),
 
     handleOidcLogin: (request, options = {}) =>
       handleOidcLogin(request, { ...options, oauthConfig, secret }),

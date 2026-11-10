@@ -369,6 +369,30 @@ try {
 }
 ```
 
+#### API calls with the access token
+
+`authorizedFetch` sends the session's access token only to URLs under
+`allowedBase` (same origin, and a path under its path), never follows a
+redirect, and times out after 10 seconds by default. A refused URL, non-2xx
+response, timeout or failed `parse` throws an `AuthorizedFetchError` with a
+`reason`, the status, and the URL without its query. On a 401 it calls `refresh`
+once and retries once:
+
+```typescript
+import { authorizedFetch, tryRefreshSessionInStore } from "@eventuras/fides-auth/server";
+
+const { data, session: current } = await authorizedFetch(session, `users/${id}`, {
+  allowedBase: "https://api.example.com/v1/",
+  parse: async (response) => parseUser(await response.json()),
+  refresh: () => tryRefreshSessionInStore(cookies, oauthConfig, secret),
+});
+```
+
+`refresh` may also return `refreshSessionInStore`'s result. Both persist the new
+session; use the returned `session` for later calls. When the refresh fails, the
+error is `refresh_failed`, and `error.refreshFailure.cause === "invalid_grant"`
+means the user must log in again.
+
 ### OAuth — Browser (`/oauth-browser`)
 
 > **Deprecated.** It hardcodes the provider endpoints and doesn't validate the
