@@ -23,7 +23,10 @@ const HOST_PREFIX = '__Host-';
 /** Live logins per browser. Another login evicts the oldest. */
 const MAX_TRANSACTIONS = 3;
 
-/** A longer returnTo is dropped, not stored in a cookie sent with every request. */
+/**
+ * A longer returnTo is dropped, not stored in a cookie sent with every request.
+ * Measured as serialized: JSON escaping grows a control character sixfold.
+ */
 const MAX_RETURN_TO_BYTES = 1024;
 
 const DEFAULT_MAX_AGE_MS = 10 * 60 * 1000;
@@ -79,7 +82,7 @@ export function createTransaction(
   { returnTo }: CreateTransactionOptions = {},
 ): LoginTransaction {
   let kept = returnTo || undefined;
-  if (kept && new TextEncoder().encode(kept).length > MAX_RETURN_TO_BYTES) {
+  if (kept && new TextEncoder().encode(JSON.stringify(kept)).length > MAX_RETURN_TO_BYTES) {
     logger.warn({ length: kept.length }, 'returnTo too long, dropped');
     kept = undefined;
   }

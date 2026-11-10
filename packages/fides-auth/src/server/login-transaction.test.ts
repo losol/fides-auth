@@ -151,10 +151,27 @@ describe('login transaction cookie', () => {
     expect(await readTransaction(store, 'st', secret)).not.toBeNull();
   });
 
-  it('drops a returnTo over 1 KB', () => {
-    const fits = `/${'a'.repeat(1023)}`;
+  it('drops a returnTo over 1 KB once serialized', () => {
+    // 1024 bytes with the JSON quotes.
+    const fits = `/${'a'.repeat(1021)}`;
     expect(createTransaction(pkce('st'), { returnTo: fits }).returnTo).toBe(fits);
     expect(createTransaction(pkce('st'), { returnTo: `${fits}a` }).returnTo).toBeUndefined();
+
+    // 201 raw bytes, but each control character escapes to six.
+    const escaped = `/${'\u0001'.repeat(200)}`;
+    expect(createTransaction(pkce('st'), { returnTo: escaped }).returnTo).toBeUndefined();
+  });
+
+  it('keeps a cookie at the returnTo cap under 2 KB, even when escaped', async () => {
+    for (const returnTo of [`/${'a'.repeat(1021)}`, `/${'\u0001'.repeat(170)}`]) {
+      const { store, jar } = memoryStore();
+      const transaction = createTransaction(pkce('st'), { returnTo });
+      expect(transaction.returnTo).toBe(returnTo);
+
+      await persistTransaction(store, transaction, secret);
+
+      expect(jar.get(SLOT_0)!.length).toBeLessThan(2048);
+    }
   });
 
   it('refuses to store a transaction too large for a cookie', async () => {

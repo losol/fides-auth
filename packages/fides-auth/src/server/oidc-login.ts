@@ -5,6 +5,7 @@
 // Uses the standard Request/Response, a CookieStore, and an optional rate-limit
 // callback, so any server runtime can call it.
 
+import { CookieTooLargeError } from '../cookies';
 import { createLogger } from '../logger';
 import type { OAuthConfig } from '../oauth';
 import { buildPKCEOptions, discoverAndBuildAuthorizationUrl } from '../oauth';
@@ -36,7 +37,7 @@ export interface OidcLoginConfig {
 
   /**
    * Validates and sanitizes the returnTo parameter, returning a safe path or null.
-   * @default Only allows relative paths starting with a single `/`.
+   * @default Only allows printable-ASCII paths starting with a single `/`.
    */
   validateReturnTo?: (rawReturnTo: string) => string | null;
 
@@ -51,7 +52,7 @@ export interface OidcLoginConfig {
 }
 
 const defaultValidateReturnTo = (raw: string): string | null =>
-  /^\/(?!\/)/.test(raw) ? raw : null;
+  /^\/(?!\/)[\x20-\x7e]*$/.test(raw) ? raw : null;
 
 /**
  * Handles OIDC login initiation: rate-limit, build PKCE, seal it into a login
@@ -76,12 +77,17 @@ export async function handleOidcLogin(
   const pkce = await buildPKCEOptions(oauthConfig, { parameters });
   const authorizationUrl = await discoverAndBuildAuthorizationUrl(oauthConfig, pkce);
 
-  await persistTransaction(
-    cookies,
-    createTransaction(pkce, { returnTo }),
-    config.secret ?? getSessionSecret(),
-    transactionCookieOptions(oauthConfig.redirect_uri),
-  );
+  const transaction = createTransaction(pkce, { returnTo });
+  const secret = config.secret ?? getSessionSecret();
+  const cookieOptions = transactionCookieOptions(oauthConfig.redirect_uri);
+  try {
+    await persistTransaction(cookies, transaction, secret, cookieOptions);
+  } catch (error) {
+    // Too big for a cookie: still log in, just without the way back.
+    if (!(error instanceof CookieTooLargeError) || !transaction.returnTo) throw error;
+    logger.warn({ size: error.size }, 'Login transaction too large; dropped returnTo');
+    await persistTransaction(cookies, { ...transaction, returnTo: undefined }, secret, cookieOptions);
+  }
 
   logger.info('Redirecting to OIDC provider for login');
 
