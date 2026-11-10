@@ -131,6 +131,26 @@ describe('handleOidcCallback — proxy callback path', () => {
   });
 });
 
+describe('handleOidcCallback — session options', () => {
+  it('passes rolesClaim and mapSession to buildSessionFromTokens', async () => {
+    const { store } = memoryStore();
+    await startLogin(store);
+    const mapSession = vi.fn();
+
+    const response = await handleOidcCallback(callback('code=abc&state=xyz'), {
+      ...baseConfig(store),
+      rolesClaim: 'groups',
+      mapSession,
+    });
+
+    expect(response.status).toBe(302);
+    expect(mockedBuildSession).toHaveBeenCalledWith(
+      { accessToken: 'a' },
+      { rolesClaim: 'groups', mapSession },
+    );
+  });
+});
+
 describe('handleOidcCallback — guards', () => {
   it('rejects an empty secret before reading the transaction', async () => {
     const { store, jar } = memoryStore();

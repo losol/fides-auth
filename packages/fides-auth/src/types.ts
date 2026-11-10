@@ -23,9 +23,12 @@ export interface Session<TData = Record<string, unknown>> {
    */
   sid?: string;
   tokens?: Tokens;
+  /** From the ID token claims. Absent when the token response has no `id_token`. */
   user?: {
+    /** `sub` claim. Absent on sessions created before this field existed. */
+    sub?: string;
     name: string;
-    email: string;
+    email?: string;
     roles?: string[];
   };
   /** OAuth scopes granted to this session (e.g. ["openid", "profile", "email"]). */

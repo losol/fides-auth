@@ -7,7 +7,7 @@
 
 import { CookieTooLargeError } from '../cookies';
 import { createLogger } from '../logger';
-import type { OAuthConfig } from '../oauth';
+import type { MapSession, OAuthConfig } from '../oauth';
 import {
   buildSessionFromTokens,
   exchangeAuthorizationCode,
@@ -62,6 +62,9 @@ export interface OidcCallbackConfig {
    */
   rolesClaim?: string;
 
+  /** Changes the session before it is stored, e.g. to add `data`. See {@link MapSession}. */
+  mapSession?: MapSession;
+
   /**
    * Default path to redirect to after login if no returnTo cookie is set.
    * @default '/'
@@ -90,6 +93,7 @@ export async function handleOidcCallback(
     secret,
     rateLimit,
     rolesClaim = 'roles',
+    mapSession,
     defaultRedirectPath = '/',
     validateReturnTo,
   } = config;
@@ -141,7 +145,7 @@ export async function handleOidcCallback(
     // persistSession raises session.created — it is the only layer that knows
     // what the session cost in cookie bytes, and a login that comes back without
     // a refresh token (no offline_access) is visible there on day one.
-    const session = buildSessionFromTokens(tokens, rolesClaim);
+    const session = buildSessionFromTokens(tokens, { rolesClaim, mapSession });
     await persistSession(cookies, session, persistence, { event: SESSION_EVENT.CREATED });
 
     const redirectUrl = validateReturnUrl(

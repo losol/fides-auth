@@ -114,6 +114,27 @@ they don't check its signature, `iss`, `aud` or `exp`. That is safe on tokens
 straight from `exchangeAuthorizationCode`. Verify tokens from anywhere else
 first (e.g. with jose's `jwtVerify`).
 
+#### Session mapping
+
+`buildSessionFromTokens` keeps the standard fields. To keep more of the token
+response or the ID token claims, pass `mapSession`, here or to
+`handleOidcCallback`:
+
+```typescript
+const session = buildSessionFromTokens(tokens, {
+  rolesClaim: "groups",
+  mapSession: (tokens, claims, session) => ({
+    ...session,
+    data: { tenant: tokens.tenant },
+  }),
+});
+```
+
+`claims` are decoded, not verified. Without an `id_token` (no `openid` scope),
+`claims` is undefined and the session has no `user`. `user.email` is optional.
+Extra fields make the session bigger; large ones need
+[server-side sessions](./docs/server-sessions.md).
+
 #### Client authentication
 
 `clientAuth` sets how the client authenticates at the token endpoint. Omit it
