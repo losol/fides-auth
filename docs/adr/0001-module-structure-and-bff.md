@@ -44,6 +44,12 @@ Paths are relative to `packages/`.
 | 12 | `validateReturnTo` has two signatures: `(raw) => string \| null` on login and `(path) => boolean` on callback. | `server/oidc-login.ts:41`, `server/oidc-callback.ts:78` |
 | 13 | `Session.sid` and `StoredSession.sid` hold the library's correlation id, not the OIDC `sid` claim. The IdP's `sid` exists only inside the raw ID token, which is encrypted in the cookie or store record. A store therefore can't find the session for a logout token. | `types.ts:24`, `server/session-store.ts:17` |
 | 14 | Session cookies have no `__Host-` prefix and use `SameSite=Lax`. The login transaction cookie already gets `__Host-` when `Secure`. | `cookies.ts:78`, `:109–134`, `server/login-transaction.ts:220` |
+| 15 | Cookie sessions have no lifetime the server enforces. The sealed session carries only `iat`, nothing checks it on read, and every refresh rewrites the cookies with a fresh 30-day `Max-Age`. Server persistence has an absolute `expiresAt`; cookie persistence has none. | `utils.ts:53`, `session-cookies.ts:95`, `server/session-persistence.ts:179` |
+| 16 | `Session` carries the tokens, so anything that reads the session holds them. A session passed to a client component or returned from a loader takes the tokens to the browser. `user.name` is typed `string` but holds whatever the claim was, and `user.sub` is optional. | `types.ts:25`, `oauth.ts:419` |
+| 17 | The logger, the discovery cache and the JWKS cache are module state, set through `configureLogger`, `configureDiscoveryCache` and `clearJwksCache`. `fides-auth-next` is published with core pinned to an exact version, so an app that also depends on core can install two copies, each with its own state and its own error classes. | `logger.ts:205`, `oidc-discovery.ts:74`, `id-token.ts:27`, `fides-auth-next/package.json:68` |
+| 18 | `CookieStore.delete(name)` takes no options. A browser ignores a deletion that isn't `Secure` for a `__Host-` cookie, which is why `clearTransaction` already deletes with `set` and `maxAge: 0`. | `server/cookie-store.ts`, `server/login-transaction.ts:152` |
+| 19 | `/server` has two API levels with overlapping names: free functions that take a persistence, and the Next factory. The null-returning refresh can't tell a dead refresh token from an unreachable provider. The log event passed to `persistSession` decides whether the handle is kept. `SessionPersistence` is documented as not an extension point, yet it is exported. | `server/session.ts:77`, `:292`, `server/session-persistence.ts:93` |
+| 20 | `engines` allows Node 18, but `authorizedFetch` uses `AbortSignal.any` (Node 20.3). CI runs Node 22. | `fides-auth/package.json:144`, `server/authorized-fetch.ts:191`, `.nvmrc` |
 
 Corrections to the starting analysis:
 
@@ -78,56 +84,78 @@ Corrections to the starting analysis:
 
 1. **Independence.** The protocol works without sessions, sessions without the server, and the server without Next.
 2. **BFF-ready.** Tokens never reach the browser. The server owns refresh, API calls, CSRF and logout.
-3. **Runtime stated per subpath.** Only Web APIs (Fetch, Web Crypto), `/server` included. DOM code lives only in client packages.
-4. **Dependency weight.** A subpath loads only the dependencies it needs.
+3. **Runtime stated per entry.** Only Web APIs (Fetch, Web Crypto), `/server` included. DOM code lives only in client packages.
+4. **Dependency weight.** An entry loads only the dependencies it needs.
 5. **Enforced, not just documented.** Breaking a layer rule fails CI.
-6. **Stable 1.0 contracts.** Settle now what consumers implement or store: `SessionStore`, `CookieStore`, cookie names and handler options. Features can come in 1.x.
-7. **Low cost**, both for existing consumers and for releases.
+6. **Stable 1.0 contracts.** Settle now what consumers implement, call or store: the session shape, the `createFidesAuth` instance, `SessionStore`, `CookieStore`, cookie names and the handlers' HTTP behaviour. Features can come in 1.x.
+7. **Small public surface.** Every export is a contract. Adding one in 1.x is additive; removing one is breaking.
+8. **Low cost**, both for existing consumers and for releases.
 
 ## Options
 
 - **A. Keep flat subpaths and only clean internals.** Split `oauth.ts` into internal modules, break the type cycles and keep every public subpath.
-- **B. Layered subpaths in one package.** Public subpaths by layer, with dependencies pointing down and enforced by lint.
+- **B. Layers in one package.** The code is split into layers with dependencies pointing down, enforced by lint. The public entries are few and don't have to mirror the layers.
 - **C. A package per layer**, e.g. `fides-auth-protocol`, `-session` and `-server`.
 
-| | A. Flat, clean internals | B. Layered subpaths | C. Package per layer |
+| | A. Flat, clean internals | B. Layers in one package | C. Package per layer |
 |---|---|---|---|
 | Independence | Low: `/oauth` still builds sessions and the root barrel stays | High, enforced by lint | Highest, enforced by package boundaries |
-| Dependency weight | Unchanged | Per subpath (`/pkce` and `/session-events` load none) | Per package; same runtime result as B |
-| Versioning | One version | One version | Several versions to keep in step. If two versions get installed, module state (`configureLogger`, the discovery and JWKS caches) splits silently. |
-| Developer experience | Familiar, but four `session-*` subpaths and `/oauth` vs `/oidc-discovery` stay confusing | One install, and the map reads by layer | Several installs and peer ranges |
+| Dependency weight | Unchanged | Per entry (`.` and `/session-events` load none) | Per package; same runtime result as B |
+| Versioning | One version | One version | Several versions to keep in step. If two versions get installed, error classes and instance types split silently. |
+| Developer experience | Familiar, but four `session-*` subpaths and `/oauth` vs `/oidc-discovery` stay confusing | One install and five entries | Several installs and peer ranges |
 | Migration cost | None | Import paths change, with shims for one minor | Import paths and package names change |
 | Release overhead | None | None | A publish workflow and an npm trusted publisher per new package |
 
 **Choice: B.**
 
 - A leaves the coupling in the public API.
-- C adds isolation that lint already gives, and brings version skew between layers that share module state.
-- B's subpaths map one-to-one to packages, so C stays possible if a layer gets its own audience.
+- C adds isolation that lint already gives, and brings version skew between layers.
+- B's layers are folders, so a layer can get its own entry or its own package later if it finds an audience.
+
+### What we would do differently from scratch
+
+The library began as encrypted cookies and grew the BFF model afterwards. We asked what a fresh start would change, and took what is cheap now and breaking later.
+
+**Adopted:**
+
+- **The session the app sees carries no tokens** (finding 16). See §4, "Session and tokens".
+- **No module state** (finding 17). The logger and the caches live on an instance. See §1 and §4, "Instance state".
+- **A small public surface** (driver 7). Five entries instead of one per layer. See §1.
+
+**Considered and not adopted:**
+
+| Idea | Why not |
+|---|---|
+| Server sessions as the only model, with the cookie as one more `SessionStore` | It rewrites both persistences. The gaps it would close, lifetime and the two API levels, are closed in §4 without it. |
+| `Request` in and headers out, with no `CookieStore` | Every method that may write would have to hand headers back, and a Next server component can't set them. `CookieStore` stays, with a narrower contract (§4). |
+| One client package in place of `-store` and `-react` | A new package costs a publish workflow and a trusted publisher. The two packages are small, and merging them later stays possible. |
+| No heartbeat | With a `SessionStore` the server can refresh on demand. With cookie sessions a refresh has to happen in a request that can write cookies, which a server component can't. The heartbeat stays. 1.0 doesn't require it when there is a store. |
 
 ## Decision
 
 ### 1. Module map
 
-`@eventuras/fides-auth`:
+`@eventuras/fides-auth` has five entries:
 
-| Subpath | Layer | Runtime | Third-party deps | Contents (moved from) |
-|---|---|---|---|---|
-| `.` | shared | types only | none | cross-layer and wire types (`/types`, `oauth.ts`) |
-| `/logger` | shared | universal | none | unchanged |
-| `/cookies` | shared | universal | none | base names and a name resolver (replacing the name constants), options, size guard |
-| `/session-events` | shared | universal | none | event vocabulary and `newSessionId` (unchanged) |
-| `/pkce` | protocol | universal | none | unchanged |
-| `/discovery` | protocol | universal | openid-client | discovery and its cache, client auth, server metadata (`/oidc-discovery`) |
-| `/authorize` | protocol | universal | openid-client | request parameters, URL, PAR, `prompt=none` (`/oauth`, `/silent-login`) |
-| `/token` | protocol | universal | openid-client | code exchange, refresh, client credentials, OAuth error helpers (`/oauth`, `/oauth-logging`) |
-| `/id-token` | protocol | universal | jose | verification (unchanged; the `oauthConfig` form loads `/discovery`) |
-| `/logout` | protocol | universal | openid-client; jose in 1.x | RP-initiated logout URL; logout token verification in 1.x (`/oauth`) |
-| `/session` | session | universal | jose | build, map, update, validate and seal sessions (`/oauth`, `/session-*`, `/utils`) |
-| `/server` | server/BFF | Fetch API: Node, edge, Bun, Deno | via lower layers | `createFidesAuth`, handlers, persistence, `SessionStore`, login transaction, `authorizedFetch`, CSRF and returnTo guards |
-| `/providers/*` | providers | universal | openid-client | provider clients |
+| Entry | Runtime | Third-party deps | Contents |
+|---|---|---|---|
+| `.` | types only | none | cross-layer and wire types |
+| `/oidc` | universal | openid-client, jose | `createOidcClient`: discovery, the authorization request (URL, PAR, `prompt=none`), code exchange, refresh, client credentials, the logout URL and ID token verification. Plus the pure helpers: PKCE, scope, claims and error classification. |
+| `/server` | Fetch API: Node, edge, Bun, Deno | via `/oidc` | `createFidesAuth`, the `SessionStore` and `CookieStore` contracts, the memory store and the error classes |
+| `/session-events` | universal | none | the event vocabulary that the server and the client packages share |
+| `/providers/*` | universal | openid-client | provider clients |
 
-Removed from core: `/oauth`, `/oidc-discovery`, `/oauth-logging`, `/oauth-browser`, `/silent-login`, `/session-refresh`, `/session-validation`, `/session-cookies`, `/utils`, `/types`, `/rate-limit`, `/heartbeat` and `/activity-tracker`.
+Removed from core: `/oauth`, `/oidc-discovery`, `/oauth-logging`, `/oauth-browser`, `/silent-login`, `/session-refresh`, `/session-validation`, `/session-cookies`, `/utils`, `/types`, `/rate-limit`, `/heartbeat`, `/activity-tracker`, `/logger`, `/cookies`, `/pkce` and `/id-token`.
+
+Inside the package, the source tree is split into layers. They are not public entries:
+
+| Folder | Holds | Reached through |
+|---|---|---|
+| `src/shared/` | types, the logger interface, cookie names and options, session events | `.`, `/session-events` |
+| `src/protocol/` | the OIDC client and the pure protocol helpers | `/oidc` |
+| `src/session/` | build, map, update, validate and seal sessions | `/server` |
+| `src/server/` | the factory, handlers, persistence, login transaction, `authorizedFetch`, CSRF and returnTo guards | `/server` |
+| `src/providers/` | provider clients | `/providers/*` |
 
 Other packages:
 
@@ -139,17 +167,12 @@ Other packages:
 
 Where this departs from the starting point:
 
-- **`/discovery`, not `/client`.** In a BFF library, "client" reads as the browser side: the client packages, or RFC 10017 §6.3's browser-based client. The contents are discovery, client authentication and metadata.
+- **Five entries, not one per layer.** `/discovery`, `/authorize`, `/token` and `/logout` would all load `openid-client` and are used together, so splitting them saves no weight and leaves four paths to keep stable. A layer can get its own entry in 1.x when a consumer needs it.
+- **One OIDC client object, not functions that take the config.** `createOidcClient(config)` holds the config, the discovery and JWKS caches and the logger. This is what removes the module state. Creating one does no I/O; discovery runs on first use. "OIDC client" is the specification's own term for the relying party, so it doesn't read as the browser side the way a bare `/client` would.
 - **The root `.` holds the cross-layer types,** including a `TokenResponse` that `openid-client`'s `TokenEndpointResponse` satisfies. Every layer then imports types from the bottom of the graph, which removes both cycles at the source.
-- **`/session` is pure: no network and no `openid-client`.**
-  - It gets `updateSession(session, tokenResponse)`, the merge half of today's `refreshSession`. The I/O half moves to `/server`.
-  - Mapping claims to a user moves here too, because it shapes a session rather than verifying anything.
-- **`/session-events` stays on its own,** with no dependencies. It's the vocabulary the server and the client packages share.
-- **returnTo validation goes to `/server`, not `/session`.** Only the handlers redirect.
-- **`/silent-login` folds into `/authorize`.** It's an authorization request with `prompt=none`.
-- **Heartbeat moves to `fides-auth-store`, not a new package.** The store already holds the session monitor, and a new package costs a publish workflow and a trusted publisher.
-
-The source tree mirrors the layers: `src/shared/`, `src/protocol/`, `src/session/`, `src/server/` and `src/providers/`. This lets the lint rules match on paths.
+- **The session layer is pure and internal.** It has no network and no `openid-client`. It gets `updateSession`, the merge half of today's `refreshSession`; the I/O half moves to the server layer. It isn't a public entry in 1.0. This gives up some of "every part usable on its own": nobody builds or seals a session without the server today, and the layer rules keep it ready to publish.
+- **returnTo validation sits in the server layer.** Only the handlers redirect.
+- **Heartbeat moves to `fides-auth-store`, not a new package.** The store already holds the session monitor.
 
 ### 2. Dependency rules
 
@@ -161,41 +184,57 @@ The source tree mirrors the layers: `src/shared/`, `src/protocol/`, `src/session
 | server | shared, protocol, session | none (Web APIs only) |
 | providers | shared, protocol | `openid-client` |
 | `fides-auth-next` | core `.` (types), `/server` | `next`, `react` |
-| client packages | core `.` (types), `/logger`, `/session-events` | their own |
+| client packages | core `.` (types), `/session-events` | their own |
 
-Enforcement, in `biome.json` and one test:
+Enforcement, in `biome.json` and two tests:
 
 - **Layer imports.** `style/noRestrictedImports` is set per layer through `overrides`. Patterns match the layer folders, so protocol code can't import `**/server/**`. Bare specifiers are matched too, so `openid-client` is denied in shared, session, server and the client packages. Patterns match specifiers as written; the exact globs get verified in the PR that adds them.
 - **Cycles.** `suspicious/noImportCycles` is on with `ignoreTypes: false`.
 - **Node APIs.** The Node ban covers all of `src/`, and the `server/**` exemption goes.
-- **Dependency weight.** A test imports each subpath in a plain Node ESM process and checks which third-party modules load. For example, `/pkce` and `/session-events` load none.
+- **Dependency weight.** A test imports each entry in a plain Node ESM process and checks which modules load. `.` and `/session-events` load no third-party module, and `/oidc` loads nothing from `server/`.
+- **No module state.** A test creates two OIDC clients and checks that they share neither a cache nor a logger.
 
 ### 3. Public API sketch
 
-The table lists export names only. *(was …)* marks a rename. The old name stays as a deprecated alias for one minor.
+The table lists export names only. *(was …)* marks a rename or a move. The old name stays as a deprecated export for one minor.
 
-| Subpath | Exports |
+| Entry | Exports |
 |---|---|
-| `.` | types: `Session`, `Tokens`, `OAuthConfig`, `ClientAuthConfig`, `TokenResponse`, `SessionInfo`, `HeartbeatResponse` |
-| `/logger` | `createLogger`, `configureLogger`, `FidesLogger` |
-| `/cookies` | `CookieOptions`, `defaultSessionCookieOptions`, `defaultOAuthCookieOptions`, `COOKIE_BASE_NAMES`, `cookieName` *(replace the `*_COOKIE_NAME` constants)*, `CookieTooLargeError`, `assertCookieWithinLimit` |
-| `/session-events` | `SESSION_EVENT`, `SessionEvent`, `SessionRejectedReason`, `RefreshFailureCause`, `logSessionEvent`, `isSessionRejectedReason`, `SessionClientEvent`, `newSessionId` |
-| `/pkce` | `createPkcePair`, `createState` |
-| `/discovery` | `discoverConfiguration`, `configureDiscoveryCache`, `clearDiscoveryCache`, `resolveClientAuth`, `getOAuthConfigLogContext` |
-| `/authorize` | `createAuthorizationRequest` *(was `buildPKCEOptions`)*, `buildAuthorizationUrl`, `buildAuthorizationUrlWithPAR`, `discoverAndBuildAuthorizationUrl`, `defaultScope`, `joinScope`, `buildSilentLoginUrl`, `checkSilentLoginResult`, `requiresInteractiveLogin` |
-| `/token` | `exchangeAuthorizationCode`, `refreshAccessToken`, `clientCredentialsGrant`, `getOAuthErrorLogContext`, `classifyRefreshFailure` |
-| `/id-token` | `verifyIdToken`, `clearJwksCache` |
-| `/logout` | `buildOidcLogoutUrl`; 1.x: `verifyLogoutToken` |
-| `/session` | `buildSession` *(was `buildSessionFromTokens`)*, `MapSession`, `userFromClaims` *(was `extractUserFromTokens`)*, `updateSession`, `isSession`, `sealSession`, `unsealSession` *(was `createEncryptedJWT`, `validateSessionJwt`)*, `hasScope` |
-| `/server` | `createFidesAuth`; `handleOidcLogin`, `handleOidcCallback`, `handleOidcLogout`, `handleHeartbeat`; `CookieStore`; `cookiePersistence`, `serverPersistence`, `SessionStore`, `StoredSession`, `createMemorySessionStore`; `readSession`, `tryReadSession`, `persistSession`, `refreshSession`, `tryRefreshSession` *(was `…InStore`)*, `clearSession`; the login transaction exports (unchanged); `authorizedFetch`, `AuthorizedFetchError`; `isSameOriginRequest`, `validateReturnTo` *(was `validateReturnUrl`)*. In 1.x: `handleSessionInfo`, `handleApiProxy`, `handleBackChannelLogout`, `createFetchCookieStore` |
+| `.` | types: `Session`, `Tokens`, `OAuthConfig`, `ClientAuthConfig`, `TokenResponse`, `SessionInfo`, `HeartbeatResponse`, `CookieOptions`, `FidesLogger`, `FidesLoggerFactory` |
+| `/oidc` | `createOidcClient`, `OidcClient`; pure helpers: `createPkcePair`, `createState`, `defaultScope`, `joinScope`, `userFromClaims` *(was `extractUserFromTokens`)*, `checkSilentLoginResult`, `requiresInteractiveLogin`, `getOAuthErrorLogContext`, `classifyRefreshFailure` |
+| `/server` | `createFidesAuth`, `FidesAuth`; `CookieStore`; `SessionStore`, `StoredSession`, `createMemorySessionStore`; `MapSession`; `AuthorizedFetchError`, `CookieTooLargeError`, `SessionSecretError`. In 1.x: `createFetchCookieStore` |
+| `/session-events` | `SESSION_EVENT`, `SessionEvent`, `SessionRejectedReason`, `RefreshFailureCause`, `isSessionRejectedReason`, `SessionClientEvent` |
 | `fides-auth-next` | `createFidesAuth`, `nextCookieStore`, types |
 | `fides-auth-store` | unchanged; `./heartbeat`: `createHeartbeat`; `./activity-tracker`: `createActivityTracker` |
+
+The OIDC client:
+
+```ts
+// @eventuras/fides-auth/oidc
+const oidc = createOidcClient(oauthConfig, { logger, discoveryTtlMs });
+
+await oidc.metadata();                           // was discoverConfiguration().serverMetadata()
+const request = await oidc.createAuthorizationRequest({ parameters }); // was buildPKCEOptions
+await oidc.authorizationUrl(request);            // uses PAR when usePar is set
+await oidc.silentLoginUrl(options);              // was buildSilentLoginUrl
+await oidc.exchangeCode(callbackUrl, request);   // was exchangeAuthorizationCode
+await oidc.refresh(refreshToken);                // was refreshAccessToken
+await oidc.clientCredentials(options);           // was clientCredentialsGrant
+await oidc.logoutUrl(options);                   // was buildOidcLogoutUrl
+await oidc.verifyIdToken(idToken);               // JWKS from discovery, cached on the client
+// 1.x: oidc.verifyLogoutToken(logoutToken)
+```
+
+`redirectUri` is checked on use, so a client made only for client credentials doesn't need one.
+
+No longer exported from `/server`: the handler functions, `persistSession` and the other session helpers, `cookiePersistence`, `serverPersistence`, `SessionPersistence`, the login transaction functions, `readIdToken` and `validateReturnUrl`. The `createFidesAuth` instance is the one way in (§4). Any of them can be exported in 1.x if a consumer needs it.
 
 Other API cleanups in 1.0:
 
 - `OAuthConfig.redirect_uri` becomes `redirectUri`. It's the only snake_case key.
 - The string overloads of `buildSessionFromTokens` and `buildOidcLogoutUrl` go.
 - `rateLimit` callbacks receive the `Request`.
+- `mapSession` may return a promise, so it can look the user up.
 
 ### 4. BFF model
 
@@ -210,40 +249,84 @@ The model has two independent axes:
 // @eventuras/fides-auth/server
 const auth = createFidesAuth({
   oauthConfig,
-  secret,        // seals cookies, store records and the login transaction
-  sessionStore,  // optional: omit for encrypted cookies, set for server sessions
-  persistence,   // optional escape hatch: a full SessionPersistence; wins over sessionStore
-  rateLimit,     // optional: (request) => boolean | Promise<boolean>
+  secret,                // seals cookies, store records and the login transaction
+  sessionStore,          // optional: omit for encrypted cookies, set for server sessions
+  sessionDurationDays,   // optional, default 30
+  applicationUrl,        // optional: the app's public origin; defaults to redirectUri's origin
+  mapSession,            // optional; rolesClaim too
+  validateReturnTo,      // optional; defaultRedirectPath too
+  postLogoutRedirectUri, // optional: defaults to applicationUrl
+  rateLimit,             // optional: (request) => boolean | Promise<boolean>
+  logger,                // optional: a FidesLoggerFactory; defaults to JSON lines on console
+  onSessionEvent,        // optional: (event) => void
 });
-await auth.handleOidcLogin(request, cookies);
-await auth.readSession(cookies);
 ```
 
-Core methods take the `CookieStore` on every call, because some frameworks only expose cookies on the request context. The Next binding drops that argument by calling `cookies()`. It keeps its `cache()` and the per-request refresh sharing from #126.
+Everything that is the same for every request is set here. A handler call takes only what varies per request.
+
+| Member | Returns | Notes |
+|---|---|---|
+| `handleOidcLogin(request, cookies, options?)` | `Response` | `options.authorizationParameters` for this request |
+| `handleOidcCallback(request, cookies)` | `Response` | |
+| `handleOidcLogout(request, cookies, options?)` | `Response` | `options.state`, `options.logoutHint` |
+| `handleHeartbeat(request, cookies)` | `Response` | |
+| `readSession(cookies)` | `Session \| null` | |
+| `tryReadSession(cookies)` | the session, or `{ session: null, reason }` | |
+| `getTokens(cookies)` | `Tokens \| null` | the only way to the tokens |
+| `refreshSession(cookies)` | `RefreshSessionResult` | *(was `tryRefreshSessionInStore`)* The null-returning form goes (finding 19). |
+| `createSession(cookies, tokenResponse)` | `Session` | Starts a session with a new handle, for a login that doesn't go through the handlers. Runs `mapSession`. |
+| `updateSession(cookies, update)` | `Session \| null` | `update(session)` returns the changed session. Keeps the handle and `expiresAt`. For `user` and `data`; it can't touch the tokens. |
+| `clearSession(cookies, options?)` | `void` | `options.trigger` |
+| `authorizedFetch(cookies, url, options)` | `{ response, data, refreshed }` | Reads the tokens itself and refreshes once on a 401. |
+| `cookieNames` | the resolved cookie names | for middleware |
+| `oidc` | the instance's `OidcClient` | for protocol calls the instance doesn't wrap |
+
+Core methods take the `CookieStore` on every call, because some frameworks only expose cookies on the request context. The Next binding has the same members without that argument, since it calls `cookies()`. It keeps its `cache()` and the per-request refresh sharing from #126.
 
 **Decided now (the 1.0 contract):**
 
 | Area | Decision | Why now |
 |---|---|---|
-| Factory | `createFidesAuth` moves to core `/server` with the config above. Next wraps it and gains `sessionStore`. | Core and Next must share one shape. |
-| `SessionStore` | Keep `get`, `set`, `delete` and the optional `withLock`. `StoredSession` gains three lookup fields, written from 1.0 on: `iss`, `subHash` and `idpSidHash`. The hashes are HMAC-SHA-256 under a key derived from `secret`, so a store dump doesn't reveal `sub`, which is personal data. Rotating `secret` already makes old records unreadable, so this adds no new rotation cost. An optional `deleteMatching({ iss, subHash?, idpSidHash? })` serves back-channel logout. The library computes the hashes, and each key matches the field of the same name; `correlationId` is never a key. | Adapters written for 1.0 must store the lookup fields. Otherwise, sessions created before back-channel logout ships can't be found. |
-| TTL | `expiresAt` is absolute and fixed at login, and the library enforces it on read. Adapter TTLs are only for cleanup, and `get` may return expired records. | Already true; this makes it part of the contract. |
-| IdP session | At login, store the ID token's `iss` and `sid` claims in `session.idp`, inside the encrypted session. Server persistence derives the lookup fields from them and from `user.sub`. | Back-channel logout finds sessions by `iss`+`sub` or `iss`+`sid`. |
+| Factory | `createFidesAuth` moves to core `/server` with the config and members above. Next wraps it and gains `sessionStore`. There is no `persistence` option: `SessionPersistence` is the library's own seam (finding 19). | Core and Next must share one shape. |
+| Session and tokens | `Session` has no `tokens`. It holds `correlationId`, `createdAt`, `expiresAt`, `user`, `scopes`, `idp` and `data`. The tokens are a separate `Tokens` value, reached through `getTokens` or used by `authorizedFetch`. `user.sub` is required when there is a `user`; `user.name` and `user.email` are optional, as the claims are. | A session handed to browser code must not carry tokens (driver 2), and the type is in every consumer. |
+| Sealed format | What is sealed into the cookies or the store record is `{ v: 1, session, tokens }`. A payload without `v` is the pre-1.0 shape, with the tokens inside the session and `sid` for the correlation id. 1.0 reads it through 1.x. | Without a version, the next format change can't tell old sessions from broken ones. |
+| Session lifetime | `expiresAt` is absolute, set at login from `sessionDurationDays`, and enforced on read in both persistences. An expired session is rejected with the new reason `session_expired`. The cookie's `Max-Age` is the time left, so a refresh no longer extends it. A session sealed before the upgrade has no `expiresAt`; it gets one, counted from then, the first time it is written. | Cookie sessions have no enforced lifetime today (finding 15). Enforcing one changes behaviour. |
+| Instance state | No module-level state. The logger, the discovery cache and the JWKS cache live on the `OidcClient`, and `createFidesAuth` passes its `logger` on. `configureLogger`, `configureDiscoveryCache`, `clearDiscoveryCache` and `clearJwksCache` go. Session events go to the logger and to `onSessionEvent`. | Two installed copies must not split configuration (finding 17), and removing globals is breaking. |
+| `SessionStore` | Keep `get`, `set`, `delete` and the optional `withLock`. `StoredSession` gains three lookup fields, written from 1.0 on: `iss`, `subHash` and `idpSidHash`. The hashes are HMAC-SHA-256 under a key derived from `secret`, so a store dump doesn't reveal `sub`, which is personal data. Rotating `secret` already makes old records unreadable, so this adds no new rotation cost. An optional `deleteMatching({ iss, subHash?, idpSidHash? })` serves back-channel logout. The library computes the hashes, and each key matches the field of the same name. A record must match every key that is given. It may return the number of records deleted, which the caller logs. `correlationId` is never a key. | Adapters written for 1.0 must store the lookup fields. Otherwise, sessions created before back-channel logout ships can't be found. |
+| Store TTL | The library sets `StoredSession.expiresAt` and enforces it on read. An adapter stores the value from every `set` and takes its own TTL from it. Adapter TTLs are only for cleanup, and `get` may return expired records. In 1.0 the value doesn't change after login, but an adapter must not rely on that. | An adapter that only reads `expiresAt` on the first `set` would break a sliding lifetime in 1.x. |
+| IdP session | At login, store the ID token's `iss`, `sub` and `sid` claims in `session.idp`, inside the encrypted session. Server persistence derives the lookup fields from `session.idp`, not from `user`, which `mapSession` may change. | Back-channel logout finds sessions by `iss`+`sub` or `iss`+`sid`. |
 | Correlation id | `Session.sid`, `StoredSession.sid` and the `sid` key in session events become `correlationId`; the old name is deprecated. 1.0 still reads `sid` from sessions stored before the upgrade, through 1.x. We chose `correlationId` over `id`: it can't be mistaken for the OIDC `sid` (`session.idp.sid`) or for the handle or store key. | From 1.0 the session also carries the IdP's `sid`. |
-| Client type | `createFidesAuth` throws at creation when `clientAuth` is `'none'`: a BFF MUST be a confidential client (RFC 10017 §6.1.3.1). The check reads only `clientAuth`, which is static config rather than environment, so it can run eagerly while the secret is still checked on use. `/authorize` and `/token` keep supporting `none` for non-BFF use. The `/server` handlers called directly don't check. | Rejecting a working config is breaking. |
+| Client type | `createFidesAuth` throws at creation when `clientAuth` is `'none'`: a BFF MUST be a confidential client (RFC 10017 §6.1.3.1). The check reads only `clientAuth`, which is static config rather than environment, so it can run eagerly while the secret is still checked on use. `createOidcClient` keeps supporting `none` for non-BFF use. | Rejecting a working config is breaking. |
 | Rate limiting | There is no default limiter; handlers rate-limit only through the documented `rateLimit` option. Next's default limiter goes: it trusts the client-supplied `X-Forwarded-For` header and counts per instance. | Removing a default changes behaviour. |
+| `CookieStore` | Two methods: `get(name)` and `set(name, value, options)`, with `options` required. There is no `delete`: the library deletes a cookie by setting it empty with `maxAge: 0` and the attributes it was set with, which is the only deletion a browser accepts for a `__Host-` cookie (finding 18). An adapter must pass the options through unchanged. | Consumers implement this interface. |
 | Cookie names | Every library cookie gets the `__Host-` prefix when `Secure`; see the cookie rule below. `SameSite` stays `Lax`. | Renaming cookies after 1.0 would log everyone out again. |
-| CSRF | One guard for every state-changing endpoint that a cookie authenticates: logout, heartbeat and proxy. It checks `Sec-Fetch-Site`, then `Origin` against the app's origin and an optional list of allowed origins (for a frontend served from another origin). It can also require a custom header. Exempt: login and callback (top-level navigations), and back-channel logout (server-to-server, with a signed token). | Turning it on for heartbeat changes behaviour. |
-| returnTo | One `validateReturnTo: (returnTo) => string \| null` for both login and callback. | It's a breaking signature change. |
+| CSRF | One guard for every state-changing endpoint that a cookie authenticates: logout, heartbeat and proxy. A request passes when `Sec-Fetch-Site` is `same-origin` or `none`. Without that header, it passes when `Origin` equals `applicationUrl`'s origin. A request with neither header isn't from a browser and passes. The guard can also require a custom header. 1.0 is same-origin only. Exempt: login and callback (top-level navigations), and back-channel logout (server-to-server, with a signed token). | Turning it on for heartbeat changes behaviour. |
+| returnTo | One `validateReturnTo: (returnTo) => string \| null`, set on the factory, for both login and callback. | It's a breaking signature change. |
+| HTTP behaviour | The table below. | Client code and the client packages depend on it. |
+| Packaging | The four packages release 1.0 together. Core is a `peerDependency` (`^1.0.0`) of `-next`, `-store` and `-react`, so an app has one copy. `engines` is Node 22 or later. | A peer range and an engine floor can only tighten at a major. |
+
+What the handlers answer:
+
+| Handler | Request | Answers |
+|---|---|---|
+| login | `GET`, optional `?returnTo=` | 302 to the provider; 429 |
+| callback | `GET` from the provider | 302 to the returnTo with `?login=success`, or to the default path with `?login=error&error=<code>`; 400 when the login can't be matched; 431 when the session doesn't fit a cookie; 429 |
+| logout | `POST` | 302 to the provider's end-session endpoint, or to `postLogoutRedirectUri`; 403 from the CSRF guard; 405; 429 |
+| heartbeat | `POST` | 200 `{ accessTokenExpiresAt }`; 401 `{ reason }` when the session is over; 503 when the provider couldn't be reached; 403 from the CSRF guard; 405; 429 |
+
+The session endpoints send `Cache-Control: private, no-store`.
 
 The cookie rule:
 
 - **Prefix.** Every cookie the library sets is named `__Host-<base>` when it is `Secure`, and `<base>` otherwise. We use `__Host-` rather than the RFC's example `__Host-Http-`, which only an Internet-Draft defines.
 - **Secure.** Session cookies follow the transaction cookie's rule: `Secure` unless `redirectUri` is plain http (`server/login-transaction.ts:160`). Today they are always `Secure`.
-- **Path and Domain.** The library always sets `Path=/` and no `Domain`, and offers no option to change either. This is already true, since the persistences pass fixed options (`server/session-persistence.ts:179`, `:320`). The prefix therefore depends on `secure` alone, and the browser never gets a prefixed cookie it must reject. A `CookieStore` must pass the options through unchanged. Next's cookie helpers, the only API that takes a custom path today, go in 1.0 (breaking change 11).
-- **Names in code.** The names are no longer constants. `/cookies` replaces the `*_COOKIE_NAME` constants with `COOKIE_BASE_NAMES` and `cookieName(base, { secure })`. The `createFidesAuth` instance exposes the resolved `cookieNames`, which is what middleware should read. `serverPersistence`'s `cookieName` option becomes a base name too.
+- **Path and Domain.** The library always sets `Path=/` and no `Domain`, and offers no option to change either. This is already true, since the persistences pass fixed options (`server/session-persistence.ts:179`, `:320`). The prefix therefore depends on `secure` alone, and the browser never gets a prefixed cookie it must reject. Next's cookie helpers, the only API that takes a custom path today, go in 1.0.
+- **Names in code.** The names are no longer constants. The `createFidesAuth` instance exposes the resolved `cookieNames`, which is what middleware reads. The `cookieName` option of `serverPersistence` goes with it; an option to namespace the names can come in 1.x.
+- **Changing names.** 0.16 reads the new names first and the old names otherwise, never a mix of the two sets. It writes the new names and deletes the old ones in the same response, so a browser doesn't carry both.
 
 `SameSite` stays `Lax`, not `Strict`, against the RFC's SHOULD. A `Strict` session cookie isn't sent on the redirect back from the IdP or on links from other sites, so the first page after login would look logged out. CSRF is the guard's job, and §6.1.3.3.1 says `SameSite` can't cover same-site subdomains anyway.
+
+A frontend on another origin is out of 1.0. It needs CORS answers the handlers don't give, and a `Lax` cookie is only sent to it from the same site.
 
 **Additive in 1.x:**
 
@@ -251,8 +334,11 @@ The cookie rule:
 |---|---|
 | `handleSessionInfo` | The "check session" endpoint (§6.1.2.1). Returns `SessionInfo` (`authenticated`, `user`, `scopes`, `accessTokenExpiresAt`), never tokens, with `Cache-Control: no-store`. `fides-auth-store` gets a matching default `checkAuthStatus`. |
 | `handleApiProxy` | A same-origin API proxy built on `authorizedFetch`. It has an explicit route table mapping each prefix to a base URL, which is the allowlist §6.1.3.6 requires. As our own choice, each route also lists its allowed methods. It strips `Cookie`, runs the CSRF guard and refreshes at most once per request. Request bodies are buffered so a 401 retry can resend them, up to `maxBodyBytes` (default 1 MiB, set per route). A larger body gets 413 and never reaches the API. We chose 413 over forwarding without a retry so every request behaves the same on a 401 and memory stays bounded on edge runtimes. Upload routes raise the cap. |
-| `handleBackChannelLogout` and `verifyLogoutToken` | Validates the logout token per Back-Channel Logout §2.6 using the `/id-token` JWKS cache. It hashes the token's `sub` and `sid` the same way, calls `deleteMatching({ iss, subHash, idpSidHash })` and answers per §2.8. It requires a `SessionStore` with `deleteMatching`; without one it throws rather than answering 200 and logging nobody out. Cookie sessions get no back-channel logout and no denylist. |
+| `handleBackChannelLogout` and `verifyLogoutToken` | Validates the logout token per Back-Channel Logout §2.6 using the client's JWKS cache. It hashes the token's `sub` and `sid` the same way, calls `deleteMatching({ iss, subHash, idpSidHash })` and answers per §2.8. It requires a `SessionStore` with `deleteMatching`; without one it throws rather than answering 200 and logging nobody out. Cookie sessions get no back-channel logout and no denylist. |
 | `createFetchCookieStore` | A `CookieStore` over `Request` and `Response` headers, for runtimes without a framework cookie API. |
+| Secret rotation | `secret` takes a list: the first seals, all open. |
+| Sliding lifetime | An idle timeout next to the absolute one. The store TTL rule above leaves room for it. |
+| Server-side refresh | With a `SessionStore`, `readSession` can refresh a session that is about to expire, so an app needs no heartbeat. |
 | BFF guide | `docs/bff.md` covers endpoints, CSRF, proxy routes and the persistence choice. |
 
 ### 5. Default persistence for 1.0
@@ -270,68 +356,79 @@ Set `sessionStore` when:
 
 **Gains:**
 
-- Each layer can be used, tested and documented on its own.
-- Unbundled runtimes load only what a subpath needs.
+- The session an app passes around holds no tokens.
+- There are five entries and one factory to learn, and each export is one we mean to keep.
+- Two instances, or two installed copies, don't share or split configuration. Tests need no cache resets.
+- Sessions end when they say they do, in both persistences.
+- Unbundled runtimes load only what an entry needs.
 - Next consumers get server sessions and the BFF features.
 - The lint rules keep the layers from eroding.
 
 **Costs:**
 
-- Every existing consumer has to update imports once.
+- Every existing consumer has to update imports and call sites once. This is more than a path change: protocol calls become methods on a client, and server calls become members of the instance.
 - The shims have to be carried for one minor.
 - The README needs a rewrite.
-- `/server` stays the largest subpath, kept whole because it has one responsibility: the BFF runtime.
-- Back-channel logout needs a `SessionStore`. Cookie sessions end only when their tokens stop working.
+- A consumer that built on the free `/server` functions or on the session layer has to move to the instance, or ask for the export back.
+- Cookie sessions that slid forward on every refresh now end `sessionDurationDays` after login.
+- Back-channel logout needs a `SessionStore`. Without one, a cookie session ends at `expiresAt` or when its tokens stop working.
 
 **Breaking changes in 1.0:**
 
 | # | Change | Migration aid |
 |---|---|---|
-| 1 | The 13 core subpaths listed under "Removed from core" are removed. | Shims and an old-to-new table in 0.16 |
+| 1 | Core keeps five entries. The 17 subpaths listed under "Removed from core" are removed. | Shims and an old-to-new table in 0.16 |
 | 2 | The root `.` exports types only. | The same table |
-| 3 | `/heartbeat` and `/activity-tracker` move to `fides-auth-store`. | Both locations in 0.16, with core's copy deprecated (core can't re-export from the store, which depends on core) |
-| 4 | `/rate-limit` and `TokenBucket` leave core and the Next root. Next's default limiter (`globalGETRateLimit`, `globalPOSTRateLimit`) goes, so Next handlers no longer rate-limit unless `rateLimit` is set. | Deprecated in 0.16; `rateLimit` documented |
-| 5 | `/oauth-browser` is removed (deprecated since #114). | none |
-| 6 | `/utils` is removed. `encrypt`, `decrypt`, `sha512` and `toHex` have no internal users and are dropped. The rest become internal or move to `/session`. | Web Crypto |
-| 7 | The renames from §3, `redirect_uri` → `redirectUri`, and the dropped overloads. Watch out: `/server`'s `refreshSession` takes a cookie store, while the old root `refreshSession(session, config)` becomes `refreshAccessToken` plus `updateSession`. | Deprecated aliases in 0.16 |
-| 8 | One `validateReturnTo` signature. | 0.16 accepts both |
-| 9 | Session cookies get the `__Host-` prefix, and aren't `Secure` when `redirectUri` is plain http. | 0.16 reads both names and writes the new ones |
-| 10 | The CSRF guard covers heartbeat, so cross-origin POSTs get 403. | On by default in 0.16, with an off switch |
-| 11 | `fides-auth-next` keeps one entry. The per-handler subpaths, `./auth`, `./store`, `./request`, `./cookie-store`, the cookie helpers and the core re-exports go. It no longer depends on the store and react packages. | Shims in 0.16 |
-| 12 | The `*_COOKIE_NAME` constants go. Code that reads cookies by name (middleware, custom `CookieStore` code) uses `cookieName(base, { secure })` or the `cookieNames` on the `createFidesAuth` instance. | Both in 0.16, with the constants deprecated |
-| 13 | `Session.sid`, `StoredSession.sid` and the `sid` key in session events become `correlationId`. | 0.16 writes and logs both and reads either. 1.0 still reads `sid` from sessions stored earlier. |
-| 14 | `createFidesAuth` throws when `clientAuth` is `'none'`. | 0.16 logs a warning at creation |
+| 3 | The protocol functions become members of `createOidcClient`, with the renames in §3. `redirect_uri` becomes `redirectUri`, and the string overloads go. | The old functions stay in 0.16 as deprecated wrappers. `OAuthConfig` accepts both spellings. |
+| 4 | The free `/server` functions are no longer exported: the handlers, the session helpers, the persistences and the login transaction. `createFidesAuth` is the way in, and the handler options that don't vary per request move to it. | Deprecated in 0.16, next to the new factory |
+| 5 | `Session` has no `tokens`. `user.sub` is required, and `user.name` is optional. | 0.16 adds `getTokens` and deprecates `session.tokens`. 1.0 reads sessions sealed in the old shape. |
+| 6 | Sessions have an absolute lifetime in both persistences, and `session_expired` joins `SessionRejectedReason`. | `sessionDurationDays` |
+| 7 | `configureLogger`, `configureDiscoveryCache`, `clearDiscoveryCache` and `clearJwksCache` go. `fides-auth-store`'s `configureAuthLogger` goes with them; the client packages log through `@eventuras/logger`, which they already depend on. `logSessionEvent` and `newSessionId` become internal. | 0.16 takes `logger` on the factory and the client, and deprecates the globals |
+| 8 | `CookieStore` has no `delete`, and `set` always gets options. An adapter that still has `delete` keeps compiling. | 0.16 stops calling `delete` |
+| 9 | `/heartbeat` and `/activity-tracker` move to `fides-auth-store`. | Both locations in 0.16, with core's copy deprecated (core can't re-export from the store, which depends on core) |
+| 10 | `/rate-limit` and `TokenBucket` leave core and the Next root. Next's default limiter (`globalGETRateLimit`, `globalPOSTRateLimit`) goes, so Next handlers no longer rate-limit unless `rateLimit` is set. | Deprecated in 0.16; `rateLimit` documented |
+| 11 | `/oauth-browser` is removed (deprecated since #114). | none |
+| 12 | `/utils` is removed. `encrypt`, `decrypt`, `sha256`, `sha512`, `toHex` and `generateToken` have no place in the new surface; the rest become internal. Some consumers call them directly. | Deprecated exports in 0.16. The migration doc gives the Web Crypto equivalents. |
+| 13 | One `validateReturnTo` signature, set on the factory. | 0.16 accepts both |
+| 14 | Session cookies get the `__Host-` prefix, and aren't `Secure` when `redirectUri` is plain http. The `*_COOKIE_NAME` constants go; middleware reads `auth.cookieNames`. | 0.16 reads both sets of names and writes the new ones, as the cookie rule describes |
+| 15 | The CSRF guard covers heartbeat, so cross-origin POSTs get 403. | On by default in 0.16, with an off switch |
+| 16 | `fides-auth-next` keeps one entry. The per-handler subpaths, `./auth`, `./store`, `./request`, `./cookie-store`, the cookie helpers and the core re-exports go. Its instance gets the member names in §4. It no longer depends on the store and react packages. | Shims in 0.16 |
+| 17 | `Session.sid`, `StoredSession.sid` and the `sid` key in session events become `correlationId`. | 0.16 writes and logs both and reads either. 1.0 still reads `sid` from sessions stored earlier. |
+| 18 | `createFidesAuth` throws when `clientAuth` is `'none'`. | 0.16 logs a warning at creation |
+| 19 | Core becomes a peer dependency of the other three packages, and all four need Node 22. | Install core next to them |
 
 ## Migration plan
 
-The pending changesets ship first, as core 0.15. Breaking changes on 0.x keep using `minor` changesets, as they do today. 1.0 needs an explicit `major`.
+The pending changesets ship first, as core 0.15. Breaking changes on 0.x keep using `minor` changesets, as they do today. 1.0 needs an explicit `major`, and the four packages take it together.
 
 1. **0.16: move, shim, deprecate and enforce.** Every "in 0.16" aid in the breaking-changes table lands here.
-   - **Structure.** Move the code into the layered tree and add the new subpaths.
-   - **Old subpaths (1, 2, 11).** Turn the old core and Next subpaths into `@deprecated` re-exports that name the new path. Subpaths with no new home (`/rate-limit`, `/utils`) are only marked `@deprecated`.
-   - **Heartbeat (3).** Ship it in `fides-auth-store`, and mark core's copy `@deprecated`.
-   - **Renames (7).** Add the new names and keep the old ones as deprecated aliases. `OAuthConfig` accepts both `redirect_uri` and `redirectUri`.
-   - **returnTo (8).** Accept both `validateReturnTo` signatures.
-   - **Cookies (9, 12).** Add `COOKIE_BASE_NAMES` and `cookieName`, and deprecate the `*_COOKIE_NAME` constants. Read both cookie names and write the prefixed ones.
-   - **CSRF (10).** Turn the guard on for heartbeat by default, with an off switch. So 0.16 itself changes heartbeat behaviour: cross-origin POSTs get 403 unless the origin is allowed or the guard is switched off. Defaulting to on surfaces the change while the switch still exists. Defaulting to off would surface it at 1.0, with no way back.
-   - **Rate limiting (4).** Deprecate Next's default limiter and `TokenBucket`, and document `rateLimit`.
-   - **Correlation id (13).** Write `sid` and `correlationId`, log both keys, and read either.
-   - **Client type (14).** `createFidesAuth` warns at creation when `clientAuth` is `'none'`.
-   - **Factory.** Add `createFidesAuth` to core, and rebuild Next's version on it with `sessionStore`.
-   - **Contract fields.** Add the `StoredSession` lookup fields (`iss`, `subHash`, `idpSidHash`) and `session.idp`.
+   - **Structure (1, 2).** Move the code into the layered tree and add `/oidc`. Turn the old core subpaths into `@deprecated` re-exports that name the new home. Subpaths with no new home (`/rate-limit`, `/utils`) are only marked `@deprecated`.
+   - **OIDC client (3, 7).** Add `createOidcClient`, with the caches and the logger on it. The old functions become wrappers over a client kept per config, and the global configuration functions are deprecated. `OAuthConfig` accepts both `redirect_uri` and `redirectUri`.
+   - **Factory (4, 13, 16).** Add `createFidesAuth` to core with the config and members in §4, and rebuild Next's version on it with `sessionStore`. The free `/server` functions and Next's old subpaths and member names stay, deprecated. Both `validateReturnTo` signatures are accepted.
+   - **Session (5, 6, 17).** Seal `{ v: 1, session, tokens }` and read the old shape. Add `getTokens`, `createdAt`, `expiresAt` and `session.idp`. `session.tokens` stays readable and deprecated. Write `sid` and `correlationId`, log both keys, and read either. Enforce `expiresAt` on read.
+   - **Store contract.** Add the `StoredSession` lookup fields (`iss`, `subHash`, `idpSidHash`).
+   - **`CookieStore` (8).** Stop calling `delete`.
+   - **Cookies (14).** Read both sets of names, write the prefixed ones and delete the old ones. Add `auth.cookieNames` and deprecate the `*_COOKIE_NAME` constants.
+   - **CSRF (15).** Turn the guard on for heartbeat by default, with an off switch. So 0.16 itself changes heartbeat behaviour: cross-origin POSTs get 403 unless the guard is switched off. Defaulting to on surfaces the change while the switch still exists. Defaulting to off would surface it at 1.0, with no way back.
+   - **Heartbeat (9).** Ship it in `fides-auth-store`, and mark core's copy `@deprecated`.
+   - **Rate limiting (10).** Deprecate Next's default limiter and `TokenBucket`, and document `rateLimit`.
+   - **Utilities (12).** Mark the `/utils` exports `@deprecated`.
+   - **Client type (18).** `createFidesAuth` warns at creation when `clientAuth` is `'none'`.
    - **Lint.** Land the Biome layer rules and `noImportCycles` in this release, with the shims excluded. The starting point put them in 1.0, but the moved code passes them now, and enforcing early stops new violations during the deprecation window.
 2. **1.0: remove and enforce.**
-   - Delete the shims, aliases, core's heartbeat copy, the name constants, the old cookie names, the CSRF off switch and Next's default limiter.
-   - Stop writing and logging `sid`; reads keep the `sid` fallback through 1.x.
+   - Delete the shims, wrappers, deprecated exports and members, core's heartbeat copy, the name constants, the old cookie names, the CSRF off switch, the global configuration functions and Next's default limiter.
+   - Remove `tokens` from the `Session` type. Reads keep the old sealed shape and the `sid` fallback through 1.x.
+   - Stop writing and logging `sid`.
    - `createFidesAuth` throws on `clientAuth: 'none'`.
    - The root becomes types-only.
-3. **1.x: add.** Ship each as its own minor: the session-info handler, then back-channel logout, then the API proxy, the Fetch cookie store and the BFF guide.
+   - Core becomes a peer dependency, and `engines` moves to Node 22 (19).
+3. **1.x: add.** Ship each as its own minor: the session-info handler, then back-channel logout, then the API proxy, the Fetch cookie store and the BFF guide. Secret rotation, a sliding lifetime and server-side refresh follow when a consumer needs them.
 
 Each step gets a short changeset that points to one migration doc, `docs/migrating-to-1.0.md`.
 
 ## Open questions
 
-None. The maintainer decided the six questions from the first draft, and the decisions are recorded in §4:
+The maintainer decided the six questions from the first draft, and the decisions are recorded in §4:
 
 | Question | Decision | Where |
 |---|---|---|
@@ -341,3 +438,9 @@ None. The maintainer decided the six questions from the first draft, and the dec
 | Next's default limiter | Deprecate in 0.16, remove in 1.0 | contract table, "Rate limiting" |
 | Back-channel logout with cookie sessions | Requires a `SessionStore`; no denylist | 1.x table |
 | Proxy request bodies | Buffer up to 1 MiB, then 413 | 1.x table |
+
+The second revision, which added the "from scratch" changes and findings 15 to 20, leaves three:
+
+1. **Absolute lifetime for cookie sessions.** Today an active cookie session never ends. 1.0 ends it `sessionDurationDays` after login, as server sessions already do. Should 1.0 also ship the sliding lifetime, so consumers who rely on today's behaviour can keep it? Lean: no. Ship absolute only, and add sliding in 1.x.
+2. **How little `/server` exports.** The free handler functions, the login transaction and the session layer are not public in 1.0. Is there a consumer that needs one of them and can't use the instance? Lean: none known, and exporting later is additive.
+3. **The Node floor.** Node 22 matches CI. Node 20.3 would be enough for the code. Lean: 22, since Node 20 is past its end of life.
