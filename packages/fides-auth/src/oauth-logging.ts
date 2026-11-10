@@ -13,7 +13,7 @@ export function getOAuthConfigLogContext(config: OAuthConfig) {
     clientId: config.clientId,
     issuer: config.issuer,
     redirectUri: config.redirect_uri,
-    scope: config.scope,
+    scope: Array.isArray(config.scope) ? config.scope.join(' ') : config.scope,
     usePar: config.usePar ?? false,
   };
 }

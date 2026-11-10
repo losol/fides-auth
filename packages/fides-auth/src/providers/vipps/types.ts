@@ -18,8 +18,8 @@ export interface VippsLoginConfig {
   clientSecret: string;
   /** OAuth redirect URI (callback URL) */
   redirectUri: string;
-  /** OpenID Connect scopes (default: 'openid name phoneNumber address email') */
-  scope?: string;
+  /** OpenID Connect scopes, as a string or an array (default: 'openid name phoneNumber address email') */
+  scope?: string | string[];
   /** Vipps subscription key (Ocp-Apim-Subscription-Key) - required for userinfo endpoint */
   subscriptionKey?: string;
   /** Merchant serial number - required for userinfo endpoint */

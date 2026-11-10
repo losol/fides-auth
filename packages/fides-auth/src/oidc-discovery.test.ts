@@ -257,6 +257,17 @@ describe('discoverConfiguration — serverMetadata', () => {
 
     expect(openid.Configuration).toHaveBeenCalledTimes(1);
   });
+
+  it('reads an array scope the same way', async () => {
+    const noIssuer = { token_endpoint: metadata.token_endpoint } as openid.ServerMetadata;
+
+    await expect(
+      discoverConfiguration({ ...config, scope: ['profile', 'openid'], serverMetadata: noIssuer }),
+    ).rejects.toThrow(/serverMetadata\.issuer is required/);
+    await discoverConfiguration({ ...config, scope: ['api:read'], serverMetadata: noIssuer });
+
+    expect(openid.Configuration).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('discoverConfiguration — failures', () => {

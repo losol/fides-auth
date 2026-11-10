@@ -13,6 +13,7 @@ export default defineVanillaLibConfig({
     'session-events': 'src/session-events.ts',
     oauth: 'src/oauth.ts',
     'oidc-discovery': 'src/oidc-discovery.ts',
+    pkce: 'src/pkce.ts',
     'oauth-browser': 'src/oauth-browser.ts',
     'oauth-logging': 'src/oauth-logging.ts',
     'silent-login': 'src/silent-login.ts',

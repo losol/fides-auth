@@ -77,6 +77,7 @@ Each module is available as a separate entry point for tree-shaking:
 | ------------------------------------------ | ----------- | ----------------------------------------------------- |
 | `@eventuras/fides-auth`                    | Node.js     | Main entry — re-exports utils, session, types, logger |
 | `@eventuras/fides-auth/oauth`              | Node.js     | OAuth/OIDC flows with `openid-client`                 |
+| `@eventuras/fides-auth/pkce`               | Universal   | PKCE verifier/challenge and `state` (Web Crypto)      |
 | `@eventuras/fides-auth/oauth-browser`      | Browser     | **Deprecated** — OAuth/OIDC flows with Web Crypto API |
 | `@eventuras/fides-auth/session-validation` | Node.js     | Encrypted JWT session validation                      |
 | `@eventuras/fides-auth/session-refresh`    | Node.js     | Automatic token refresh for sessions                  |
@@ -146,6 +147,55 @@ const oauthConfig: OAuthConfig = {
 
 With `openid` in the scope the metadata must include `issuer`, so the ID token's
 `iss` can be checked.
+
+#### PKCE and state (`/pkce`)
+
+For flows that manage their own login transaction. Web Crypto only, so it also
+runs in the browser and on edge runtimes:
+
+```typescript
+import { createPkcePair, createState } from "@eventuras/fides-auth/pkce";
+
+const { verifier, challenge } = await createPkcePair(); // S256
+const state = createState();
+```
+
+`buildPKCEOptions` is built on the same two functions.
+
+#### Scope and extra authorization parameters
+
+`scope` takes a string or an array. Other authorization parameters (`prompt`,
+`login_hint`, `resource`, …) can be set on the config, per call, or per request
+in `handleOidcLogin`. They go through PAR too.
+
+```typescript
+const oauthConfig = {
+  // …
+  scope: ["openid", "profile", "offline_access"],
+  authorizationParameters: { resource: "https://api.example.com" },
+};
+
+const pkce = await buildPKCEOptions(oauthConfig, {
+  parameters: { login_hint: "user@example.com" },
+});
+
+// Or per request in the server handler
+return handleOidcLogin(request, {
+  oauthConfig,
+  cookies,
+  authorizationParameters: (request) =>
+    new URL(request.url).searchParams.has("reauth") ? { prompt: "login" } : {},
+});
+```
+
+Per-call parameters override the config's, and a `scope` among them replaces
+`OAuthConfig.scope`. These keys are reserved, and passing one throws:
+
+- `state`, `code_challenge`, `code_challenge_method` and `redirect_uri`, which
+  fides-auth sets.
+- `client_id` and `response_type`, which openid-client sets.
+- `request` and `request_uri`, which would bypass PKCE and `state`.
+- `nonce`, which the callback doesn't check, so the login would fail.
 
 #### Pushed Authorization Requests (PAR, RFC 9126)
 

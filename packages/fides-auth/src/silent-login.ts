@@ -11,7 +11,7 @@
 import * as openid from 'openid-client';
 
 import { createLogger } from './logger';
-import { OAuthConfig } from './oauth';
+import { joinScope, type OAuthConfig } from './oauth';
 import { discoverConfiguration } from './oidc-discovery';
 
 const logger = createLogger({ namespace: 'fides-auth:silent-login' });
@@ -68,7 +68,7 @@ export async function buildSilentLoginUrl(
 
     const parameters: Record<string, string> = {
       redirect_uri: config.redirect_uri,
-      scope: config.scope,
+      scope: joinScope(config.scope),
       prompt: 'none', // Critical: tells provider to not show any UI
       response_type: 'code',
       ...options.additionalParams,

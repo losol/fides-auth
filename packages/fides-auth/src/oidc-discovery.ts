@@ -162,8 +162,10 @@ function sameInputs(a: readonly unknown[], b: readonly unknown[]): boolean {
 }
 
 /** Unset scope means `defaultScope`, which includes `openid`. */
-function requestsOpenId(scope: string | undefined): boolean {
-  return scope === undefined || scope.split(/\s+/).includes('openid');
+function requestsOpenId(scope: string | string[] | undefined): boolean {
+  if (scope === undefined) return true;
+  const joined = Array.isArray(scope) ? scope.join(' ') : scope;
+  return joined.split(/\s+/).includes('openid');
 }
 
 /** Async so a bad config rejects like a failed discovery and is never cached. */

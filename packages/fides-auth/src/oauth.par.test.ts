@@ -16,15 +16,13 @@ vi.mock('openid-client', () => ({
   buildAuthorizationUrl: vi.fn(),
   buildAuthorizationUrlWithPAR: vi.fn(),
   ClientSecretPost: vi.fn(() => () => undefined),
-  randomPKCECodeVerifier: vi.fn(() => 'verifier-123'),
-  calculatePKCECodeChallenge: vi.fn(async () => 'challenge-abc'),
-  randomState: vi.fn(() => 'state-xyz'),
 }));
 
 import * as openid from 'openid-client';
 import { clearDiscoveryCache } from './oidc-discovery';
 import {
   buildAuthorizationUrlWithPAR,
+  buildPKCEOptions,
   discoverAndBuildAuthorizationUrl,
   type OAuthConfig,
   type PKCEOptions,
@@ -265,5 +263,33 @@ describe('discoverAndBuildAuthorizationUrl — PAR routing', () => {
     expect(openid.buildAuthorizationUrl).toHaveBeenCalledTimes(1);
     expect(openid.buildAuthorizationUrlWithPAR).not.toHaveBeenCalled();
     expect(result).toBe(authUrl);
+  });
+});
+
+describe('discoverAndBuildAuthorizationUrl — extra parameters over PAR', () => {
+  it('pushes extra parameters and the joined scope to the PAR endpoint', async () => {
+    const discovered = makeDiscoveredConfig('https://auth.example.com/par');
+    vi.mocked(openid.discovery).mockResolvedValue(discovered);
+    vi.mocked(openid.buildAuthorizationUrlWithPAR).mockResolvedValue(
+      new URL('https://auth.example.com/authorize?client_id=x&request_uri=urn:1'),
+    );
+
+    const oauthConfig = makeOAuthConfig({
+      usePar: true,
+      scope: ['openid', 'profile'],
+      authorizationParameters: { resource: 'https://api.example.com' },
+    });
+    const pkce = await buildPKCEOptions(oauthConfig, { parameters: { login_hint: 'user@example.com' } });
+    await discoverAndBuildAuthorizationUrl(oauthConfig, pkce);
+
+    expect(openid.buildAuthorizationUrlWithPAR).toHaveBeenCalledWith(discovered, {
+      redirect_uri: 'https://app.example.com/callback',
+      scope: 'openid profile',
+      resource: 'https://api.example.com',
+      login_hint: 'user@example.com',
+      code_challenge: pkce.code_challenge,
+      code_challenge_method: 'S256',
+      state: pkce.state,
+    });
   });
 });
