@@ -50,6 +50,15 @@ export {
   type ValidateCallbackOptions,
 } from './login-transaction';
 
+export {
+  authorizedFetch,
+  AuthorizedFetchError,
+  type AuthorizedFetchErrorDetails,
+  type AuthorizedFetchErrorReason,
+  type AuthorizedFetchOptions,
+  type AuthorizedFetchResult,
+} from './authorized-fetch';
+
 export { handleOidcLogin, type OidcLoginConfig } from './oidc-login';
 export { handleOidcCallback, type OidcCallbackConfig } from './oidc-callback';
 export { handleOidcLogout, type OidcLogoutConfig } from './oidc-logout';
