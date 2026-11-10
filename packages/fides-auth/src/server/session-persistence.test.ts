@@ -433,3 +433,28 @@ describe('server persistence', () => {
     });
   });
 });
+
+describe('writing a session that could not be read back', () => {
+  const unreadable = { sid: 'x', scopes: ['openid'] } as Session;
+
+  it('throws under cookie persistence and writes nothing', async () => {
+    const { cookies, jar } = cookieJar();
+
+    await expect(persistSession(cookies, unreadable, cookiePersistence(secret))).rejects.toThrow(
+      TypeError,
+    );
+    expect(jar.size).toBe(0);
+  });
+
+  it('throws under server persistence and stores nothing', async () => {
+    const store = createMemorySessionStore();
+    const set = vi.spyOn(store, 'set');
+    const { cookies, jar } = cookieJar();
+
+    await expect(
+      persistSession(cookies, unreadable, serverPersistence({ store, secret })),
+    ).rejects.toThrow(TypeError);
+    expect(set).not.toHaveBeenCalled();
+    expect(jar.size).toBe(0);
+  });
+});

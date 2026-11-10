@@ -10,7 +10,7 @@
 // goes in the main one, so no cookie has to carry two JWTs against the ~4KB limit.
 
 import { createEncryptedJWT, decryptJWT } from './utils';
-import { validateSessionJwt } from './session-validation';
+import { isSession, validateSessionJwt } from './session-validation';
 import { createLogger } from './logger';
 import type { SessionRejectedReason } from './session-events';
 import { Session } from './types';
@@ -46,11 +46,15 @@ export interface RawSessionCookies {
  *
  * @param session - The session to encode.
  * @param secret - The encryption key as a hex string or Uint8Array (32 bytes for A256GCM).
+ * @throws TypeError when the session has neither `tokens` nor `user`, so it could not be read back.
  */
 export async function encodeSessionCookies(
   session: Session,
   secret: string | Uint8Array,
 ): Promise<EncodedSessionCookies> {
+  if (!isSession(session)) {
+    throw new TypeError('A session needs a tokens or user object');
+  }
   const { tokens, ...rest } = session;
   const accessToken = tokens?.accessToken;
   const idToken = tokens?.idToken;

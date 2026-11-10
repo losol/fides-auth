@@ -23,7 +23,10 @@ const HOST_PREFIX = '__Host-';
 /** Live logins per browser. Another login evicts the oldest. */
 const MAX_TRANSACTIONS = 3;
 
-/** A longer returnTo is dropped, not stored in a cookie sent with every request. */
+/**
+ * A longer returnTo is dropped, not stored in a cookie sent with every request.
+ * Measured as serialized: JSON escaping grows a control character sixfold.
+ */
 const MAX_RETURN_TO_BYTES = 1024;
 
 const DEFAULT_MAX_AGE_MS = 10 * 60 * 1000;
@@ -79,7 +82,7 @@ export function createTransaction(
   { returnTo }: CreateTransactionOptions = {},
 ): LoginTransaction {
   let kept = returnTo || undefined;
-  if (kept && new TextEncoder().encode(kept).length > MAX_RETURN_TO_BYTES) {
+  if (kept && new TextEncoder().encode(JSON.stringify(kept)).length > MAX_RETURN_TO_BYTES) {
     logger.warn({ length: kept.length }, 'returnTo too long, dropped');
     kept = undefined;
   }
@@ -92,8 +95,8 @@ export function createTransaction(
 }
 
 /**
- * Seals the transaction into a free `__Host-oauth_tx_<n>` slot, or the oldest
- * login's. Throws `CookieTooLargeError` if it would not fit in a cookie.
+ * Seals the transaction into a random free `__Host-oauth_tx_<n>` slot, or the
+ * oldest login's. Throws `CookieTooLargeError` if it would not fit in a cookie.
  */
 export async function persistTransaction(
   cookies: CookieStore,
@@ -103,8 +106,10 @@ export async function persistTransaction(
 ): Promise<void> {
   const key = await transactionKey(secret);
   const slots = await readSlots(cookies, key, secure);
+  const free = slots.filter((candidate) => !candidate.transaction);
+  // A random free slot, so two logins started at the same moment rarely share one.
   const slot =
-    slots.find((candidate) => !candidate.transaction) ??
+    free[Math.floor(Math.random() * free.length)] ??
     slots.reduce((oldest, candidate) =>
       (candidate.transaction?.createdAt ?? 0) < (oldest.transaction?.createdAt ?? 0)
         ? candidate
@@ -151,7 +156,7 @@ export async function clearTransaction(
   }
 }
 
-/** Handler default: Secure unless the callback itself is plain http. */
+/** What the handlers use: Secure and `__Host-` unless the callback is plain http. */
 export function transactionCookieOptions(redirectUri: string): TransactionCookieOptions {
   return { secure: !/^http:/i.test(redirectUri) };
 }

@@ -9,7 +9,7 @@
  * The OAuth machinery (tested elsewhere) is mocked; we assert on the URL handed
  * to exchangeAuthorizationCode and that the session is persisted via the store.
  */
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterAll } from 'vitest';
 
 vi.mock('../oauth', () => ({
   exchangeAuthorizationCode: vi.fn(),
@@ -31,6 +31,7 @@ import {
   readTransaction,
   type LoginTransaction,
 } from './login-transaction';
+import { transactionCookieOptions } from './index';
 import { serverPersistence } from './session-persistence';
 import { createMemorySessionStore } from './session-store';
 import { sha256 } from '../utils';
@@ -90,11 +91,19 @@ const baseConfig = (store: CookieStore) => ({
   secret,
 });
 
+// The first free transaction slot.
+const random = vi.spyOn(Math, 'random');
+
 beforeEach(() => {
   vi.clearAllMocks();
+  random.mockReturnValue(0);
   mockedExchange.mockResolvedValue({ accessToken: 'a' } as any);
-  mockedBuildSession.mockReturnValue({} as any);
+  mockedBuildSession.mockReturnValue({ tokens: { accessToken: 'a' } } as any);
   mockedValidateReturnUrl.mockReturnValue(new URL('https://host.example.test/'));
+});
+
+afterAll(() => {
+  random.mockRestore();
 });
 
 describe('handleOidcCallback — proxy callback path', () => {
@@ -192,12 +201,18 @@ describe('handleOidcCallback — login transaction', () => {
     );
   });
 
-  it('finds a plain cookie when the redirect_uri is http', async () => {
+  it('pairs a custom login using transactionCookieOptions with an http callback', async () => {
     const { store, jar } = memoryStore();
-    const transaction = createTransaction({ state: 'xyz', code_verifier: 'verifier' });
-    await persistTransaction(store, transaction, secret, { secure: false });
     const config = baseConfig(store);
     config.oauthConfig.redirect_uri = 'http://dev.test/api/auth/callback/oidc';
+    const transaction = createTransaction({ state: 'xyz', code_verifier: 'verifier' });
+    await persistTransaction(
+      store,
+      transaction,
+      secret,
+      transactionCookieOptions(config.oauthConfig.redirect_uri),
+    );
+    expect(transactionCookies(jar)).toEqual(['oauth_tx_0']);
 
     const response = await handleOidcCallback(callback('code=abc&state=xyz'), config);
 

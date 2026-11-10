@@ -2,7 +2,7 @@
  * Tests for the login transaction: the sealed per-login cookie and the callback
  * checks run against it.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 
 import { CookieTooLargeError, type CookieOptions } from '../cookies';
 import { decryptJWT } from '../utils';
@@ -13,6 +13,7 @@ import {
   createTransaction,
   persistTransaction,
   readTransaction,
+  transactionCookieOptions,
   validateCallback,
   type LoginTransaction,
 } from './login-transaction';
@@ -39,6 +40,18 @@ function memoryStore(initial?: Record<string, string>) {
 }
 
 const SLOT_0 = '__Host-oauth_tx_0';
+
+// The first free slot, unless a test draws otherwise.
+const random = vi.spyOn(Math, 'random');
+beforeEach(() => {
+  random.mockReturnValue(0);
+});
+afterEach(() => {
+  random.mockReset();
+});
+afterAll(() => {
+  random.mockRestore();
+});
 
 const pkce = (state: string) => ({ state, code_verifier: `verifier-for-${state}` });
 
@@ -94,6 +107,12 @@ describe('login transaction cookie', () => {
     expect(jar.size).toBe(0);
   });
 
+  it('derives the handlers\' cookie options from the redirect_uri', () => {
+    expect(transactionCookieOptions('https://app.test/cb')).toEqual({ secure: true });
+    expect(transactionCookieOptions('http://localhost:3000/cb')).toEqual({ secure: false });
+    expect(transactionCookieOptions('HTTP://dev.test/cb')).toEqual({ secure: false });
+  });
+
   it('ignores an unprefixed cookie when secure, so a subdomain cannot plant one', async () => {
     const { store } = memoryStore();
     await persistTransaction(store, createTransaction(pkce('st')), secret, { secure: false });
@@ -143,18 +162,74 @@ describe('login transaction cookie', () => {
   });
 
   it('reuses a slot holding an unreadable cookie', async () => {
-    const { store, jar } = memoryStore({ [SLOT_0]: 'garbage' });
+    const { store, jar } = memoryStore();
+    await persistTransaction(store, createTransaction(pkce('one')), secret);
+    await persistTransaction(store, createTransaction(pkce('two')), secret);
+    await persistTransaction(store, createTransaction(pkce('three')), secret);
+    jar.set(SLOT_0, 'garbage');
 
     await persistTransaction(store, createTransaction(pkce('st')), secret);
 
-    expect(jar.size).toBe(1);
+    expect(jar.size).toBe(3);
     expect(await readTransaction(store, 'st', secret)).not.toBeNull();
+    expect(await readTransaction(store, 'two', secret)).not.toBeNull();
+    expect(await readTransaction(store, 'three', secret)).not.toBeNull();
   });
 
-  it('drops a returnTo over 1 KB', () => {
-    const fits = `/${'a'.repeat(1023)}`;
+  it('picks a random free slot, leaving taken ones alone', async () => {
+    const { store, jar } = memoryStore();
+    random.mockReturnValueOnce(0.5);
+    await persistTransaction(store, createTransaction(pkce('one')), secret);
+    expect([...jar.keys()]).toEqual(['__Host-oauth_tx_1']);
+
+    // Free slots are 0 and 2; a draw near 1 takes the last of them.
+    random.mockReturnValueOnce(0.99);
+    await persistTransaction(store, createTransaction(pkce('two')), secret);
+    expect([...jar.keys()].sort()).toEqual(['__Host-oauth_tx_1', '__Host-oauth_tx_2']);
+  });
+
+  it('lets two logins started at the same moment land in different slots', async () => {
+    // Both requests carry the same empty Cookie header; the browser keeps both responses.
+    const browser = new Map<string, string>();
+    const request = (): CookieStore => ({
+      get: () => null,
+      set: (name, value) => { browser.set(name, value); },
+      delete: (name) => { browser.delete(name); },
+    });
+    random.mockReturnValueOnce(0.1).mockReturnValueOnce(0.9);
+
+    await Promise.all([
+      persistTransaction(request(), createTransaction(pkce('one')), secret),
+      persistTransaction(request(), createTransaction(pkce('two')), secret),
+    ]);
+
+    expect(browser.size).toBe(2);
+    const { store } = memoryStore(Object.fromEntries(browser));
+    expect(await readTransaction(store, 'one', secret)).not.toBeNull();
+    expect(await readTransaction(store, 'two', secret)).not.toBeNull();
+  });
+
+  it('drops a returnTo over 1 KB once serialized', () => {
+    // 1024 bytes with the JSON quotes.
+    const fits = `/${'a'.repeat(1021)}`;
     expect(createTransaction(pkce('st'), { returnTo: fits }).returnTo).toBe(fits);
     expect(createTransaction(pkce('st'), { returnTo: `${fits}a` }).returnTo).toBeUndefined();
+
+    // 201 raw bytes, but each control character escapes to six.
+    const escaped = `/${'\u0001'.repeat(200)}`;
+    expect(createTransaction(pkce('st'), { returnTo: escaped }).returnTo).toBeUndefined();
+  });
+
+  it('keeps a cookie at the returnTo cap under 2 KB, even when escaped', async () => {
+    for (const returnTo of [`/${'a'.repeat(1021)}`, `/${'\u0001'.repeat(170)}`]) {
+      const { store, jar } = memoryStore();
+      const transaction = createTransaction(pkce('st'), { returnTo });
+      expect(transaction.returnTo).toBe(returnTo);
+
+      await persistTransaction(store, transaction, secret);
+
+      expect(jar.get(SLOT_0)!.length).toBeLessThan(2048);
+    }
   });
 
   it('refuses to store a transaction too large for a cookie', async () => {

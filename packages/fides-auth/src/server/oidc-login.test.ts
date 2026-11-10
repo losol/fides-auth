@@ -2,7 +2,7 @@
  * Tests for the OIDC login handler — focused on the login transaction cookie.
  * The OAuth machinery is mocked (tested elsewhere).
  */
-import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 
 vi.mock('../oauth', () => ({
   buildPKCEOptions: vi.fn(),
@@ -11,7 +11,7 @@ vi.mock('../oauth', () => ({
 
 import { handleOidcLogin } from './oidc-login';
 import { buildPKCEOptions, discoverAndBuildAuthorizationUrl } from '../oauth';
-import type { CookieOptions } from '../cookies';
+import { CookieTooLargeError, type CookieOptions } from '../cookies';
 import type { CookieStore } from './cookie-store';
 import { readTransaction } from './login-transaction';
 
@@ -49,14 +49,22 @@ const login = (store: CookieStore, query = '') =>
     secret,
   });
 
+// The first free transaction slot, unless a test draws otherwise.
+const random = vi.spyOn(Math, 'random');
+
 beforeEach(() => {
   vi.clearAllMocks();
+  random.mockReturnValue(0);
   mockedPkce.mockResolvedValue({ state: 'st', code_verifier: 'cv' } as any);
   mockedAuthUrl.mockResolvedValue(new URL('https://id.example.test/authorize?x=1'));
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+afterAll(() => {
+  random.mockRestore();
 });
 
 describe('handleOidcLogin', () => {
@@ -121,6 +129,27 @@ describe('handleOidcLogin', () => {
     expect((await readTransaction(store, 'two', secret))?.returnTo).toBe('/b');
   });
 
+  it('lets two logins started at the same moment both complete', async () => {
+    // Both requests carry the same empty Cookie header; the browser keeps both responses.
+    const browser = new Map<string, string>();
+    const request = (): CookieStore => ({
+      get: () => null,
+      set: (name, value) => { browser.set(name, value); },
+      delete: (name) => { browser.delete(name); },
+    });
+    mockedPkce
+      .mockResolvedValueOnce({ state: 'one', code_verifier: 'cv1' } as any)
+      .mockResolvedValueOnce({ state: 'two', code_verifier: 'cv2' } as any);
+    random.mockReturnValueOnce(0).mockReturnValueOnce(0.5);
+
+    await Promise.all([login(request()), login(request())]);
+
+    const { store } = memoryStore();
+    for (const [name, value] of browser) await store.set(name, value);
+    expect(await readTransaction(store, 'one', secret)).not.toBeNull();
+    expect(await readTransaction(store, 'two', secret)).not.toBeNull();
+  });
+
   it('keeps at most three logins in progress', async () => {
     const { store, jar } = memoryStore();
     for (const state of ['one', 'two', 'three', 'four']) {
@@ -130,6 +159,44 @@ describe('handleOidcLogin', () => {
 
     expect(jar.size).toBe(3);
     expect(await readTransaction(store, 'four', secret)).not.toBeNull();
+  });
+
+  it.each([
+    ['a control character', '%2Fa%01b'],
+    ['DEL', '%2Fa%7Fb'],
+    ['non-ASCII', '%2Fs%C3%B8k'],
+  ])('drops a returnTo with %s', async (_, encoded) => {
+    const { store } = memoryStore();
+    await login(store, `?returnTo=${encoded}`);
+
+    expect((await readTransaction(store, 'st', secret))?.returnTo).toBeUndefined();
+  });
+
+  it('keeps a printable returnTo with a query', async () => {
+    const { store } = memoryStore();
+    await login(store, `?returnTo=${encodeURIComponent('/dash?tab=1 2')}`);
+
+    expect((await readTransaction(store, 'st', secret))?.returnTo).toBe('/dash?tab=1 2');
+  });
+
+  it('retries without returnTo when the transaction is too large for a cookie', async () => {
+    const { store } = memoryStore();
+    mockedPkce.mockResolvedValue({ state: 'st', code_verifier: 'v'.repeat(2400) } as any);
+
+    const response = await login(store, `?returnTo=%2F${'a'.repeat(900)}`);
+
+    expect(response.status).toBe(302);
+    const transaction = await readTransaction(store, 'st', secret);
+    expect(transaction).not.toBeNull();
+    expect(transaction?.returnTo).toBeUndefined();
+  });
+
+  it('still throws when the transaction is too large without returnTo', async () => {
+    const { store, jar } = memoryStore();
+    mockedPkce.mockResolvedValue({ state: 'st', code_verifier: 'v'.repeat(4000) } as any);
+
+    await expect(login(store, '?returnTo=%2Fdash')).rejects.toBeInstanceOf(CookieTooLargeError);
+    expect(jar.size).toBe(0);
   });
 
   it('drops a returnTo over 1 KB but still starts the login', async () => {

@@ -241,6 +241,10 @@ export function serverPersistence(options: ServerPersistenceOptions): SessionPer
     mode: 'server',
 
     async write(cookies, session, { continuation = false } = {}) {
+      // Same rule as on read, so a session is never stored that reads back as null.
+      if (!isSession(session)) {
+        throw new TypeError('A session needs a tokens or user object');
+      }
       const current = await locate(cookies);
       await clearSplitCookies(cookies);
       const data = await createEncryptedJWT(session, secret);

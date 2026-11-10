@@ -30,6 +30,12 @@ const session = (accessToken?: string, idToken?: string): Session => ({
 });
 
 describe('encodeSessionCookies', () => {
+  it('refuses a session with neither tokens nor user, which would not read back', async () => {
+    const unreadable = { sid: 'x', data: { cartId: 'c' } } as Session;
+
+    await expect(encodeSessionCookies(unreadable, SECRET)).rejects.toThrow(TypeError);
+  });
+
   it('splits the access token into its own value, kept out of the main value', async () => {
     const accessToken = jwtWithExp(3600);
     const encoded = await encodeSessionCookies(session(accessToken), SECRET);
