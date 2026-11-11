@@ -10,6 +10,7 @@
 
 import {
   handleHeartbeat as coreHandleHeartbeat,
+  type SessionPersistence,
   type SessionSecret,
 } from '@eventuras/fides-auth/server';
 import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
@@ -23,6 +24,9 @@ export interface HeartbeatHandlerConfig {
 
   /** Session encryption secret. */
   secret: SessionSecret;
+
+  /** Where the session lives. Defaults to the cookies under `secret`; see `serverPersistence`. */
+  persistence?: SessionPersistence;
 }
 
 /**
@@ -47,6 +51,7 @@ export async function handleHeartbeat(
   return coreHandleHeartbeat(request, {
     oauthConfig: config.oauthConfig,
     secret: config.secret,
+    persistence: config.persistence,
     cookies: await nextCookieStore(),
     rateLimit: globalPOSTRateLimit,
   });

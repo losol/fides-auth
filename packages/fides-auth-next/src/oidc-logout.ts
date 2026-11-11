@@ -6,6 +6,7 @@
 
 import {
   handleOidcLogout as coreHandleOidcLogout,
+  type SessionPersistence,
   type SessionSecret,
 } from '@eventuras/fides-auth/server';
 import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
@@ -19,6 +20,9 @@ export interface OidcLogoutConfig {
 
   /** Session encryption secret. */
   secret: SessionSecret;
+
+  /** Where the session lives. Defaults to the cookies under `secret`; see `serverPersistence`. */
+  persistence?: SessionPersistence;
 
   /**
    * URI the provider redirects back to after logout. Must be registered with the
@@ -74,6 +78,7 @@ export async function handleOidcLogout(
   return coreHandleOidcLogout(request, {
     oauthConfig: config.oauthConfig,
     secret: config.secret,
+    persistence: config.persistence,
     postLogoutRedirectUri: config.postLogoutRedirectUri,
     state: config.state,
     logoutHint: config.logoutHint,

@@ -33,6 +33,7 @@ vi.mock('@eventuras/fides-auth/server', async (importOriginal) => {
   return {
     ...original,
     tryRefreshSessionInStore: vi.fn(original.tryRefreshSessionInStore),
+    serverPersistence: vi.fn(original.serverPersistence),
     handleOidcLogin: vi.fn(async () => new Response(null, { status: 302 })),
     handleOidcCallback: vi.fn(async () => new Response(null, { status: 302 })),
     handleOidcLogout: vi.fn(async () => new Response(null, { status: 302 })),
@@ -254,6 +255,48 @@ describe('createFidesAuth — bound config', () => {
       request,
       expect.objectContaining({ applicationUrl: 'https://app.test' }),
     );
+  });
+
+  it('passes no persistence without a sessionStore', async () => {
+    const request = new Request('https://app.test/api/auth');
+
+    await auth.handleOidcCallback(request, { applicationUrl: 'https://app.test' });
+    await auth.handleOidcLogout(request, { postLogoutRedirectUri: 'https://app.test/' });
+    await auth.handleHeartbeat(request);
+    await createAndPersistSession(baseSession(jwtWithExp(3600)));
+
+    expect(core.serverPersistence).not.toHaveBeenCalled();
+    for (const handler of [core.handleOidcCallback, core.handleOidcLogout, core.handleHeartbeat]) {
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(handler).mock.calls[0]?.[1].persistence).toBeUndefined();
+    }
+    expect(jar.has('session_ref')).toBe(false);
+  });
+
+  it('builds one server persistence on first use and passes it to the handlers', async () => {
+    const sessionStore = core.createMemorySessionStore();
+    const stored = createFidesAuth({ secret, oauthConfig, sessionStore });
+    // Not at creation: module-scope setup may run in a build without the secret.
+    expect(core.serverPersistence).not.toHaveBeenCalled();
+
+    const request = new Request('https://app.test/api/auth');
+    await stored.handleOidcLogin(request);
+    await stored.handleOidcCallback(request, { applicationUrl: 'https://app.test' });
+    await stored.handleOidcLogout(request, { postLogoutRedirectUri: 'https://app.test/' });
+    await stored.handleHeartbeat(request);
+    await stored.tryGetCurrentSession();
+
+    expect(core.serverPersistence).toHaveBeenCalledTimes(1);
+    expect(core.serverPersistence).toHaveBeenCalledWith({ store: sessionStore, secret });
+    const persistence = vi.mocked(core.serverPersistence).mock.results[0]?.value;
+    for (const handler of [core.handleOidcCallback, core.handleOidcLogout, core.handleHeartbeat]) {
+      const config = vi.mocked(handler).mock.calls[0]?.[1];
+      expect(config).toMatchObject({ oauthConfig, secret });
+      expect(config?.persistence).toBe(persistence);
+    }
+    // Login only seals the transaction cookie.
+    expect(vi.mocked(core.handleOidcLogin).mock.calls[0]?.[1]).toMatchObject({ secret });
+    expect(vi.mocked(core.handleOidcLogin).mock.calls[0]?.[1]).not.toHaveProperty('persistence');
   });
 
   it('binds authorizedFetch to refresh the cookie session on a 401', async () => {

@@ -10,6 +10,7 @@ import {
   clearSession,
   persistSession,
   refreshSessionInStore,
+  serverPersistence,
   tryReadSession,
   tryRefreshSessionInStore,
   type AuthorizedFetchErrorReason,
@@ -18,7 +19,10 @@ import {
   type ClearSessionOptions,
   type ReadSessionResult,
   type RefreshSessionResult,
+  type SessionPersistence,
   type SessionSecret,
+  type SessionStore,
+  type StoredSession,
 } from '@eventuras/fides-auth/server';
 import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
 import type { CreateSessionOptions, Session } from '@eventuras/fides-auth/types';
@@ -33,6 +37,7 @@ import { handleOidcLogout, type OidcLogoutConfig } from './oidc-logout';
 
 // So consumers can name the helpers' types without reaching past this package.
 export type { ClearSessionOptions, ReadSessionResult, RefreshSessionResult, SessionSecret };
+export type { SessionStore, StoredSession };
 export type { AuthorizedFetchErrorReason, AuthorizedFetchOptions, AuthorizedFetchResult };
 export { AuthorizedFetchError };
 
@@ -42,10 +47,16 @@ export interface FidesAuthConfig {
 
   /** OAuth/OIDC configuration. */
   oauthConfig: OAuthConfig;
+
+  /**
+   * Keeps sessions in this store, encrypted under `secret`; the cookie holds only a handle.
+   * Omit to keep them in encrypted cookies.
+   */
+  sessionStore?: SessionStore;
 }
 
 /** A handler's config minus what the factory binds. */
-type Bound<T> = Omit<T, 'oauthConfig' | 'secret'>;
+type Bound<T> = Omit<T, 'oauthConfig' | 'secret' | 'persistence'>;
 
 export type BoundAuthorizedFetchOptions<T = undefined> = Omit<
   AuthorizedFetchOptions<T>,
@@ -65,20 +76,20 @@ export interface FidesAuth {
   /** The current session, or why there is none. Shares the cache with `getCurrentSession`. */
   tryGetCurrentSession(): Promise<ReadSessionResult>;
 
-  /** Refreshes the session and updates the cookies. Null on any failure. */
+  /** Refreshes the session and saves it. Null on any failure. */
   refreshCurrentSession(options?: CreateSessionOptions): Promise<Session | null>;
 
   /** Refreshes the session and, on failure, says why. Prefer it over `refreshCurrentSession`. */
   tryRefreshCurrentSession(options?: CreateSessionOptions): Promise<RefreshSessionResult>;
 
-  /** Persists a new session across the session cookies. Returns the main cookie's value. */
+  /** Persists a new session. Returns the session cookie's value: the encrypted session, or the handle. */
   createAndPersistSession(session: Session): Promise<string>;
 
-  /** Deletes the session cookies. `trigger` defaults to `logout`. */
+  /** Deletes the session cookies and, with a `sessionStore`, the record. `trigger` defaults to `logout`. */
   clearCurrentSession(options?: ClearSessionOptions): Promise<void>;
 
   /**
-   * `authorizedFetch` that, on a 401, refreshes the session in the cookies and retries once.
+   * `authorizedFetch` that, on a 401, refreshes the session and retries once.
    * Parallel calls in one request share one refresh. The refresh writes cookies, so it works
    * only in Server Actions and Route Handlers; pass `refresh: false` in a Server Component.
    */
@@ -109,20 +120,30 @@ export interface FidesAuth {
  * const session = await auth.getCurrentSession();
  * ```
  */
-export function createFidesAuth({ secret, oauthConfig }: FidesAuthConfig): FidesAuth {
+export function createFidesAuth({ secret, oauthConfig, sessionStore }: FidesAuthConfig): FidesAuth {
+  // One per instance, so refreshes of one session are shared across requests. Built on first use.
+  let persistence: SessionPersistence | undefined;
+  const serverSessions = (): SessionPersistence | undefined => {
+    if (sessionStore) persistence ??= serverPersistence({ store: sessionStore, secret });
+    return persistence;
+  };
+  /** Where sessions live: the store, or else the cookies under `secret`. */
+  const storage = (): SessionSecret | SessionPersistence => serverSessions() ?? secret;
+
   const tryGetCurrentSession = cache(
-    async (): Promise<ReadSessionResult> => tryReadSession(await nextCookieStore(), secret),
+    async (): Promise<ReadSessionResult> => tryReadSession(await nextCookieStore(), storage()),
   );
   const getCurrentSession = cache(async () => (await tryGetCurrentSession()).session);
 
   // Keyed by the request's cookies, so parallel 401s don't each spend the refresh token.
+  // Needed with a store too, which joins only refreshes that overlap.
   const refreshes = new WeakMap<object, Promise<RefreshSessionResult>>();
   const refreshOncePerRequest = async (): Promise<RefreshSessionResult> => {
     const requestCookies = await cookies();
     let refresh = refreshes.get(requestCookies);
     if (!refresh) {
       refresh = nextCookieStore().then((store) =>
-        tryRefreshSessionInStore(store, oauthConfig, secret),
+        tryRefreshSessionInStore(store, oauthConfig, storage()),
       );
       refreshes.set(requestCookies, refresh);
     }
@@ -134,18 +155,22 @@ export function createFidesAuth({ secret, oauthConfig }: FidesAuthConfig): Fides
     tryGetCurrentSession,
 
     refreshCurrentSession: async (options = {}) =>
-      refreshSessionInStore(await nextCookieStore(), oauthConfig, secret, options),
+      refreshSessionInStore(await nextCookieStore(), oauthConfig, storage(), options),
 
     tryRefreshCurrentSession: async (options = {}) =>
-      tryRefreshSessionInStore(await nextCookieStore(), oauthConfig, secret, options),
+      tryRefreshSessionInStore(await nextCookieStore(), oauthConfig, storage(), options),
 
     createAndPersistSession: async (session) =>
-      persistSession(await nextCookieStore(), session, secret),
+      persistSession(await nextCookieStore(), session, storage()),
 
     clearCurrentSession: async (options = {}) => {
       // The sid comes from the per-render cache, so correlating the logout costs nothing.
       const sid = options.sid ?? (await tryGetCurrentSession()).session?.sid;
-      await clearSession(await nextCookieStore(), { trigger: options.trigger ?? 'logout', sid });
+      await clearSession(await nextCookieStore(), {
+        trigger: options.trigger ?? 'logout',
+        sid,
+        persistence: serverSessions(),
+      });
     },
 
     authorizedFetch: (session, url, options) =>
@@ -154,12 +179,24 @@ export function createFidesAuth({ secret, oauthConfig }: FidesAuthConfig): Fides
         refresh: options.refresh === false ? undefined : refreshOncePerRequest,
       }),
 
+    // Login only seals the transaction cookie, so it takes the secret alone.
     handleOidcLogin: (request, options = {}) =>
       handleOidcLogin(request, { ...options, oauthConfig, secret }),
     handleOidcCallback: (request, options) =>
-      handleOidcCallback(request, { ...options, oauthConfig, secret }),
+      handleOidcCallback(request, {
+        ...options,
+        oauthConfig,
+        secret,
+        persistence: serverSessions(),
+      }),
     handleOidcLogout: (request, options) =>
-      handleOidcLogout(request, { ...options, oauthConfig, secret }),
-    handleHeartbeat: (request) => handleHeartbeat(request, { oauthConfig, secret }),
+      handleOidcLogout(request, {
+        ...options,
+        oauthConfig,
+        secret,
+        persistence: serverSessions(),
+      }),
+    handleHeartbeat: (request) =>
+      handleHeartbeat(request, { oauthConfig, secret, persistence: serverSessions() }),
   };
 }
