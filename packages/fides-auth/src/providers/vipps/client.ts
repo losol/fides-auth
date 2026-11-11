@@ -13,9 +13,9 @@ import {
   buildPKCEOptions,
   joinScope,
   type AuthorizationRequestOptions,
-  type OAuthConfig,
   type PKCEOptions,
 } from '../../oauth';
+import type { OAuthConfig } from '../../oauth-config';
 import { discoverConfiguration } from '../../oidc-discovery';
 import {
   defaultVippsLoginScope,

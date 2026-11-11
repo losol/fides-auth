@@ -7,12 +7,13 @@
 
 import { CookieTooLargeError } from '../cookies';
 import { createLogger } from '../logger';
-import type { MapSession, OAuthConfig } from '../oauth';
+import type { MapSession } from '../oauth';
 import {
   buildSessionFromTokens,
   exchangeAuthorizationCode,
   validateReturnUrl,
 } from '../oauth';
+import type { OAuthConfig } from '../oauth-config';
 import { SESSION_EVENT } from '../session-events';
 import type { CookieStore } from './cookie-store';
 import {

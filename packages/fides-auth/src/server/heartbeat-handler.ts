@@ -6,7 +6,7 @@
 // session, refresh, respond — over the standard Request/Response and a CookieStore.
 
 import { createLogger } from '../logger';
-import type { OAuthConfig } from '../oauth';
+import type { OAuthConfig } from '../oauth-config';
 import { SESSION_EVENT, logSessionEvent, type SessionRejectedReason } from '../session-events';
 import type { CookieStore } from './cookie-store';
 import { tryRefreshSessionInStore } from './session';

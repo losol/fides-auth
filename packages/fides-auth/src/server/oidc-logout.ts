@@ -5,8 +5,8 @@
 // re-authenticates — this handler ends both.
 
 import { createLogger } from '../logger';
-import type { OAuthConfig } from '../oauth';
 import { buildOidcLogoutUrl } from '../oauth';
+import type { OAuthConfig } from '../oauth-config';
 import type { CookieStore } from './cookie-store';
 import { clearSession, readIdToken, tryReadSession } from './session';
 import { persistenceFrom, type SessionPersistenceConfig } from './session-persistence';

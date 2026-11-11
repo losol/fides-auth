@@ -4,7 +4,7 @@
 
 import { createRemoteJWKSet, type JWTPayload, jwtVerify } from 'jose';
 
-import type { OAuthConfig } from './oauth';
+import type { OAuthConfig } from './oauth-config';
 import { discoverConfiguration } from './oidc-discovery';
 
 /** Asymmetric only, so `none` and `HS*` are rejected. */

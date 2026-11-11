@@ -7,8 +7,8 @@
 
 import { CookieTooLargeError } from '../cookies';
 import { createLogger } from '../logger';
-import type { OAuthConfig } from '../oauth';
 import { buildPKCEOptions, discoverAndBuildAuthorizationUrl } from '../oauth';
+import type { OAuthConfig } from '../oauth-config';
 import type { CookieStore } from './cookie-store';
 import {
   createTransaction,

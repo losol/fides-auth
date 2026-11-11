@@ -3,6 +3,8 @@ import { decodeJwt, type JWTPayload } from 'jose';
 import * as openid from 'openid-client';
 
 import { createLogger } from './logger';
+// `.js` keeps the re-exported types resolvable under node16/nodenext.
+import type { ClientAuthConfig, ClientCredentialsConfig, OAuthConfig } from './oauth-config.js';
 import { getOAuthErrorLogContext } from './oauth-logging';
 import { discoverConfiguration, resolveClientAuth } from './oidc-discovery';
 import { createPkcePair, createState } from './pkce';
@@ -14,6 +16,8 @@ const logger = createLogger({ namespace: 'fides-auth:oauth' });
 // Re-export commonly used types from openid-client for convenience
 export type { Configuration, TokenEndpointResponse } from 'openid-client';
 
+export type { ClientAuthConfig, ClientCredentialsConfig, OAuthConfig };
+
 /** Default OIDC scope requesting user identity, profile, email, and offline access. */
 export const defaultScope = 'openid profile email offline_access';
 
@@ -21,55 +25,6 @@ export const defaultScope = 'openid profile email offline_access';
 export function joinScope(scope: string | string[]): string {
   return Array.isArray(scope) ? scope.join(' ') : scope;
 }
-
-/**
- * How the client authenticates at the token endpoint. Omit `clientAuth` to use
- * `client_secret_post`.
- */
-export type ClientAuthConfig =
-  | {
-      /** @default 'client_secret_post' */
-      clientAuth?: 'client_secret_post' | 'client_secret_basic';
-      clientSecret: string;
-    }
-  | {
-      /** Public client: sends only `client_id`. Pair it with PKCE. */
-      clientAuth: 'none';
-    }
-  | {
-      clientAuth: 'private_key_jwt';
-      /** Signs the client assertion. Reuse one key object: a new one means a new cache entry. */
-      privateKey: openid.CryptoKey | openid.PrivateKey;
-    };
-
-/** Configuration for server-side OAuth / OIDC flows. */
-export type OAuthConfig = ClientAuthConfig & {
-  issuer: string;
-  clientId: string;
-  redirect_uri: string;
-  /** Space-separated string or an array of scopes. */
-  scope: string | string[];
-  /**
-   * Extra authorization request parameters (e.g. `prompt`, `resource`), added by `buildPKCEOptions`.
-   * Reserved keys throw: `state`, `code_challenge`, `code_challenge_method`, `redirect_uri`,
-   * `client_id`, `response_type`, `request`, `request_uri` and `nonce`.
-   */
-  authorizationParameters?: Record<string, string>;
-  /**
-   * Opt in to Pushed Authorization Requests (RFC 9126) when the provider
-   * supports it. When true, authorization parameters are posted to the
-   * provider's PAR endpoint ahead of the redirect, and only `client_id` +
-   * `request_uri` travel through the user-agent. The provider must advertise
-   * `pushed_authorization_request_endpoint` in its discovery metadata.
-   */
-  usePar?: boolean;
-  /**
-   * Server metadata to use instead of OIDC discovery, e.g. an RFC 8414 document.
-   * Must include `issuer` when `scope` has `openid`. `issuer` above is then used
-   * only for logs and caching.
-   */
-  serverMetadata?: openid.ServerMetadata;
-};
 
 /**
  * Refreshes an access token using a refresh token grant.
@@ -295,29 +250,6 @@ export async function discoverAndBuildAuthorizationUrl(
     throw error;
   }
 }
-
-/**
- * Configuration for OAuth client credentials flow (machine-to-machine authentication).
- * Takes any {@link ClientAuthConfig} except `none`: the grant needs client authentication.
- */
-export type ClientCredentialsConfig = Exclude<ClientAuthConfig, { clientAuth: 'none' }> & {
-  /** OAuth token endpoint URL. Must be https. */
-  tokenEndpoint: string;
-  /** OAuth client ID */
-  clientId: string;
-  /** Optional scope for the access token */
-  scope?: string;
-  /**
-   * Issuer identifier; defaults to the token endpoint's origin. With
-   * `private_key_jwt` it is the client assertion's `aud`, so set it to what the server expects.
-   */
-  issuer?: string;
-  /**
-   * Request timeout in seconds.
-   * @default 30
-   */
-  timeout?: number;
-};
 
 /**
  * Exchanges an authorization code for tokens using OIDC discovery and PKCE.

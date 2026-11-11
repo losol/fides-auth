@@ -9,7 +9,7 @@
 // raised from here rather than from each caller.
 
 import { createLogger } from '../logger';
-import type { OAuthConfig } from '../oauth';
+import type { OAuthConfig } from '../oauth-config';
 import { classifyRefreshFailure, getOAuthErrorLogContext } from '../oauth-logging';
 import { refreshSession } from '../session-refresh';
 import {
