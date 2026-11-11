@@ -18,14 +18,21 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "recommended"
+      "preset": "recommended",
+      "suspicious": {
+        "noImportCycles": {
+          "level": "error",
+          "options": {
+            "ignoreTypes": false
+          }
+        }
+      }
     }
   },
   "overrides": [
     {
       "includes": [
         "packages/fides-auth/src/**",
-        "!packages/fides-auth/src/server/**",
         "packages/fides-auth-store/src/**",
         "packages/fides-auth-react/src/**"
       ],

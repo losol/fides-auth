@@ -1,4 +1,4 @@
-import type { OAuthConfig } from './oauth';
+import type { OAuthConfig } from './oauth-config';
 import type { RefreshFailureCause } from './session-events';
 
 /**

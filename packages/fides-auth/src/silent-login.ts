@@ -11,7 +11,8 @@
 import * as openid from 'openid-client';
 
 import { createLogger } from './logger';
-import { joinScope, type OAuthConfig } from './oauth';
+import { joinScope } from './oauth';
+import type { OAuthConfig } from './oauth-config';
 import { discoverConfiguration } from './oidc-discovery';
 
 const logger = createLogger({ namespace: 'fides-auth:silent-login' });

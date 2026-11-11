@@ -1,5 +1,6 @@
 import { createLogger } from './logger';
-import { OAuthConfig, refreshAccessToken } from "./oauth";
+import { refreshAccessToken } from './oauth';
+import type { OAuthConfig } from './oauth-config';
 import { getOAuthErrorLogContext } from './oauth-logging';
 import { CreateSessionOptions, Session } from "./types";
 
