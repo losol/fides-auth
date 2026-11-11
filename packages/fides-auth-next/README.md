@@ -139,6 +139,39 @@ when you run more than one instance. `createMemorySessionStore()` from
 [Server-side sessions](../fides-auth/docs/server-sessions.md) for the store
 contract and an adapter example.
 
+## Rate limiting
+
+The route handlers use a default limiter. It is deprecated, together with
+`globalGETRateLimit`, `globalPOSTRateLimit` and `TokenBucket`: it keys on the raw
+`X-Forwarded-For` header, which a client can send itself, and lets requests
+without the header through.
+
+For a limiter of your own, add `@eventuras/fides-auth` and call its handler from
+`/server` with the Next cookie store and a `rateLimit` callback. Key it on
+something the app trusts, such as the client address your own proxy sets. The
+handler answers 429 when the callback returns `false`:
+
+```typescript
+// app/api/auth/login/route.ts
+import { handleOidcLogin } from "@eventuras/fides-auth/server";
+import { nextCookieStore } from "@eventuras/fides-auth-next";
+
+export async function GET(request: Request) {
+  return handleOidcLogin(request, {
+    oauthConfig,
+    secret: process.env.SESSION_SECRET!,
+    cookies: await nextCookieStore(),
+    rateLimit: () => limiter.consume(clientKey(request)),
+  });
+}
+```
+
+`handleOidcCallback`, `handleOidcLogout` and `handleHeartbeat` take the same option.
+With a `sessionStore`, also pass those three
+`persistence: serverPersistence({ store: sessionStore, secret })`, or they keep
+the session in cookies. Build it once. It does not share refreshes with `auth`,
+so give the store `withLock`.
+
 ## Documentation
 
 - [Store API](./src/store/) - XState Store details

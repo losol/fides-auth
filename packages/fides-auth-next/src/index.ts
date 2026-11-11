@@ -21,4 +21,7 @@ export * from '@eventuras/fides-auth/session-validation';
 export * from '@eventuras/fides-auth/silent-login';
 export * from '@eventuras/fides-auth/utils';
 export * from '@eventuras/fides-auth/types';
-export { TokenBucket } from '@eventuras/fides-auth/rate-limit';
+export {
+  /** @deprecated Only backs the deprecated default limiter. Use the handlers' `rateLimit` option. */
+  TokenBucket,
+} from '@eventuras/fides-auth/rate-limit';

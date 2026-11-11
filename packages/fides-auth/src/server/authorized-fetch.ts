@@ -116,21 +116,25 @@ export async function authorizedFetch<T = undefined>(
 
   if (attempt.response.status === 401 && refresh) {
     await attempt.response.body?.cancel().catch(() => undefined);
+    attempt.unlink();
     logger.debug(request, 'Got 401, refreshing the session once');
     current = await refreshOnce(refresh, request);
     refreshed = true;
     attempt = await send(current, target, init, timeoutMs, request);
   }
 
-  const { response, timeout } = attempt;
+  const { response, timeout, unlink } = attempt;
   if (!response.ok) {
     throw new AuthorizedFetchError('http_error', { ...request, status: response.status, response });
   }
 
   try {
     const data = (parse ? await parse(response) : undefined) as T;
+    // A body still to be read stays under the timeout and the caller's signal.
+    if (!response.body || response.bodyUsed) unlink();
     return { response, data, session: current, refreshed };
   } catch (error) {
+    unlink();
     if (init.signal?.aborted) throw error;
     // A body read cut off by the timeout rejects with the timeout's own reason.
     const reason = error === timeout.reason ? 'timeout' : 'parse_failed';
@@ -173,6 +177,8 @@ function resolveAllowedUrl(url: string | URL, allowedBase: string | URL): URL {
 interface Attempt {
   response: Response;
   timeout: AbortSignal;
+  /** Stops listening to the caller's signal, once nobody will read the body. */
+  unlink: () => void;
 }
 
 async function send(
@@ -188,17 +194,43 @@ async function send(
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${token}`);
   const timeout = AbortSignal.timeout(timeoutMs);
-  const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+  const { signal, unlink } = linkSignals(timeout, init.signal);
 
   try {
     const response = await fetch(target, { ...init, headers, signal, redirect: 'error' });
-    return { response, timeout };
+    return { response, timeout, unlink };
   } catch (error) {
+    unlink();
     // The caller's own abort is theirs to handle.
     if (init.signal?.aborted) throw error;
     const reason = timeout.aborted ? 'timeout' : 'network_error';
     throw new AuthorizedFetchError(reason, { ...request, cause: error });
   }
+}
+
+/**
+ * A signal that aborts when the timeout or the caller's signal does, with that signal's
+ * reason, and `unlink` to remove the listeners. `AbortSignal.any` would need Node 18.17.
+ */
+function linkSignals(
+  timeout: AbortSignal,
+  caller?: AbortSignal | null,
+): { signal: AbortSignal; unlink: () => void } {
+  if (!caller) return { signal: timeout, unlink: () => undefined };
+
+  const sources = [caller, timeout];
+  const controller = new AbortController();
+  const unlink = () => {
+    for (const source of sources) source.removeEventListener('abort', onAbort);
+  };
+  const onAbort = () => {
+    unlink();
+    controller.abort(sources.find((source) => source.aborted)?.reason);
+  };
+
+  if (sources.some((source) => source.aborted)) onAbort();
+  else for (const source of sources) source.addEventListener('abort', onAbort);
+  return { signal: controller.signal, unlink };
 }
 
 async function refreshOnce(
