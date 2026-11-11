@@ -1,5 +1,107 @@
 # @eventuras/fides-auth
 
+## 0.15.0
+
+### Minor Changes
+
+- 42fe1c5: `OAuthConfig.scope` (and provider client configs) accept `string | string[]`;
+  arrays are joined with spaces on authorize, PAR, refresh and silent login. New
+  `OAuthConfig.authorizationParameters`, `buildPKCEOptions(config, { parameters })`
+  and `OidcLoginConfig.authorizationParameters(request)` add extra authorization
+  parameters. `state`, `code_challenge`, `code_challenge_method`, `redirect_uri`,
+  `client_id`, `response_type`, `request`, `request_uri` and `nonce` are reserved
+  and throw. Code that reads `OAuthConfig.scope` must handle an array; `joinScope()`
+  from `/oauth` returns the string.
+- e6d0aec: New `authorizedFetch(session, url, { allowedBase, parse?, timeoutMs?, refresh? })`
+  in `@eventuras/fides-auth/server`. It sends the access token only to URLs under
+  `allowedBase`, refuses redirects, times out after 10 s, and throws a typed
+  `AuthorizedFetchError`. On a 401 it calls `refresh` once (e.g.
+  `tryRefreshSessionInStore`) and retries; the result carries the session to use next.
+- 9567058: `OAuthConfig` and `ClientCredentialsConfig` take `clientAuth`: `client_secret_post`
+  (default), `client_secret_basic`, `private_key_jwt` with `privateKey`, or `none`
+  (`OAuthConfig` only). The discovery cache now tells entries apart by method and key.
+  
+  Breaking (types only): `config.clientSecret` is no longer always a `string`. Narrow
+  on `clientAuth` before reading it. Configs that set `clientSecret` without
+  `clientAuth` work as before.
+- 344537f: `buildSessionFromTokens` takes `{ rolesClaim, mapSession }` and `handleOidcCallback`
+  takes `mapSession`. `mapSession(tokens, claims, session)` returns the session to
+  store, e.g. with `data` added. The `rolesClaim` string argument still works.
+  `Session.user` gains `sub`.
+  
+  Breaking: `Session.user.email` is optional; handle `undefined`. A token response
+  without `id_token` no longer throws: the session has tokens and no `user`.
+- 623eb89: Each login is now one sealed `__Host-oauth_tx_<n>` cookie (state, PKCE verifier,
+  returnTo, start time), replacing `oauth_state`, `oauth_code_verifier` and
+  `returnTo`. The callback rejects it after 10 minutes. New in `/server`:
+  `createTransaction`, `persistTransaction`, `readTransaction`, `clearTransaction`,
+  `validateCallback`.
+  
+  Breaking: `handleOidcLogin` takes `secret`; pass both handlers the same one.
+  Code reading the old cookies must use the new helpers. Logins in progress
+  during the upgrade must be restarted.
+- 42fe1c5: New `@eventuras/fides-auth/pkce` entry point with `createPkcePair()` (verifier
+  and S256 challenge) and `createState()`. It uses Web Crypto only, so it also runs
+  in the browser and on edge runtimes. `buildPKCEOptions` now uses them and logs at
+  `debug` instead of `info`.
+- bdf5128: The library no longer reads `SESSION_SECRET`: `getSessionSecret` and
+  `getSessionSecretUint8Array` are removed. `handleOidcLogin` and
+  `handleOidcCallback` require `secret`; `handleOidcLogout` and `handleHeartbeat`
+  require `secret` or `persistence`. A missing, empty or non-32-byte secret (64
+  hex characters or a `Uint8Array`) throws a `TypeError` on first use, session
+  reads included.
+  
+  Migration: pass `secret` to every handler (e.g. `process.env.SESSION_SECRET`),
+  and replace `getSessionSecret()` with your own read of it.
+- 9567058: `OAuthConfig.serverMetadata` skips OIDC discovery: the configuration is built from
+  the given metadata and cached the same way. With `openid` in the scope the metadata
+  must include `issuer`.
+- c2fa830: Opt-in server-side sessions. `serverPersistence({ store, secret })` keeps the
+  session in a `SessionStore` and gives the browser a random handle, for providers
+  whose tokens don't fit a cookie.
+- f9e0b95: New `@eventuras/fides-auth/id-token` entry point with `verifyIdToken(idToken, options)`.
+  It checks the signature, `iss`, `aud` and `exp` against the provider's JWKS and returns
+  the claims. Pass `jwksUri`, or an `oauthConfig` to use `jwks_uri` from its metadata.
+  Only asymmetric algorithms are accepted by default. The JWKS is cached per URI;
+  `clearJwksCache()` resets it. Runs in the browser too.
+
+### Patch Changes
+
+- 8de23d2: `authorizedFetch` with a `signal` no longer needs `AbortSignal.any`, so it works
+  on Node before 18.17.
+- 3e76c27: Deprecate `@eventuras/fides-auth/oauth-browser`. Use the server flow
+  (`handleOidcLogin` / `handleOidcCallback` from `/server`) instead; the entry
+  point will be removed in a later minor.
+  
+  Document that `extractUserFromTokens` and `buildSessionFromTokens` decode the
+  ID token without verifying it.
+- 7a0bc8f: The default `returnTo` validator in `handleOidcLogin` accepts only printable
+  ASCII, and the 1 KB `returnTo` cap is measured after JSON escaping. If the login
+  transaction is still too large for a cookie, `handleOidcLogin` stores it without
+  `returnTo` instead of failing.
+- 8fd8afa: The login transaction cookie is `__Host-oauth_tx_<n>`, or a plain non-Secure
+  `oauth_tx_<n>` when `redirect_uri` is http. The transaction helpers take
+  `{ secure }` for custom flows. The callback passes on only `[a-z0-9_]` error
+  codes (others become `idp_error`), and an IdP error after the login has ended
+  redirects with `error=login_expired` instead of returning 400.
+- 8fd8afa: Login transaction cookies are sealed under a key derived from the secret, so
+  one can no longer be sent back as a `session` cookie. `isSession` now requires
+  a `tokens` or `user` object.
+- 8fd8afa: At most three login transaction cookies (`oauth_tx_0`–`oauth_tx_2`) are kept; a
+  fourth login evicts the oldest. A `returnTo` over 1 KB is dropped, and
+  `persistTransaction` throws `CookieTooLargeError` instead of setting a cookie the
+  browser would drop. `clearTransaction` now takes the secret.
+- 7a0bc8f: A login takes a random free transaction slot instead of the first, so two logins
+  started at the same moment usually keep separate cookies.
+- be42d5e: `handleOidcCallback` redirects an IdP error response (`?error=access_denied`) to
+  `defaultRedirectPath` with `?login=error&error=<code>` instead of returning 500.
+  The login transaction cookies are now cleared after every callback, not only on
+  success.
+- 7a0bc8f: `encodeSessionCookies` and `serverPersistence` throw a `TypeError` for a session
+  with neither `tokens` nor `user`, instead of writing one that reads back as null.
+- 7a0bc8f: `/server` exports `transactionCookieOptions(redirectUri)`, the cookie options the
+  login handlers use. Pass it to the transaction helpers in custom flows.
+
 ## 0.14.1
 
 ### Patch Changes
