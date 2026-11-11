@@ -106,6 +106,39 @@ const { data } = await auth.authorizedFetch(session, "users/me", { ...api, refre
 The handlers are also exported on their own (`@eventuras/fides-auth-next/oidc-login`
 and so on). Those take `oauthConfig` and `secret` in their config.
 
+## Server sessions
+
+By default the session lives in encrypted cookies. Pass a `sessionStore` to keep
+it on the server instead. The browser then holds only a random handle, in the
+`session_ref` cookie:
+
+```typescript
+// lib/auth.ts
+import { createFidesAuth, type SessionStore } from "@eventuras/fides-auth-next";
+
+const sessionStore: SessionStore = {
+  get: (key) => db.sessions.find(key),
+  set: (key, record) => db.sessions.save(key, record),
+  delete: (key) => db.sessions.remove(key),
+};
+
+export const auth = createFidesAuth({
+  secret: process.env.SESSION_SECRET!,
+  oauthConfig,
+  sessionStore,
+});
+```
+
+Every handler and helper on `auth` then uses the store, and logout deletes the
+record. `secret` is still required: it encrypts the records and seals the login
+transaction.
+
+Use a store that every instance shares, such as a database, and add `withLock`
+when you run more than one instance. `createMemorySessionStore()` from
+`@eventuras/fides-auth/server` is for tests. See
+[Server-side sessions](../fides-auth/docs/server-sessions.md) for the store
+contract and an adapter example.
+
 ## Documentation
 
 - [Store API](./src/store/) - XState Store details

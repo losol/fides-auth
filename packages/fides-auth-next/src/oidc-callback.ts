@@ -6,6 +6,7 @@
 
 import {
   handleOidcCallback as coreHandleOidcCallback,
+  type SessionPersistence,
   type SessionSecret,
 } from '@eventuras/fides-auth/server';
 import type { MapSession, OAuthConfig } from '@eventuras/fides-auth/oauth';
@@ -19,6 +20,9 @@ export interface OidcCallbackConfig {
 
   /** Opens the login transaction and encrypts the session. Must match the login's. */
   secret: SessionSecret;
+
+  /** Where the session lives. Defaults to the cookies under `secret`; see `serverPersistence`. */
+  persistence?: SessionPersistence;
 
   /** Public application URL (used to reconstruct the callback URL and validate redirects) */
   applicationUrl: string;
@@ -79,6 +83,7 @@ export async function handleOidcCallback(
   return coreHandleOidcCallback(request, {
     oauthConfig: config.oauthConfig,
     secret: config.secret,
+    persistence: config.persistence,
     applicationUrl: config.applicationUrl,
     rolesClaim: config.rolesClaim,
     mapSession: config.mapSession,
