@@ -11,30 +11,30 @@
  */
 import { vi, describe, it, expect, beforeEach, afterAll } from 'vitest';
 
-vi.mock('../oauth', () => ({
+vi.mock('../oauth.js', () => ({
   exchangeAuthorizationCode: vi.fn(),
   buildSessionFromTokens: vi.fn(),
   validateReturnUrl: vi.fn(),
 }));
 
-import { handleOidcCallback } from './oidc-callback';
+import { handleOidcCallback } from './oidc-callback.js';
 import {
   exchangeAuthorizationCode,
   buildSessionFromTokens,
   validateReturnUrl,
-} from '../oauth';
-import type { CookieOptions } from '../cookies';
-import type { CookieStore } from './cookie-store';
+} from '../oauth.js';
+import type { CookieOptions } from '../cookies.js';
+import type { CookieStore } from './cookie-store.js';
 import {
   createTransaction,
   persistTransaction,
   readTransaction,
   type LoginTransaction,
-} from './login-transaction';
-import { transactionCookieOptions } from './index';
-import { serverPersistence } from './session-persistence';
-import { createMemorySessionStore } from './session-store';
-import { sha256 } from '../utils';
+} from './login-transaction.js';
+import { transactionCookieOptions } from './index.js';
+import { serverPersistence } from './session-persistence.js';
+import { createMemorySessionStore } from './session-store.js';
+import { sha256 } from '../utils.js';
 
 const mockedExchange = vi.mocked(exchangeAuthorizationCode);
 const mockedBuildSession = vi.mocked(buildSessionFromTokens);

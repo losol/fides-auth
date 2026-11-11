@@ -1,8 +1,8 @@
-import { createLogger } from './logger';
-import { refreshAccessToken } from './oauth';
-import type { OAuthConfig } from './oauth-config';
-import { getOAuthErrorLogContext } from './oauth-logging';
-import { CreateSessionOptions, Session } from "./types";
+import { createLogger } from './logger.js';
+import { refreshAccessToken } from './oauth.js';
+import type { OAuthConfig } from './oauth-config.js';
+import { getOAuthErrorLogContext } from './oauth-logging.js';
+import { CreateSessionOptions, Session } from "./types.js";
 
 const logger = createLogger({ namespace: 'fides-auth:session-refresh' });
 

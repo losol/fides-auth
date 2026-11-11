@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
-import { createAuthStore, initializeAuth, checkAuth } from './store';
-import type { AuthStatus, SessionUser } from './types';
+import { createAuthStore, initializeAuth, checkAuth } from './store.js';
+import type { AuthStatus, SessionUser } from './types.js';
 
 const admin: SessionUser = { name: 'Ada', email: 'ada@example.com', roles: ['Admin'] };
 const member: SessionUser = { name: 'Ben', email: 'ben@example.com', roles: ['Member'] };

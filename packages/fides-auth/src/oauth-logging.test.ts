@@ -4,8 +4,8 @@ import {
   classifyRefreshFailure,
   getOAuthConfigLogContext,
   getOAuthErrorLogContext,
-} from './oauth-logging';
-import type { OAuthConfig } from './oauth';
+} from './oauth-logging.js';
+import type { OAuthConfig } from './oauth.js';
 
 const baseConfig: OAuthConfig = {
   issuer: 'https://issuer.example.com',

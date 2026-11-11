@@ -44,7 +44,7 @@ vi.mock('@eventuras/fides-auth/server', async (importOriginal) => {
 // getCurrentSession is wrapped in React's cache(); make it a pass-through.
 vi.mock('react', () => ({ cache: (fn: unknown) => fn }));
 
-import { createFidesAuth } from './auth';
+import { createFidesAuth } from './auth.js';
 import * as core from '@eventuras/fides-auth/server';
 import { createEncryptedJWT } from '@eventuras/fides-auth/utils';
 import type { MapSession } from '@eventuras/fides-auth/oauth';

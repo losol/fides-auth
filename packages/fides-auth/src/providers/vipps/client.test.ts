@@ -3,8 +3,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { VippsLoginClient } from './client';
-import { defaultVippsLoginScope } from './types';
+import { VippsLoginClient } from './client.js';
+import { defaultVippsLoginScope } from './types.js';
 
 const baseConfig = {
   issuer: 'https://auth.example.com/',

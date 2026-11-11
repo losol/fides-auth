@@ -7,5 +7,5 @@
  * @see https://developer.vippsmobilepay.com/docs/APIs/login-api/
  */
 
-export * from './types';
-export * from './client';
+export * from './types.js';
+export * from './client.js';

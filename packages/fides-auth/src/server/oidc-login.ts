@@ -5,17 +5,17 @@
 // Uses the standard Request/Response, a CookieStore, and an optional rate-limit
 // callback, so any server runtime can call it.
 
-import { CookieTooLargeError } from '../cookies';
-import { createLogger } from '../logger';
-import { buildPKCEOptions, discoverAndBuildAuthorizationUrl } from '../oauth';
-import type { OAuthConfig } from '../oauth-config';
-import type { CookieStore } from './cookie-store';
+import { CookieTooLargeError } from '../cookies.js';
+import { createLogger } from '../logger.js';
+import { buildPKCEOptions, discoverAndBuildAuthorizationUrl } from '../oauth.js';
+import type { OAuthConfig } from '../oauth-config.js';
+import type { CookieStore } from './cookie-store.js';
 import {
   createTransaction,
   persistTransaction,
   transactionCookieOptions,
-} from './login-transaction';
-import { assertSessionSecret, type SessionSecret } from './session-persistence';
+} from './login-transaction.js';
+import { assertSessionSecret, type SessionSecret } from './session-persistence.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-login' });
 

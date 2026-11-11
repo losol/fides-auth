@@ -5,12 +5,12 @@
 // parallel logins in one browser neither overwrite each other nor pile up. It is
 // sealed under a key derived from the secret, so it never opens as a session.
 
-import { assertCookieWithinLimit, defaultOAuthCookieOptions } from '../cookies';
-import { createLogger } from '../logger';
-import type { PKCEOptions } from '../oauth';
-import { createEncryptedJWT, decryptJWT, hexToUint8Array } from '../utils';
-import type { CookieStore } from './cookie-store';
-import { assertSessionSecret, type SessionSecret } from './session-persistence';
+import { assertCookieWithinLimit, defaultOAuthCookieOptions } from '../cookies.js';
+import { createLogger } from '../logger.js';
+import type { PKCEOptions } from '../oauth.js';
+import { createEncryptedJWT, decryptJWT, hexToUint8Array } from '../utils.js';
+import type { CookieStore } from './cookie-store.js';
+import { assertSessionSecret, type SessionSecret } from './session-persistence.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:login-transaction' });
 

@@ -7,21 +7,21 @@
 
 import * as openid from 'openid-client';
 
-import { createLogger } from '../../logger';
+import { createLogger } from '../../logger.js';
 import {
   buildAuthorizationUrl,
   buildPKCEOptions,
   joinScope,
   type AuthorizationRequestOptions,
   type PKCEOptions,
-} from '../../oauth';
-import type { OAuthConfig } from '../../oauth-config';
-import { discoverConfiguration } from '../../oidc-discovery';
+} from '../../oauth.js';
+import type { OAuthConfig } from '../../oauth-config.js';
+import { discoverConfiguration } from '../../oidc-discovery.js';
 import {
   defaultVippsLoginScope,
   type VippsLoginConfig,
   type VippsUserInfo,
-} from './types';
+} from './types.js';
 
 const logger = createLogger({
   namespace: 'fides-auth:vipps',

@@ -7,7 +7,7 @@
 // global fetch. No React — the engine is driven directly.
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
-import { createHeartbeat, type HeartbeatConfig } from './heartbeat';
+import { createHeartbeat, type HeartbeatConfig } from './heartbeat.js';
 
 /** Dispatches a keystroke on window so the activity tracker records it. */
 function recordKeystroke(): void {

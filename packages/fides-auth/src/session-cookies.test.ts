@@ -4,9 +4,9 @@ import {
   encodeSessionCookies,
   decodeSessionCookies,
   decodeIdTokenCookie,
-} from './session-cookies';
-import { createEncryptedJWT, decryptJWT } from './utils';
-import { Session, Tokens } from './types';
+} from './session-cookies.js';
+import { createEncryptedJWT, decryptJWT } from './utils.js';
+import { Session, Tokens } from './types.js';
 
 // 32-byte (64 hex char) key for A256GCM.
 const SECRET = 'a'.repeat(64);

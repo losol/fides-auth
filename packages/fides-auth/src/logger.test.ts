@@ -11,7 +11,7 @@ import {
   type FidesLogger,
   type FidesLoggerFactory,
   type FidesLoggerOptions,
-} from './logger';
+} from './logger.js';
 
 // ────────────────────────────────────────────
 // Default console logger

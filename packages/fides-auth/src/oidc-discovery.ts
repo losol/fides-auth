@@ -15,8 +15,8 @@
 
 import * as openid from 'openid-client';
 
-import { createLogger } from './logger';
-import type { ClientAuthConfig, OAuthConfig } from './oauth-config';
+import { createLogger } from './logger.js';
+import type { ClientAuthConfig, OAuthConfig } from './oauth-config.js';
 
 const logger = createLogger({ namespace: 'fides-auth:oidc-discovery' });
 

@@ -29,11 +29,11 @@ import type { CreateSessionOptions, Session } from '@eventuras/fides-auth/types'
 import { cookies } from 'next/headers';
 import { cache } from 'react';
 
-import { nextCookieStore } from './cookie-store';
-import { handleHeartbeat } from './heartbeat-handler';
-import { handleOidcCallback, type OidcCallbackConfig } from './oidc-callback';
-import { handleOidcLogin, type OidcLoginConfig } from './oidc-login';
-import { handleOidcLogout, type OidcLogoutConfig } from './oidc-logout';
+import { nextCookieStore } from './cookie-store.js';
+import { handleHeartbeat } from './heartbeat-handler.js';
+import { handleOidcCallback, type OidcCallbackConfig } from './oidc-callback.js';
+import { handleOidcLogin, type OidcLoginConfig } from './oidc-login.js';
+import { handleOidcLogout, type OidcLogoutConfig } from './oidc-logout.js';
 
 // So consumers can name the helpers' types without reaching past this package.
 export type { ClearSessionOptions, ReadSessionResult, RefreshSessionResult, SessionSecret };

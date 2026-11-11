@@ -1,6 +1,6 @@
 import { createStore } from '@xstate/store';
 import { createLogger } from '@eventuras/fides-auth/logger';
-import type { SessionUser, AuthStatus } from './types';
+import type { SessionUser, AuthStatus } from './types.js';
 
 /**
  * Authentication store context

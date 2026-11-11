@@ -10,14 +10,14 @@ import { inspect } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock only the OAuth exchange, so the tryRefreshSessionInStore test runs for real.
-vi.mock('../session-refresh', () => ({ refreshSession: vi.fn() }));
+vi.mock('../session-refresh.js', () => ({ refreshSession: vi.fn() }));
 
-import { configureLogger } from '../logger';
-import { refreshSession } from '../session-refresh';
-import type { Session } from '../types';
-import { AuthorizedFetchError, authorizedFetch } from './authorized-fetch';
-import type { CookieStore } from './cookie-store';
-import { persistSession, readSession, tryRefreshSessionInStore } from './session';
+import { configureLogger } from '../logger.js';
+import { refreshSession } from '../session-refresh.js';
+import type { Session } from '../types.js';
+import { AuthorizedFetchError, authorizedFetch } from './authorized-fetch.js';
+import type { CookieStore } from './cookie-store.js';
+import { persistSession, readSession, tryRefreshSessionInStore } from './session.js';
 
 interface Seen {
   path: string;

@@ -40,15 +40,15 @@ export {
   checkAuth,
   type AuthStoreContext,
   type AuthStoreConfig,
-} from './store';
+} from './store.js';
 
 export {
   startSessionMonitor,
   type SessionMonitorConfig,
-} from './session-monitor';
+} from './session-monitor.js';
 
-export { configureAuthLogger } from './configure-logger';
+export { configureAuthLogger } from './configure-logger.js';
 
 export type { SessionClientEvent } from '@eventuras/fides-auth/session-events';
 
-export type { SessionUser, AuthStatus } from './types';
+export type { SessionUser, AuthStatus } from './types.js';

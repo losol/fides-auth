@@ -1,7 +1,7 @@
 import { createLogger } from '@eventuras/fides-auth/logger';
 import { SESSION_EVENT, type SessionClientEvent } from '@eventuras/fides-auth/session-events';
-import type { createAuthStore } from './store';
-import type { AuthStatus } from './types';
+import type { createAuthStore } from './store.js';
+import type { AuthStatus } from './types.js';
 
 /**
  * Configuration for session monitoring

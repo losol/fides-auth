@@ -11,7 +11,7 @@ import {
   generateToken,
   accessTokenExpires,
   hasScope,
-} from './utils';
+} from './utils.js';
 
 /** 32-byte (256-bit) AES key — 64 hex characters */
 const TEST_SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';

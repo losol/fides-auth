@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import * as api from './index';
+import * as api from './index.js';
 
 // These hooks are thin wrappers over logic that is tested where it lives — the
 // heartbeat engine in @eventuras/fides-auth, the store and session monitor in

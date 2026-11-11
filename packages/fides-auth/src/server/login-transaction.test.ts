@@ -4,9 +4,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 
-import { CookieTooLargeError, type CookieOptions } from '../cookies';
-import { decryptJWT } from '../utils';
-import type { CookieStore } from './cookie-store';
+import { CookieTooLargeError, type CookieOptions } from '../cookies.js';
+import { decryptJWT } from '../utils.js';
+import type { CookieStore } from './cookie-store.js';
 import {
   CallbackValidationError,
   clearTransaction,
@@ -16,8 +16,8 @@ import {
   transactionCookieOptions,
   validateCallback,
   type LoginTransaction,
-} from './login-transaction';
-import { tryReadSession } from './session';
+} from './login-transaction.js';
+import { tryReadSession } from './session.js';
 
 const secret = 'a'.repeat(64);
 

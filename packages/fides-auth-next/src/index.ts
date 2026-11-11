@@ -1,15 +1,15 @@
 // Next.js-specific bindings
-export * from './cookie-store';
-export * from './request';
-export * from './auth';
-export * from './cookies';
-export * from './oidc-callback';
-export * from './oidc-login';
-export * from './oidc-logout';
-export * from './heartbeat-handler';
+export * from './cookie-store.js';
+export * from './request.js';
+export * from './auth.js';
+export * from './cookies.js';
+export * from './oidc-callback.js';
+export * from './oidc-login.js';
+export * from './oidc-logout.js';
+export * from './heartbeat-handler.js';
 
 // Authentication Store (XState Store)
-export * from './store';
+export * from './store/index.js';
 
 // Re-export all framework-agnostic utilities from @eventuras/fides-auth
 export * from '@eventuras/fides-auth/oauth';

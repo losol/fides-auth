@@ -13,8 +13,8 @@ vi.mock('openid-client', () => ({
 }));
 
 import * as openid from 'openid-client';
-import { clearDiscoveryCache } from './oidc-discovery';
-import { exchangeAuthorizationCode, type OAuthConfig } from './oauth';
+import { clearDiscoveryCache } from './oidc-discovery.js';
+import { exchangeAuthorizationCode, type OAuthConfig } from './oauth.js';
 
 function makeOAuthConfig(overrides: Partial<OAuthConfig> = {}): OAuthConfig {
   return {

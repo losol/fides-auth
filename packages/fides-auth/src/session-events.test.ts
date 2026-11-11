@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 
-import type { FidesLogger } from './logger';
+import type { FidesLogger } from './logger.js';
 import {
   SESSION_EVENT,
   SESSION_REJECTED_REASONS,
@@ -17,7 +17,7 @@ import {
   logSessionEvent,
   newSessionId,
   sessionEventLevel,
-} from './session-events';
+} from './session-events.js';
 
 function fakeLogger() {
   const logger: FidesLogger = {

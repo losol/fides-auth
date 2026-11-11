@@ -11,8 +11,8 @@ import {
 } from '@eventuras/fides-auth/server';
 import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
 
-import { nextCookieStore } from './cookie-store';
-import { globalPOSTRateLimit } from './request';
+import { nextCookieStore } from './cookie-store.js';
+import { globalPOSTRateLimit } from './request.js';
 
 export interface OidcLogoutConfig {
   /** OAuth/OIDC configuration */

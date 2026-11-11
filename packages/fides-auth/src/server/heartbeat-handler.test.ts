@@ -11,13 +11,13 @@
  */
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
-vi.mock('./session', () => ({
+vi.mock('./session.js', () => ({
   tryRefreshSessionInStore: vi.fn(),
 }));
 
-import { handleHeartbeat } from './heartbeat-handler';
-import { tryRefreshSessionInStore } from './session';
-import type { CookieStore } from './cookie-store';
+import { handleHeartbeat } from './heartbeat-handler.js';
+import { tryRefreshSessionInStore } from './session.js';
+import type { CookieStore } from './cookie-store.js';
 
 const mockedRefresh = vi.mocked(tryRefreshSessionInStore);
 

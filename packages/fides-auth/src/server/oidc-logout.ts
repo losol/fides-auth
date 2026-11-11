@@ -4,12 +4,12 @@
 // leaves the provider's session alive, so the next /authorize silently
 // re-authenticates — this handler ends both.
 
-import { createLogger } from '../logger';
-import { buildOidcLogoutUrl } from '../oauth';
-import type { OAuthConfig } from '../oauth-config';
-import type { CookieStore } from './cookie-store';
-import { clearSession, readIdToken, tryReadSession } from './session';
-import { persistenceFrom, type SessionPersistenceConfig } from './session-persistence';
+import { createLogger } from '../logger.js';
+import { buildOidcLogoutUrl } from '../oauth.js';
+import type { OAuthConfig } from '../oauth-config.js';
+import type { CookieStore } from './cookie-store.js';
+import { clearSession, readIdToken, tryReadSession } from './session.js';
+import { persistenceFrom, type SessionPersistenceConfig } from './session-persistence.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-logout' });
 

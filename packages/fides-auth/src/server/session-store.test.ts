@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { createMemorySessionStore } from './session-store';
+import { createMemorySessionStore } from './session-store.js';
 
 const future = '2099-01-01T00:00:00.000Z';
 

@@ -8,7 +8,7 @@ import {
   checkSilentLoginResult,
   requiresInteractiveLogin,
   SilentLoginErrors,
-} from './silent-login';
+} from './silent-login.js';
 
 // ────────────────────────────────────────────
 // checkSilentLoginResult

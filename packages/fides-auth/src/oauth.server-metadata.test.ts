@@ -4,8 +4,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { refreshAccessToken } from './oauth';
-import { clearDiscoveryCache } from './oidc-discovery';
+import { refreshAccessToken } from './oauth.js';
+import { clearDiscoveryCache } from './oidc-discovery.js';
 
 const issuer = 'https://auth.example.test';
 const tokenEndpoint = `${issuer}/oauth/token`;
