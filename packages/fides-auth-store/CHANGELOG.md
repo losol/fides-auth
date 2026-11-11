@@ -1,5 +1,36 @@
 # @eventuras/fides-auth-store
 
+## 0.3.0
+
+### Minor Changes
+
+- 344537f: Breaking: `SessionUser.email`, and so `AuthStatus.user.email`, is optional; handle
+  `undefined`. The login log line falls back to the user's name.
+
+### Patch Changes
+
+- Updated dependencies [42fe1c5]
+- Updated dependencies [8de23d2]
+- Updated dependencies [e6d0aec]
+- Updated dependencies [9567058]
+- Updated dependencies [3e76c27]
+- Updated dependencies [7a0bc8f]
+- Updated dependencies [8fd8afa]
+- Updated dependencies [8fd8afa]
+- Updated dependencies [8fd8afa]
+- Updated dependencies [7a0bc8f]
+- Updated dependencies [344537f]
+- Updated dependencies [be42d5e]
+- Updated dependencies [623eb89]
+- Updated dependencies [42fe1c5]
+- Updated dependencies [bdf5128]
+- Updated dependencies [9567058]
+- Updated dependencies [c2fa830]
+- Updated dependencies [7a0bc8f]
+- Updated dependencies [7a0bc8f]
+- Updated dependencies [f9e0b95]
+  - @eventuras/fides-auth@0.15.0
+
 ## 0.2.3
 
 ### Patch Changes

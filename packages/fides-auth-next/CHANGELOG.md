@@ -1,5 +1,65 @@
 # @eventuras/fides-auth-next
 
+## 0.8.0
+
+### Minor Changes
+
+- e6d0aec: `createFidesAuth` now returns `authorizedFetch(session, url, options)`, which on a
+  401 refreshes the session in the cookies and retries once. Parallel calls in one
+  request share one refresh. The refresh works only in Server Actions and Route
+  Handlers; in a Server Component pass `refresh: false`. `AuthorizedFetchError` and
+  its types are re-exported.
+- bdf5128: `createFidesAuth({ secret, oauthConfig })` returns the session helpers and route
+  handlers with both bound. The package-level session helpers and the `./session`
+  entry point are removed; `./auth` replaces it. The standalone route handlers
+  now require `secret`, and the login handler takes `authorizationParameters`.
+  
+  Migration:
+  - Create one `auth = createFidesAuth(…)` and call `auth.getCurrentSession()` and
+    so on. `refreshCurrentSession(oauthConfig)` becomes `auth.refreshCurrentSession()`.
+  - Replace `createSession(session)` with `createEncryptedJWT(session, secret)`.
+- 344537f: `handleOidcCallback` takes `mapSession`, also through `createFidesAuth`. See
+  `buildSessionFromTokens` in `@eventuras/fides-auth`.
+  
+  Breaking: the re-exported `Session.user.email` is optional; handle `undefined`.
+- 9896f85: `createFidesAuth` takes an optional `sessionStore`. With it, every handler and
+  helper keeps the session in the store, and the cookie holds only a handle.
+  Without it, sessions stay in cookies as before.
+  
+  The `SessionStore` and `StoredSession` types are re-exported. The standalone
+  callback, logout and heartbeat handlers take an optional `persistence`.
+
+### Patch Changes
+
+- 8de23d2: Deprecate `globalGETRateLimit`, `globalPOSTRateLimit` and the `TokenBucket`
+  re-export. The Next handlers still use the default limiter. For your own, call
+  the handlers from `@eventuras/fides-auth/server` with `nextCookieStore()` and a
+  `rateLimit` callback; see "Rate limiting" in the README.
+- Updated dependencies [42fe1c5]
+- Updated dependencies [8de23d2]
+- Updated dependencies [e6d0aec]
+- Updated dependencies [9567058]
+- Updated dependencies [3e76c27]
+- Updated dependencies [7a0bc8f]
+- Updated dependencies [8fd8afa]
+- Updated dependencies [8fd8afa]
+- Updated dependencies [8fd8afa]
+- Updated dependencies [7a0bc8f]
+- Updated dependencies [344537f]
+- Updated dependencies [be42d5e]
+- Updated dependencies [623eb89]
+- Updated dependencies [42fe1c5]
+- Updated dependencies [bdf5128]
+- Updated dependencies [9567058]
+- Updated dependencies [c2fa830]
+- Updated dependencies [7a0bc8f]
+- Updated dependencies [344537f]
+- Updated dependencies [7a0bc8f]
+- Updated dependencies [f9e0b95]
+  - @eventuras/fides-auth@0.15.0
+  - @eventuras/fides-auth-store@0.3.0
+  - @eventuras/fides-auth-react@0.1.8
+
 ## 0.7.2
 
 ### Patch Changes
