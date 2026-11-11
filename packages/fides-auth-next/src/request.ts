@@ -14,6 +14,10 @@ function getBucket(): TokenBucket<string> {
   return globalBucket;
 }
 
+/**
+ * @deprecated Keys on the raw `X-Forwarded-For` header, and requests without it pass.
+ * Pass your own limiter as `rateLimit` to the handlers in `@eventuras/fides-auth/server`.
+ */
 export async function globalGETRateLimit(): Promise<boolean> {
   try {
     const headerStore = await headers();
@@ -33,6 +37,10 @@ export async function globalGETRateLimit(): Promise<boolean> {
   }
 }
 
+/**
+ * @deprecated Keys on the raw `X-Forwarded-For` header, and requests without it pass.
+ * Pass your own limiter as `rateLimit` to the handlers in `@eventuras/fides-auth/server`.
+ */
 export async function globalPOSTRateLimit(): Promise<boolean> {
   try {
     const headerStore = await headers();

@@ -3,6 +3,7 @@
  * another origin that must never see a request. Real sockets, so redirects and
  * timeouts behave as they do in production.
  */
+import { getEventListeners } from 'node:events';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { inspect } from 'node:util';
@@ -48,6 +49,9 @@ function apiHandler(req: IncomingMessage, res: ServerResponse): void {
       return; // never answers
     case '/v1/stall-body':
       res.writeHead(200, { 'Content-Type': 'application/json' }).write('{"a":');
+      return;
+    case '/v1/empty':
+      res.writeHead(204).end();
       return;
     case '/v1/missing':
       json(res, 404, { error: 'not_found' });
@@ -260,6 +264,136 @@ describe('authorizedFetch — timeout', () => {
 
     expect(error).not.toBeInstanceOf(AuthorizedFetchError);
     expect((error as Error).name).toBe('AbortError');
+  });
+});
+
+describe('authorizedFetch — caller signal without AbortSignal.any', () => {
+  // Node before 18.17 has no AbortSignal.any.
+  const abortSignal = AbortSignal as { any?: typeof AbortSignal.any };
+  const nativeAny = abortSignal.any;
+  const listeners = (signal: AbortSignal) => getEventListeners(signal, 'abort');
+
+  beforeEach(() => {
+    abortSignal.any = undefined;
+  });
+
+  afterEach(() => {
+    abortSignal.any = nativeAny;
+  });
+
+  it('sends the request', async () => {
+    const result = await authorizedFetch(session(), 'ok', {
+      allowedBase: base,
+      signal: new AbortController().signal,
+      parse: (r) => r.json(),
+    });
+
+    expect(AbortSignal.any).toBeUndefined();
+    expect(result.data).toEqual({ hello: 'world' });
+  });
+
+  it("rejects with the caller's reason", async () => {
+    const controller = new AbortController();
+    const reason = new Error('navigated away');
+    setTimeout(() => controller.abort(reason), 20);
+
+    const error = await authorizedFetch(session(), 'slow', {
+      allowedBase: base,
+      signal: controller.signal,
+    }).catch((e: unknown) => e);
+
+    expect(error).toBe(reason);
+    expect(listeners(controller.signal)).toHaveLength(0);
+  });
+
+  it('sends nothing when the signal is already aborted', async () => {
+    const reason = new Error('too late');
+    const signal = AbortSignal.abort(reason);
+
+    const error = await authorizedFetch(session(), 'ok', { allowedBase: base, signal }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(error).toBe(reason);
+    expect(apiSeen).toEqual([]);
+    expect(listeners(signal)).toHaveLength(0);
+  });
+
+  it("times out with the timeout's reason", async () => {
+    const { signal } = new AbortController();
+
+    const error = await failure(
+      authorizedFetch(session(), 'slow', { allowedBase: base, signal, timeoutMs: 50 }),
+    );
+
+    expect(error.reason).toBe('timeout');
+    expect((error.cause as Error).name).toBe('TimeoutError');
+    expect(listeners(signal)).toHaveLength(0);
+  });
+
+  it('stops listening to the signal when the request settles', async () => {
+    const { signal } = new AbortController();
+    const options = { allowedBase: base, signal, parse: (r: Response) => r.json() };
+
+    await authorizedFetch(session(), 'ok', options);
+    expect(listeners(signal)).toHaveLength(0);
+
+    // Two requests: the 401 and the retry.
+    await authorizedFetch(session(), 'protected', { ...options, refresh: async () => refreshed() });
+    expect(listeners(signal)).toHaveLength(0);
+
+    await failure(authorizedFetch(session(), 'redirect-in', options));
+    expect(listeners(signal)).toHaveLength(0);
+
+    const invalid = () => { throw new Error('invalid body'); };
+    await failure(authorizedFetch(session(), 'ok', { ...options, parse: invalid }));
+    expect(listeners(signal)).toHaveLength(0);
+
+    // No body, so nothing is left to read.
+    await authorizedFetch(session(), 'empty', { allowedBase: base, signal });
+    expect(listeners(signal)).toHaveLength(0);
+  });
+
+  it('times out a body that parse hands back unread', async () => {
+    const { signal } = new AbortController();
+
+    const { data } = await authorizedFetch(session(), 'stall-body', {
+      allowedBase: base,
+      signal,
+      timeoutMs: 100,
+      parse: (r) => r.body,
+    });
+
+    await expect(new Response(data).text()).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(listeners(signal)).toHaveLength(0);
+  });
+
+  it('times out a body the caller reads after the call', async () => {
+    const { signal } = new AbortController();
+
+    const { response } = await authorizedFetch(session(), 'stall-body', {
+      allowedBase: base,
+      signal,
+      timeoutMs: 100,
+    });
+
+    await expect(response.text()).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(listeners(signal)).toHaveLength(0);
+  });
+
+  it("aborts a body the caller reads after the call, with the caller's reason", async () => {
+    const controller = new AbortController();
+    const reason = new Error('navigated away');
+
+    const { response } = await authorizedFetch(session(), 'stall-body', {
+      allowedBase: base,
+      signal: controller.signal,
+    });
+    const body = response.text();
+    controller.abort(reason);
+
+    await expect(body).rejects.toBe(reason);
+    expect(listeners(controller.signal)).toHaveLength(0);
   });
 });
 
