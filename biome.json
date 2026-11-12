@@ -84,6 +84,142 @@
       }
     },
     {
+      "includes": ["packages/fides-auth/src/shared/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["node:*"],
+                    "message": "Node built-ins don't run in browsers or edge runtimes."
+                  },
+                  {
+                    "group": ["../*", "../protocol/**", "../session/**", "../server/**", "../providers/**"],
+                    "message": "shared is the bottom layer and imports no other layer (ADR 0001 §2)."
+                  },
+                  {
+                    "group": ["jose", "jose/**", "openid-client", "openid-client/**"],
+                    "message": "shared imports no third-party packages (ADR 0001 §2)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/fides-auth/src/protocol/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["node:*"],
+                    "message": "Node built-ins don't run in browsers or edge runtimes."
+                  },
+                  {
+                    "group": ["../*", "../session/**", "../server/**", "../providers/**"],
+                    "message": "protocol may import only shared and protocol (ADR 0001 §2)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/fides-auth/src/session/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["node:*"],
+                    "message": "Node built-ins don't run in browsers or edge runtimes."
+                  },
+                  {
+                    "group": ["../*", "../protocol/**", "../server/**", "../providers/**"],
+                    "message": "session may import only shared and session (ADR 0001 §2)."
+                  },
+                  {
+                    "group": ["openid-client", "openid-client/**"],
+                    "message": "session may use jose but not openid-client (ADR 0001 §2)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/fides-auth/src/server/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["node:*"],
+                    "message": "Node built-ins don't run in browsers or edge runtimes."
+                  },
+                  {
+                    "group": ["../*", "../providers/**"],
+                    "message": "server may import only shared, protocol, session and server (ADR 0001 §2)."
+                  },
+                  {
+                    "group": ["jose", "jose/**", "openid-client", "openid-client/**"],
+                    "message": "server uses Web APIs only. Reach jose and openid-client through protocol or session (ADR 0001 §2)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/fides-auth/src/providers/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["node:*"],
+                    "message": "Node built-ins don't run in browsers or edge runtimes."
+                  },
+                  {
+                    "group": ["../../*", "../../session/**", "../../server/**"],
+                    "message": "providers may import only shared and protocol (ADR 0001 §2)."
+                  },
+                  {
+                    "group": ["jose", "jose/**"],
+                    "message": "providers may use openid-client but not jose (ADR 0001 §2)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/*.test.ts", "**/*.test.tsx"],
       "linter": {
         "rules": {

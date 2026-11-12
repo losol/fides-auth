@@ -1,4 +1,5 @@
 import { decodeJwt, type JWTPayload } from 'jose';
+// biome-ignore lint/style/noRestrictedImports: type-only, until #142 adds a shared TokenResponse.
 import type { TokenEndpointResponse } from 'openid-client';
 
 import { createLogger } from '../shared/logger.js';
