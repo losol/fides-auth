@@ -10,10 +10,10 @@
 
 import * as openid from 'openid-client';
 
-import { createLogger } from './logger.js';
-import type { OAuthConfig } from './oauth-config.js';
-import { joinScope } from './oauth-scope.js';
-import { discoverConfiguration } from './oidc-discovery.js';
+import { createLogger } from '../shared/logger.js';
+import type { OAuthConfig } from './config.js';
+import { joinScope } from './scope.js';
+import { discoverConfiguration } from './discovery.js';
 
 const logger = createLogger({ namespace: 'fides-auth:silent-login' });
 

@@ -1,4 +1,4 @@
-import { createLogger } from '../logger.js';
+import { createLogger } from '../shared/logger.js';
 
 // The namespace from before the split out of oauth.ts, so existing log filters still match.
 const logger = createLogger({ namespace: 'fides-auth:oauth' });

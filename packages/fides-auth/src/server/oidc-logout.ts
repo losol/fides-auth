@@ -4,9 +4,9 @@
 // leaves the provider's session alive, so the next /authorize silently
 // re-authenticates — this handler ends both.
 
-import { createLogger } from '../logger.js';
-import { buildOidcLogoutUrl } from '../oauth.js';
-import type { OAuthConfig } from '../oauth-config.js';
+import { createLogger } from '../shared/logger.js';
+import { buildOidcLogoutUrl } from '../protocol/logout-url.js';
+import type { OAuthConfig } from '../protocol/config.js';
 import type { CookieStore } from './cookie-store.js';
 import { clearSession, readIdToken, tryReadSession } from './session.js';
 import { persistenceFrom, type SessionPersistenceConfig } from './session-persistence.js';

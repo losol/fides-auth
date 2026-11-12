@@ -1,7 +1,7 @@
 import { decodeJwt, type JWTPayload } from 'jose';
 import type { TokenEndpointResponse } from 'openid-client';
 
-import { createLogger } from './logger.js';
+import { createLogger } from '../shared/logger.js';
 
 const logger = createLogger({ namespace: 'fides-auth:oauth' });
 

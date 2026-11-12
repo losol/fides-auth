@@ -7,13 +7,10 @@
 import { jwtVerify } from 'jose';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  clientCredentialsGrant,
-  refreshAccessToken,
-  type ClientCredentialsConfig,
-  type OAuthConfig,
-} from './oauth.js';
-import { clearDiscoveryCache, discoverConfiguration } from './oidc-discovery.js';
+import { clientCredentialsGrant } from './client-credentials.js';
+import { refreshAccessToken } from './refresh.js';
+import type { ClientCredentialsConfig, OAuthConfig } from './config.js';
+import { clearDiscoveryCache, discoverConfiguration } from './discovery.js';
 
 const issuer = 'https://auth.example.test';
 const tokenEndpoint = `${issuer}/token`;

@@ -4,17 +4,17 @@
  */
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
-vi.mock('../oauth.js', () => ({ buildOidcLogoutUrl: vi.fn() }));
+vi.mock('../protocol/logout-url.js', () => ({ buildOidcLogoutUrl: vi.fn() }));
 
 import { handleOidcLogout } from './oidc-logout.js';
-import { buildOidcLogoutUrl } from '../oauth.js';
+import { buildOidcLogoutUrl } from '../protocol/logout-url.js';
 import { persistSession } from './session.js';
 import { serverPersistence } from './session-persistence.js';
 import { createMemorySessionStore } from './session-store.js';
 import type { CookieStore } from './cookie-store.js';
-import type { Session } from '../types.js';
-import { SESSION_EVENT } from '../session-events.js';
-import { sha256 } from '../utils.js';
+import type { Session } from '../shared/types.js';
+import { SESSION_EVENT } from '../shared/session-events.js';
+import { sha256 } from '../session/utils.js';
 
 const mockedBuildLogoutUrl = vi.mocked(buildOidcLogoutUrl);
 const secret = 'a'.repeat(64);

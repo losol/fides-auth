@@ -5,9 +5,9 @@
 // current refresh token for a fresh access token. Glue only — rate limit, load
 // session, refresh, respond — over the standard Request/Response and a CookieStore.
 
-import { createLogger } from '../logger.js';
-import type { OAuthConfig } from '../oauth-config.js';
-import { SESSION_EVENT, logSessionEvent, type SessionRejectedReason } from '../session-events.js';
+import { createLogger } from '../shared/logger.js';
+import type { OAuthConfig } from '../protocol/config.js';
+import { SESSION_EVENT, logSessionEvent, type SessionRejectedReason } from '../shared/session-events.js';
 import type { CookieStore } from './cookie-store.js';
 import { tryRefreshSessionInStore } from './session.js';
 import { persistenceFrom, type SessionPersistenceConfig } from './session-persistence.js';

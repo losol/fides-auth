@@ -4,8 +4,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { configureLogger } from './logger.js';
-import { buildPKCEOptions, defaultScope, type OAuthConfig } from './oauth.js';
+import { configureLogger } from '../shared/logger.js';
+import { buildPKCEOptions } from './authorization-parameters.js';
+import { defaultScope } from './scope.js';
+import type { OAuthConfig } from './config.js';
 
 // RFC 7636 Appendix B octets and the verifier/challenge they produce.
 const RFC_7636_OCTETS = [

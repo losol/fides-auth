@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { clientCredentialsGrant } from './oauth.js';
+import { clientCredentialsGrant } from './client-credentials.js';
 
 const baseConfig = {
   clientId: 'service-client',

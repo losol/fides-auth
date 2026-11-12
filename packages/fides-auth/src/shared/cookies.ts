@@ -5,7 +5,7 @@
 // adapters (Next.js, React Router, …) own the actual cookie store and use these
 // values and helpers to configure and size-check the cookies they set.
 //
-// The companion module `session-cookies.ts` encodes/decodes a session into cookie
+// The companion module `server/session-cookies.ts` encodes/decodes a session into cookie
 // *values*; this module is about the cookie *attributes* and *limits*.
 
 /**

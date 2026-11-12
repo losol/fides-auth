@@ -1,4 +1,4 @@
-// oidc-discovery.ts
+// discovery.ts
 //
 // One place where fides-auth turns an OAuthConfig into an openid-client
 // Configuration, and one cache in front of it.
@@ -15,8 +15,8 @@
 
 import * as openid from 'openid-client';
 
-import { createLogger } from './logger.js';
-import type { ClientAuthConfig, OAuthConfig } from './oauth-config.js';
+import { createLogger } from '../shared/logger.js';
+import type { ClientAuthConfig, OAuthConfig } from './config.js';
 
 const logger = createLogger({ namespace: 'fides-auth:oidc-discovery' });
 

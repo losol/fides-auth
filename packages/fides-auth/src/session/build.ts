@@ -1,9 +1,9 @@
 import { decodeJwt, type JWTPayload } from 'jose';
 import type { TokenEndpointResponse } from 'openid-client';
 
-import { userFromClaims } from './oauth-user-claims.js';
-import { newSessionId } from './session-events.js';
-import type { Session } from './types.js';
+import { userFromClaims } from './user-claims.js';
+import { newSessionId } from '../shared/session-events.js';
+import type { Session } from '../shared/types.js';
 
 /**
  * Changes the session built from a token response, e.g. to add `data` or custom user

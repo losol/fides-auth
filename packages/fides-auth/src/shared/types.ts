@@ -8,7 +8,7 @@ export interface Tokens {
   refreshTokenExpiresAt?: string;
   /**
    * Raw (encoded) ID token, sent as `id_token_hint` on RP-initiated logout. Rides
-   * in the access-token cookie, not the main one — see `session-cookies.ts`.
+   * in the access-token cookie, not the main one — see `server/session-cookies.ts`.
    */
   idToken?: string;
 }

@@ -4,8 +4,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 
-import { CookieTooLargeError, type CookieOptions } from '../cookies.js';
-import { decryptJWT } from '../utils.js';
+import { CookieTooLargeError, type CookieOptions } from '../shared/cookies.js';
+import { decryptJWT } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
 import {
   CallbackValidationError,

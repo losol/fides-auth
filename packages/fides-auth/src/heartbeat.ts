@@ -11,12 +11,12 @@ import {
   DEFAULT_ACTIVITY_EVENTS,
   type ActivityTracker,
 } from './activity-tracker.js';
-import { createLogger } from './logger.js';
+import { createLogger } from './shared/logger.js';
 import {
   SESSION_EVENT,
   isSessionRejectedReason,
   type SessionClientEvent,
-} from './session-events.js';
+} from './shared/session-events.js';
 
 /**
  * Configuration for {@link createHeartbeat}.

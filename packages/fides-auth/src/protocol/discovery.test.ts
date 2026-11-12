@@ -25,8 +25,9 @@ import {
   clearDiscoveryCache,
   configureDiscoveryCache,
   discoverConfiguration,
-} from './oidc-discovery.js';
-import { refreshAccessToken, type OAuthConfig } from './oauth.js';
+} from './discovery.js';
+import { refreshAccessToken } from './refresh.js';
+import type { OAuthConfig } from './config.js';
 
 const config: OAuthConfig = {
   issuer: 'https://auth.example.test',

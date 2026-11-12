@@ -1,5 +1,5 @@
-import type { OAuthConfig } from './oauth-config.js';
-import type { RefreshFailureCause } from './session-events.js';
+import type { OAuthConfig } from './config.js';
+import type { RefreshFailureCause } from '../shared/session-events.js';
 
 /**
  * Returns a structured, log-safe context describing an `OAuthConfig`.

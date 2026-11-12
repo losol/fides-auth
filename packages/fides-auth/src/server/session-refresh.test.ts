@@ -3,12 +3,12 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('./oauth.js', () => ({ refreshAccessToken: vi.fn() }));
+vi.mock('../protocol/refresh.js', () => ({ refreshAccessToken: vi.fn() }));
 
 import { refreshSession } from './session-refresh.js';
-import { refreshAccessToken } from './oauth.js';
-import type { OAuthConfig } from './oauth.js';
-import type { Session } from './types.js';
+import { refreshAccessToken } from '../protocol/refresh.js';
+import type { OAuthConfig } from '../protocol/config.js';
+import type { Session } from '../shared/types.js';
 
 const mockedRefresh = vi.mocked(refreshAccessToken);
 

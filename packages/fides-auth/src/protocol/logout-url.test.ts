@@ -15,8 +15,9 @@ vi.mock('openid-client', () => ({
 }));
 
 import * as openid from 'openid-client';
-import { clearDiscoveryCache } from './oidc-discovery.js';
-import { buildOidcLogoutUrl, type OAuthConfig } from './oauth.js';
+import { clearDiscoveryCache } from './discovery.js';
+import { buildOidcLogoutUrl } from './logout-url.js';
+import type { OAuthConfig } from './config.js';
 
 const oauthConfig: OAuthConfig = {
   issuer: 'https://auth.example.com',

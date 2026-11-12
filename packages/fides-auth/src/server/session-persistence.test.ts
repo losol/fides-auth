@@ -7,13 +7,13 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // Mock only the OAuth exchange; encode/decode and persistence run for real.
-vi.mock('../session-refresh.js', () => ({ refreshSession: vi.fn() }));
+vi.mock('./session-refresh.js', () => ({ refreshSession: vi.fn() }));
 
-import type { CookieOptions } from '../cookies.js';
-import { refreshSession } from '../session-refresh.js';
-import { SESSION_EVENT } from '../session-events.js';
-import type { Session } from '../types.js';
-import { createEncryptedJWT, sha256 } from '../utils.js';
+import type { CookieOptions } from '../shared/cookies.js';
+import { refreshSession } from './session-refresh.js';
+import { SESSION_EVENT } from '../shared/session-events.js';
+import type { Session } from '../shared/types.js';
+import { createEncryptedJWT, sha256 } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
 import {
   assertSessionSecret,

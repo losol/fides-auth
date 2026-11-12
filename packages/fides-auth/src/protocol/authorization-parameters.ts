@@ -1,6 +1,6 @@
-import { createLogger } from './logger.js';
-import type { OAuthConfig } from './oauth-config.js';
-import { defaultScope, joinScope } from './oauth-scope.js';
+import { createLogger } from '../shared/logger.js';
+import type { OAuthConfig } from './config.js';
+import { defaultScope, joinScope } from './scope.js';
 import { createPkcePair, createState } from './pkce.js';
 
 const logger = createLogger({ namespace: 'fides-auth:oauth' });

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SignJWT } from 'jose';
-import { buildSessionFromTokens, type MapSession } from './oauth.js';
-import { isSession } from './session-validation.js';
+import { buildSessionFromTokens, type MapSession } from './build.js';
+import { isSession } from './validation.js';
 import type { TokenEndpointResponse } from 'openid-client';
 
 async function createIdToken(claims: Record<string, unknown>): Promise<string> {

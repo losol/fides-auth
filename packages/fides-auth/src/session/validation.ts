@@ -1,10 +1,10 @@
-// session-validation.ts
+// validation.ts
 
 import { jwtDecrypt, decodeJwt } from 'jose';
 
-import { createLogger } from './logger.js';
+import { createLogger } from '../shared/logger.js';
 import { hexToUint8Array } from './utils.js';
-import { Session } from './types.js';
+import { Session } from '../shared/types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:session-validation' });
 

@@ -13,9 +13,11 @@ vi.mock('openid-client', () => ({
 
 import * as openid from 'openid-client';
 
-import { joinScope, refreshAccessToken, type OAuthConfig } from './oauth.js';
-import { getOAuthConfigLogContext } from './oauth-logging.js';
-import { clearDiscoveryCache } from './oidc-discovery.js';
+import { joinScope } from './scope.js';
+import { refreshAccessToken } from './refresh.js';
+import type { OAuthConfig } from './config.js';
+import { getOAuthConfigLogContext } from './logging.js';
+import { clearDiscoveryCache } from './discovery.js';
 import { buildSilentLoginUrl } from './silent-login.js';
 
 const discovered = {} as openid.Configuration;

@@ -1,5 +1,5 @@
 /**
- * Tests for session-validation.ts — typical production flows:
+ * Tests for validation.ts — typical production flows:
  *
  * 1. Create an encrypted session JWT
  * 2. Validate it and get the session back
@@ -7,9 +7,9 @@
  */
 import { EncryptJWT, SignJWT } from 'jose';
 
-import { validateSessionJwt, isSession } from './session-validation.js';
+import { validateSessionJwt, isSession } from './validation.js';
 import { createEncryptedJWT, hexToUint8Array } from './utils.js';
-import type { Session } from './types.js';
+import type { Session } from '../shared/types.js';
 
 /** 32-byte AES-256 key */
 const SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';

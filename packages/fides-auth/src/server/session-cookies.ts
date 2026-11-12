@@ -9,11 +9,11 @@
 // `id_token_hint` on logout) — each get their own encrypted value, everything else
 // goes in the main one, so no cookie has to carry two JWTs against the ~4KB limit.
 
-import { createEncryptedJWT, decryptJWT } from './utils.js';
-import { isSession, validateSessionJwt } from './session-validation.js';
-import { createLogger } from './logger.js';
-import type { SessionRejectedReason } from './session-events.js';
-import { Session } from './types.js';
+import { createEncryptedJWT, decryptJWT } from '../session/utils.js';
+import { isSession, validateSessionJwt } from '../session/validation.js';
+import { createLogger } from '../shared/logger.js';
+import type { SessionRejectedReason } from '../shared/session-events.js';
+import { Session } from '../shared/types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:session-cookies' });
 

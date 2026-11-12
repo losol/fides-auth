@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateReturnUrl } from './oauth.js';
+import { validateReturnUrl } from './return-to.js';
 
 const origin = 'https://example.com';
 

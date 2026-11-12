@@ -5,8 +5,8 @@ import { exportJWK, generateKeyPair, type JWK, SignJWT, UnsecuredJWT } from 'jos
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { clearJwksCache, verifyIdToken } from './id-token.js';
-import type { OAuthConfig } from './oauth.js';
-import { clearDiscoveryCache } from './oidc-discovery.js';
+import type { OAuthConfig } from './config.js';
+import { clearDiscoveryCache } from './discovery.js';
 
 const issuer = 'https://auth.example.test';
 const jwksUri = `${issuer}/jwks`;

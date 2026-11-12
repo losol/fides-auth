@@ -1,9 +1,9 @@
 import * as openid from 'openid-client';
 
-import { createLogger } from './logger.js';
-import type { PKCEOptions } from './oauth-authorization-parameters.js';
-import type { OAuthConfig } from './oauth-config.js';
-import { discoverConfiguration } from './oidc-discovery.js';
+import { createLogger } from '../shared/logger.js';
+import type { PKCEOptions } from './authorization-parameters.js';
+import type { OAuthConfig } from './config.js';
+import { discoverConfiguration } from './discovery.js';
 
 const logger = createLogger({ namespace: 'fides-auth:oauth' });
 

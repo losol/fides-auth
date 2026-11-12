@@ -1,5 +1,5 @@
 /**
- * Tests for Pushed Authorization Requests (RFC 9126) support in oauth.ts.
+ * Tests for Pushed Authorization Requests (RFC 9126) support in authorization-url.ts.
  *
  * Covers:
  * - `buildAuthorizationUrlWithPAR` — thin wrapper over openid-client.
@@ -19,15 +19,14 @@ vi.mock('openid-client', () => ({
 }));
 
 import * as openid from 'openid-client';
-import { clearDiscoveryCache } from './oidc-discovery.js';
+import { clearDiscoveryCache } from './discovery.js';
 import {
   buildAuthorizationUrlWithPAR,
-  buildPKCEOptions,
   discoverAndBuildAuthorizationUrl,
-  type OAuthConfig,
-  type PKCEOptions,
-} from './oauth.js';
-import { configureLogger, type FidesLogger } from './logger.js';
+} from './authorization-url.js';
+import { buildPKCEOptions, type PKCEOptions } from './authorization-parameters.js';
+import type { OAuthConfig } from './config.js';
+import { configureLogger, type FidesLogger } from '../shared/logger.js';
 
 function makeOAuthConfig(overrides: Partial<OAuthConfig> = {}): OAuthConfig {
   return {
