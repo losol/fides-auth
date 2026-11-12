@@ -5,30 +5,30 @@
 // redirect — over the standard Request/Response and a CookieStore, delegating the
 // protocol to the core oauth module and persistence to the server session helpers.
 
-import { CookieTooLargeError } from '../cookies';
-import { createLogger } from '../logger';
-import type { MapSession } from '../oauth';
+import { CookieTooLargeError } from '../cookies.js';
+import { createLogger } from '../logger.js';
+import type { MapSession } from '../oauth.js';
 import {
   buildSessionFromTokens,
   exchangeAuthorizationCode,
   validateReturnUrl,
-} from '../oauth';
-import type { OAuthConfig } from '../oauth-config';
-import { SESSION_EVENT } from '../session-events';
-import type { CookieStore } from './cookie-store';
+} from '../oauth.js';
+import type { OAuthConfig } from '../oauth-config.js';
+import { SESSION_EVENT } from '../session-events.js';
+import type { CookieStore } from './cookie-store.js';
 import {
   CallbackValidationError,
   clearTransaction,
   readTransaction,
   transactionCookieOptions,
   validateCallback,
-} from './login-transaction';
-import { persistSession } from './session';
+} from './login-transaction.js';
+import { persistSession } from './session.js';
 import {
   assertSessionSecret,
   type SessionPersistence,
   type SessionSecret,
-} from './session-persistence';
+} from './session-persistence.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-callback' });
 

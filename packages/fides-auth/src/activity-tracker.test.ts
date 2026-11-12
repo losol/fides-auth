@@ -6,7 +6,7 @@
  * - Querying recent activity windows for heartbeat decisions
  * - Cleanup on dispose
  */
-import { createActivityTracker, DEFAULT_ACTIVITY_EVENTS } from './activity-tracker';
+import { createActivityTracker, DEFAULT_ACTIVITY_EVENTS } from './activity-tracker.js';
 
 /**
  * Drives an injectable clock so tests don't depend on real time.

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SignJWT } from 'jose';
-import { extractUserFromTokens } from './oauth';
+import { extractUserFromTokens } from './oauth.js';
 import type { TokenEndpointResponse } from 'openid-client';
 
 async function createIdToken(claims: Record<string, unknown>): Promise<string> {

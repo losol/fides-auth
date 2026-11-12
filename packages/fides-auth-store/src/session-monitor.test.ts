@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { createAuthStore } from './store';
-import { startSessionMonitor } from './session-monitor';
-import type { SessionUser } from './types';
+import { createAuthStore } from './store.js';
+import { startSessionMonitor } from './session-monitor.js';
+import type { SessionUser } from './types.js';
 
 const user: SessionUser = { name: 'Ada', email: 'ada@example.com', roles: ['Member'] };
 

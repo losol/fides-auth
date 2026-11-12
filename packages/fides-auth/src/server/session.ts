@@ -8,19 +8,19 @@
 // what persisting it cost, so `session.created` / `session.refreshed` are
 // raised from here rather than from each caller.
 
-import { createLogger } from '../logger';
-import type { OAuthConfig } from '../oauth-config';
-import { classifyRefreshFailure, getOAuthErrorLogContext } from '../oauth-logging';
-import { refreshSession } from '../session-refresh';
+import { createLogger } from '../logger.js';
+import type { OAuthConfig } from '../oauth-config.js';
+import { classifyRefreshFailure, getOAuthErrorLogContext } from '../oauth-logging.js';
+import { refreshSession } from '../session-refresh.js';
 import {
   SESSION_EVENT,
   logSessionEvent,
   type RefreshFailureCause,
   type SessionClearedTrigger,
   type SessionRejectedReason,
-} from '../session-events';
-import type { CreateSessionOptions, Session } from '../types';
-import type { CookieStore } from './cookie-store';
+} from '../session-events.js';
+import type { CreateSessionOptions, Session } from '../types.js';
+import type { CookieStore } from './cookie-store.js';
 import {
   clearSessionCookies,
   resolvePersistence,
@@ -28,9 +28,9 @@ import {
   type ReadSessionResult,
   type SessionPersistence,
   type SessionSecret,
-} from './session-persistence';
+} from './session-persistence.js';
 
-export type { ReadSessionResult } from './session-persistence';
+export type { ReadSessionResult } from './session-persistence.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:session' });
 

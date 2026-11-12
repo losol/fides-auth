@@ -2,9 +2,9 @@
 
 import { jwtDecrypt, decodeJwt } from 'jose';
 
-import { createLogger } from './logger';
-import { hexToUint8Array } from './utils';
-import { Session } from './types';
+import { createLogger } from './logger.js';
+import { hexToUint8Array } from './utils.js';
+import { Session } from './types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:session-validation' });
 

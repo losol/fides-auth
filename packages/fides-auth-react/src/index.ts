@@ -30,8 +30,8 @@ export {
   createAuthStoreHooks,
   type AuthStoreSelector,
   type AuthStoreActions,
-} from './hooks';
+} from './hooks.js';
 
-export { useSessionMonitor } from './use-session-monitor';
+export { useSessionMonitor } from './use-session-monitor.js';
 
-export { useHeartbeat, type HeartbeatConfig } from './use-heartbeat';
+export { useHeartbeat, type HeartbeatConfig } from './use-heartbeat.js';

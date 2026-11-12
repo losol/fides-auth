@@ -4,8 +4,8 @@
 
 import { createRemoteJWKSet, type JWTPayload, jwtVerify } from 'jose';
 
-import type { OAuthConfig } from './oauth-config';
-import { discoverConfiguration } from './oidc-discovery';
+import type { OAuthConfig } from './oauth-config.js';
+import { discoverConfiguration } from './oidc-discovery.js';
 
 /** Asymmetric only, so `none` and `HS*` are rejected. */
 const DEFAULT_ALGORITHMS = [

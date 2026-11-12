@@ -2,14 +2,14 @@ import { decodeJwt, type JWTPayload } from 'jose';
 
 import * as openid from 'openid-client';
 
-import { createLogger } from './logger';
+import { createLogger } from './logger.js';
 // `.js` keeps the re-exported types resolvable under node16/nodenext.
 import type { ClientAuthConfig, ClientCredentialsConfig, OAuthConfig } from './oauth-config.js';
-import { getOAuthErrorLogContext } from './oauth-logging';
-import { discoverConfiguration, resolveClientAuth } from './oidc-discovery';
-import { createPkcePair, createState } from './pkce';
-import { newSessionId } from './session-events';
-import type { Session } from './types';
+import { getOAuthErrorLogContext } from './oauth-logging.js';
+import { discoverConfiguration, resolveClientAuth } from './oidc-discovery.js';
+import { createPkcePair, createState } from './pkce.js';
+import { newSessionId } from './session-events.js';
+import type { Session } from './types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:oauth' });
 

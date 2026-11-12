@@ -7,22 +7,22 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // Mock only the OAuth exchange; encode/decode and persistence run for real.
-vi.mock('../session-refresh', () => ({ refreshSession: vi.fn() }));
+vi.mock('../session-refresh.js', () => ({ refreshSession: vi.fn() }));
 
-import type { CookieOptions } from '../cookies';
-import { refreshSession } from '../session-refresh';
-import { SESSION_EVENT } from '../session-events';
-import type { Session } from '../types';
-import { createEncryptedJWT, sha256 } from '../utils';
-import type { CookieStore } from './cookie-store';
+import type { CookieOptions } from '../cookies.js';
+import { refreshSession } from '../session-refresh.js';
+import { SESSION_EVENT } from '../session-events.js';
+import type { Session } from '../types.js';
+import { createEncryptedJWT, sha256 } from '../utils.js';
+import type { CookieStore } from './cookie-store.js';
 import {
   assertSessionSecret,
   cookiePersistence,
   serverPersistence,
   type ServerPersistenceOptions,
   type SessionPersistence,
-} from './session-persistence';
-import { createMemorySessionStore, type SessionStore, type StoredSession } from './session-store';
+} from './session-persistence.js';
+import { createMemorySessionStore, type SessionStore, type StoredSession } from './session-store.js';
 import {
   clearSession,
   persistSession,
@@ -30,7 +30,7 @@ import {
   readSession,
   tryReadSession,
   tryRefreshSessionInStore,
-} from './session';
+} from './session.js';
 
 const mockedRefreshSession = vi.mocked(refreshSession);
 const secret = 'a'.repeat(64);

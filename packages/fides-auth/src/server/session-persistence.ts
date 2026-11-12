@@ -15,19 +15,19 @@ import {
   SESSION_REF_COOKIE_NAME,
   assertCookieWithinLimit,
   defaultSessionCookieOptions,
-} from '../cookies';
-import { createLogger } from '../logger';
+} from '../cookies.js';
+import { createLogger } from '../logger.js';
 import {
   decodeIdTokenCookie,
   encodeSessionCookies,
   tryDecodeSessionCookies,
-} from '../session-cookies';
-import type { SessionPersistenceMode, SessionRejectedReason } from '../session-events';
-import { isSession } from '../session-validation';
-import type { Session } from '../types';
-import { createEncryptedJWT, decryptJWT, generateToken, sha256 } from '../utils';
-import type { CookieStore } from './cookie-store';
-import type { SessionStore } from './session-store';
+} from '../session-cookies.js';
+import type { SessionPersistenceMode, SessionRejectedReason } from '../session-events.js';
+import { isSession } from '../session-validation.js';
+import type { Session } from '../types.js';
+import { createEncryptedJWT, decryptJWT, generateToken, sha256 } from '../utils.js';
+import type { CookieStore } from './cookie-store.js';
+import type { SessionStore } from './session-store.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:session-persistence' });
 

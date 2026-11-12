@@ -11,8 +11,8 @@ import {
 } from '@eventuras/fides-auth/server';
 import type { MapSession, OAuthConfig } from '@eventuras/fides-auth/oauth';
 
-import { nextCookieStore } from './cookie-store';
-import { globalGETRateLimit } from './request';
+import { nextCookieStore } from './cookie-store.js';
+import { globalGETRateLimit } from './request.js';
 
 export interface OidcCallbackConfig {
   /** OAuth/OIDC configuration (issuer, clientId, clientSecret, redirect_uri, scope) */

@@ -31,6 +31,21 @@
   },
   "overrides": [
     {
+      "includes": ["packages/*/src/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useImportExtensions": {
+              "level": "error",
+              "options": {
+                "forceJsExtensions": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": [
         "packages/fides-auth/src/**",
         "packages/fides-auth-store/src/**",

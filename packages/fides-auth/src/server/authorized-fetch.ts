@@ -4,10 +4,10 @@
 // goes only to URLs under `allowedBase` and never follows a redirect. A 401 gets
 // one refresh and one retry. Lives in server/ because a refresh must be persisted.
 
-import { createLogger } from '../logger';
-import type { RefreshFailureCause, SessionRejectedReason } from '../session-events';
-import type { Session } from '../types';
-import type { RefreshSessionResult } from './session';
+import { createLogger } from '../logger.js';
+import type { RefreshFailureCause, SessionRejectedReason } from '../session-events.js';
+import type { Session } from '../types.js';
+import type { RefreshSessionResult } from './session.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:authorized-fetch' });
 

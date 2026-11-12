@@ -5,7 +5,7 @@
  * - Per-IP or per-user rate limiting
  * - Token refilling over time
  */
-import { TokenBucket } from './rate-limit';
+import { TokenBucket } from './rate-limit.js';
 
 // ────────────────────────────────────────────
 // Basic consume / check behaviour

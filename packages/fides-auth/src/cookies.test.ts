@@ -9,7 +9,7 @@ import {
   defaultOAuthCookieOptions,
   cookieByteSize,
   assertCookieWithinLimit,
-} from './cookies';
+} from './cookies.js';
 
 describe('cookieByteSize', () => {
   it('counts name + "=" + value in UTF-8 bytes', () => {

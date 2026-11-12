@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createPkcePair, createState } from './pkce';
+import { createPkcePair, createState } from './pkce.js';
 
 // RFC 7636 Appendix B: the 32 random octets behind the example verifier.
 const RFC_7636_OCTETS = [

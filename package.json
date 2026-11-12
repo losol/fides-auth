@@ -7,11 +7,13 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "lint": "biome lint",
+    "attw": "pnpm --filter \"./packages/*\" exec attw --pack . --profile esm-only",
     "changeset": "changeset",
     "changeset:version": "changeset version",
     "changeset:tag": "changeset git-tag"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
     "@biomejs/biome": "2.6.6",
     "@changesets/cli": "^3.0.3",
     "turbo": "^2.11.10"

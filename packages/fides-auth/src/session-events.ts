@@ -13,7 +13,7 @@
 // The fields are deliberately low-cardinality except `sid` — see docs/session-events.md
 // for the dashboard/alerting contract.
 
-import type { FidesLogger } from './logger';
+import type { FidesLogger } from './logger.js';
 
 /**
  * Event names. Use these constants rather than string literals so a rename is a

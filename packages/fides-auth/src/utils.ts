@@ -1,7 +1,7 @@
 import * as jose from 'jose';
 
-import { createLogger } from './logger';
-import type { Session } from './types';
+import { createLogger } from './logger.js';
+import type { Session } from './types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:utils' });
 

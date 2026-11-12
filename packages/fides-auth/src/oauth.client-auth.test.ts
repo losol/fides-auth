@@ -12,8 +12,8 @@ import {
   refreshAccessToken,
   type ClientCredentialsConfig,
   type OAuthConfig,
-} from './oauth';
-import { clearDiscoveryCache, discoverConfiguration } from './oidc-discovery';
+} from './oauth.js';
+import { clearDiscoveryCache, discoverConfiguration } from './oidc-discovery.js';
 
 const issuer = 'https://auth.example.test';
 const tokenEndpoint = `${issuer}/token`;

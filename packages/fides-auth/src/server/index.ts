@@ -4,13 +4,13 @@
 // request handlers that adapters like @eventuras/fides-auth-next wire to their
 // cookie store.
 
-export type { CookieStore } from './cookie-store';
+export type { CookieStore } from './cookie-store.js';
 
 export {
   createMemorySessionStore,
   type SessionStore,
   type StoredSession,
-} from './session-store';
+} from './session-store.js';
 
 export {
   cookiePersistence,
@@ -19,7 +19,7 @@ export {
   type SessionPersistence,
   type SessionPersistenceConfig,
   type SessionSecret,
-} from './session-persistence';
+} from './session-persistence.js';
 
 export {
   persistSession,
@@ -33,7 +33,7 @@ export {
   type PersistSessionOptions,
   type ReadSessionResult,
   type RefreshSessionResult,
-} from './session';
+} from './session.js';
 
 export {
   createTransaction,
@@ -48,7 +48,7 @@ export {
   type LoginTransaction,
   type TransactionCookieOptions,
   type ValidateCallbackOptions,
-} from './login-transaction';
+} from './login-transaction.js';
 
 export {
   authorizedFetch,
@@ -57,9 +57,9 @@ export {
   type AuthorizedFetchErrorReason,
   type AuthorizedFetchOptions,
   type AuthorizedFetchResult,
-} from './authorized-fetch';
+} from './authorized-fetch.js';
 
-export { handleOidcLogin, type OidcLoginConfig } from './oidc-login';
-export { handleOidcCallback, type OidcCallbackConfig } from './oidc-callback';
-export { handleOidcLogout, type OidcLogoutConfig } from './oidc-logout';
-export { handleHeartbeat, type HeartbeatHandlerConfig } from './heartbeat-handler';
+export { handleOidcLogin, type OidcLoginConfig } from './oidc-login.js';
+export { handleOidcCallback, type OidcCallbackConfig } from './oidc-callback.js';
+export { handleOidcLogout, type OidcLogoutConfig } from './oidc-logout.js';
+export { handleHeartbeat, type HeartbeatHandlerConfig } from './heartbeat-handler.js';

@@ -1,0 +1,4 @@
+{
+  "//": "ESM without \"type\": \"module\": adding it breaks Vitest tests that import this package. Revisit when the Next package is rebuilt in 0.17 (ADR 0001).",
+  "ignoreRules": ["unexpected-module-syntax"]
+}

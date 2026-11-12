@@ -4,12 +4,12 @@
  * Generic authentication utilities with support for multiple providers.
  */
 
-export * from './activity-tracker';
-export * from './cookies';
-export * from './logger';
-export * from './oauth-logging';
-export * from './session-events';
-export * from './session-refresh';
-export * from './session-validation';
-export * from './utils';
-export * from './types';
+export * from './activity-tracker.js';
+export * from './cookies.js';
+export * from './logger.js';
+export * from './oauth-logging.js';
+export * from './session-events.js';
+export * from './session-refresh.js';
+export * from './session-validation.js';
+export * from './utils.js';
+export * from './types.js';

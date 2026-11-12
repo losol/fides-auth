@@ -19,15 +19,15 @@ vi.mock('openid-client', () => ({
 }));
 
 import * as openid from 'openid-client';
-import { clearDiscoveryCache } from './oidc-discovery';
+import { clearDiscoveryCache } from './oidc-discovery.js';
 import {
   buildAuthorizationUrlWithPAR,
   buildPKCEOptions,
   discoverAndBuildAuthorizationUrl,
   type OAuthConfig,
   type PKCEOptions,
-} from './oauth';
-import { configureLogger, type FidesLogger } from './logger';
+} from './oauth.js';
+import { configureLogger, type FidesLogger } from './logger.js';
 
 function makeOAuthConfig(overrides: Partial<OAuthConfig> = {}): OAuthConfig {
   return {
