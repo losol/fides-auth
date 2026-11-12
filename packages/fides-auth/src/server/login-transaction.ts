@@ -7,7 +7,7 @@
 
 import { assertCookieWithinLimit, defaultOAuthCookieOptions } from '../cookies.js';
 import { createLogger } from '../logger.js';
-import type { PKCEOptions } from '../oauth.js';
+import type { PKCEOptions } from '../oauth-authorization-parameters.js';
 import { createEncryptedJWT, decryptJWT, hexToUint8Array } from '../utils.js';
 import type { CookieStore } from './cookie-store.js';
 import { assertSessionSecret, type SessionSecret } from './session-persistence.js';
