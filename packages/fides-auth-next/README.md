@@ -7,8 +7,11 @@ render with React's `cache()`, and adds a refresh for `proxy.ts`.
 ## Installation
 
 ```bash
-pnpm add @eventuras/fides-auth-next
+pnpm add @eventuras/fides-auth @eventuras/fides-auth-next
 ```
+
+`@eventuras/fides-auth`, `next` and `react` are peer dependencies, so the app
+has one copy of core. Needs Node 22.
 
 ## Setup
 

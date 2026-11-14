@@ -104,7 +104,7 @@ Corrections to the starting analysis:
 | Independence | Low: `/oauth` still builds sessions and the root barrel stays | High, enforced by lint | Highest, enforced by package boundaries |
 | Dependency weight | Unchanged | Per entry (`.` and `/session-events` load none) | Per package; same runtime result as B |
 | Versioning | One version | One version | Several versions to keep in step. If two versions get installed, error classes and instance types split silently. |
-| Developer experience | Familiar, but four `session-*` subpaths and `/oauth` vs `/oidc-discovery` stay confusing | One install and five entries | Several installs and peer ranges |
+| Developer experience | Familiar, but four `session-*` subpaths and `/oauth` vs `/oidc-discovery` stay confusing | One install and six entries | Several installs and peer ranges |
 | Migration cost | None | Import paths change, with shims until 1.0 | Import paths and package names change |
 | Release overhead | None | None | A publish workflow and an npm trusted publisher per new package |
 
@@ -207,7 +207,7 @@ The table lists export names only. *(was …)* marks a rename or a move. Names t
 
 | Entry | Exports |
 |---|---|
-| `.` | types: `Session`, `Tokens`, `OAuthConfig`, `ClientAuthConfig`, `TokenResponse`, `SessionInfo`, `HeartbeatResponse`, `CookieOptions`, `FidesLogger`, `FidesLoggerFactory` |
+| `.` | types: `Session`, `Tokens`, `OidcClientConfig` *(was `OAuthConfig`)*, `ClientAuthConfig`, `TokenResponse`, `SessionInfo`, `HeartbeatResponse`, `CookieOptions`, `FidesLogger`, `FidesLoggerFactory` |
 | `/oidc` | `createOidcClient`, `OidcClient`; pure helpers: `createPkcePair`, `createState`, `defaultScope`, `joinScope`, `userFromClaims` *(was `extractUserFromTokens`)*, `checkSilentLoginResult`, `requiresInteractiveLogin`, `getOAuthErrorLogContext`, `classifyRefreshFailure` |
 | `/server` | `createFidesAuth`, `FidesAuth`; `CookieStore`; `SessionStore`, `StoredSession`, `createMemorySessionStore`; `MapSession`; `AuthorizedFetchError`, `CookieTooLargeError`, `SessionSecretError`. In 1.x: `createFetchCookieStore` |
 | `/session-events` | `SESSION_EVENT`, `SessionEvent`, `SessionRejectedReason`, `RefreshFailureCause`, `isSessionRejectedReason`, `SessionClientEvent` |
@@ -239,7 +239,7 @@ No longer exported from `/server`: the handler functions, `persistSession` and t
 
 Other API cleanups in 1.0:
 
-- `OAuthConfig.redirect_uri` becomes `redirectUri`. It's the only snake_case key.
+- `OAuthConfig.redirect_uri` becomes `redirectUri`. It's the only snake_case key. `OAuthConfig` itself becomes `OidcClientConfig`, the type `createOidcClient` takes.
 - The string overloads of `buildSessionFromTokens` and `buildOidcLogoutUrl` go.
 - `rateLimit` callbacks receive the `Request`.
 - `mapSession` may return a promise, so it can look the user up.
@@ -434,7 +434,7 @@ Set `sessionStore` when:
 **Gains:**
 
 - The session an app passes around holds no tokens.
-- There are five entries and one factory to learn, and each export is one we mean to keep.
+- There are six entries and one factory to learn, and each export is one we mean to keep.
 - Two instances, or two installed copies, don't share or split configuration. Tests need no cache resets.
 - A session behaves the same wherever it is kept, and the differences that remain are written down. A new storage, or a new rule, is written once.
 - Sessions end when they say they do, in both storages.
@@ -461,7 +461,7 @@ Set `sessionStore` when:
 
 | # | Change | Migration aid |
 |---|---|---|
-| 1 | Core keeps five entries. The 17 subpaths listed under "Removed from core" are removed. | Deprecated in 0.16, with an old-to-new table in the migration doc |
+| 1 | Core keeps the six entries in §1. The 17 subpaths listed under "Removed from core" are removed. | Deprecated in 0.16, with an old-to-new table in the migration doc |
 | 2 | The root `.` exports types only. | The same table |
 | 3 | The protocol functions become members of `createOidcClient`, with the renames in §3. `redirect_uri` becomes `redirectUri`, and the string overloads go. | Deprecated in 0.16. `OAuthConfig` accepts both spellings. |
 | 4 | The free `/server` functions are no longer exported: the handlers, the session helpers, the persistences and the login transaction. `createFidesAuth` is the way in, and the handler options that don't vary per request move to it. | The migration doc maps each one to an instance member |
@@ -532,7 +532,9 @@ The work, as PRs in beta. The numbers in brackets are rows in the breaking-chang
    - `fides-auth-store` gets no 1.0. Its package and publish workflow leave the repo, and its last 0.x is deprecated on npm.
 5. **Removal and packaging (1, 2, 3, 7, 10, 11, 12, 19).**
    - What 0.16 deprecated goes: the old subpaths, the free protocol functions, the global settings, `/oauth-browser`, `/utils` and `/rate-limit`.
-   - The root becomes types-only.
+   - The module state goes with the global settings. Each part takes a `logger` factory, and one without it writes JSON lines to the console.
+   - `redirect_uri` goes, and `OAuthConfig` becomes `OidcClientConfig`. The Vipps client is built on `createOidcClient`.
+   - The root becomes types-only. `/session-events` keeps the vocabulary, and `logSessionEvent` and `newSessionId` become internal.
    - Core becomes a peer dependency of `fides-auth-next` and `fides-auth-react`, and `engines` moves to Node 22.
 6. **Docs.** The README rewrite, and a 1.0 section in the migration doc.
 

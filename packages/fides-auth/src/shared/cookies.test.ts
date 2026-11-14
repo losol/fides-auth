@@ -3,9 +3,6 @@ import { describe, it, expect } from 'vitest';
 import {
   COOKIE_MAX_BYTES,
   CookieTooLargeError,
-  ACCESS_TOKEN_COOKIE_NAME,
-  ID_TOKEN_COOKIE_NAME,
-  defaultSessionCookieOptions,
   defaultOAuthCookieOptions,
   cookieByteSize,
   assertCookieWithinLimit,
@@ -55,28 +52,17 @@ describe('CookieTooLargeError', () => {
   });
 });
 
-describe('cookie defaults', () => {
-  it('exposes the split cookie names', () => {
-    expect(ACCESS_TOKEN_COOKIE_NAME).toBe('session_at');
-    expect(ID_TOKEN_COOKIE_NAME).toBe('session_it');
-  });
-
+describe('login transaction cookie defaults', () => {
   it('uses lax, httpOnly, root-path defaults', () => {
-    for (const opts of [defaultSessionCookieOptions, defaultOAuthCookieOptions]) {
-      expect(opts.path).toBe('/');
-      expect(opts.sameSite).toBe('lax');
-      expect(opts.httpOnly).toBe(true);
-    }
+    expect(defaultOAuthCookieOptions).toMatchObject({ path: '/', sameSite: 'lax', httpOnly: true });
   });
 
   it('sets secure unconditionally, not only when NODE_ENV is production', () => {
     // A deployment that doesn't set NODE_ENV must not silently drop the flag.
-    for (const opts of [defaultSessionCookieOptions, defaultOAuthCookieOptions]) {
-      expect(opts.secure).toBe(true);
-    }
+    expect(defaultOAuthCookieOptions.secure).toBe(true);
   });
 
-  it('keeps OAuth/PKCE cookies short-lived relative to session cookies', () => {
-    expect(defaultOAuthCookieOptions.maxAge).toBeLessThan(defaultSessionCookieOptions.maxAge!);
+  it('lives ten minutes', () => {
+    expect(defaultOAuthCookieOptions.maxAge).toBe(600);
   });
 });

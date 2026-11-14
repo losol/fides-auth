@@ -17,7 +17,8 @@ them with React's lifecycle:
 pnpm add @eventuras/fides-auth @eventuras/fides-auth-react
 ```
 
-`react` is a peer dependency.
+`@eventuras/fides-auth` and `react` are peer dependencies, so the app has one
+copy of core.
 
 ## Usage
 

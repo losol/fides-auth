@@ -1,22 +1,4 @@
-import type { OAuthConfig } from './config.js';
 import type { RefreshFailureCause } from '../shared/session-events.js';
-
-/**
- * Returns a structured, log-safe context describing an `OAuthConfig`.
- *
- * Excludes credentials (`clientSecret`, `privateKey`). Use this to attach
- * provider configuration to log lines for debugging OAuth/OIDC flows without
- * leaking credentials.
- */
-export function getOAuthConfigLogContext(config: OAuthConfig) {
-  return {
-    clientId: config.clientId,
-    issuer: config.issuer,
-    redirectUri: config.redirect_uri,
-    scope: Array.isArray(config.scope) ? config.scope.join(' ') : config.scope,
-    usePar: config.usePar ?? false,
-  };
-}
 
 /**
  * Returns a structured log context for an unknown OAuth-related error.

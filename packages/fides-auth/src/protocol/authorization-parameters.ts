@@ -1,22 +1,7 @@
-import { createLogger } from '../shared/logger.js';
-import { redirectUriOf, type OAuthConfig } from './config.js';
-import { moduleContext, type ProtocolContext } from './context.js';
+import { redirectUriOf } from './config.js';
+import type { ProtocolContext } from './context.js';
 import { defaultScope, joinScope } from './scope.js';
 import { createPkcePair, createState } from './pkce.js';
-
-const logger = createLogger({ namespace: 'fides-auth:oauth' });
-
-/**
- * PKCE parameters generated for an authorization request.
- *
- * @deprecated Use `AuthorizationRequest` from `@eventuras/fides-auth/oidc`.
- */
-export interface PKCEOptions {
-  code_verifier: string;
-  code_challenge: string;
-  state: string;
-  parameters: Record<string, string>;
-}
 
 /** One login's authorization request, from `OidcClient.createAuthorizationRequest`. */
 export interface AuthorizationRequest {
@@ -30,15 +15,15 @@ export interface AuthorizationRequest {
   parameters: Record<string, string>;
 }
 
-/** Per-request options for {@link buildPKCEOptions} and `OidcClient.createAuthorizationRequest`. */
+/** Per-request options for `OidcClient.createAuthorizationRequest`. */
 export interface AuthorizationRequestOptions {
-  /** Extra authorization parameters, merged over `OAuthConfig.authorizationParameters`. */
+  /** Extra authorization parameters, merged over the config's `authorizationParameters`. */
   parameters?: Record<string, string>;
 }
 
 /** Extra parameters can't set these. */
 const RESERVED_AUTHORIZATION_PARAMETERS = new Set([
-  // Set by buildPKCEOptions
+  // Set by createAuthorizationRequest
   'state',
   'code_challenge',
   'code_challenge_method',
@@ -54,37 +39,8 @@ const RESERVED_AUTHORIZATION_PARAMETERS = new Set([
 ]);
 
 /**
- * Creates PKCE parameters for an OAuth flow.
- * For the verifier, challenge or state alone, use `createPkcePair` / `createState` from `/pkce`.
- * Adds `config.authorizationParameters` and `options.parameters`; a `scope` among them wins.
- *
- * @param config - OAuthConfig configuration including the redirect URI and scope.
- * @param options - Per-request extra parameters.
- * @returns A promise that resolves to an object containing:
- *  - code_verifier: The randomly generated PKCE code verifier.
- *  - code_challenge: The derived PKCE code challenge.
- *  - state: A random state to protect against CSRF.
- *  - parameters: A Record<string,string> with the assembled parameters.
- * @throws Error if an extra parameter is a reserved key (see `OAuthConfig.authorizationParameters`).
- *
- * @deprecated Use `createOidcClient(config).createAuthorizationRequest(options)` from `@eventuras/fides-auth/oidc`. Its result uses camelCase: `codeVerifier`, `codeChallenge`.
- */
-export async function buildPKCEOptions(
-  config: OAuthConfig,
-  options: AuthorizationRequestOptions = {},
-): Promise<PKCEOptions> {
-  const request = await createAuthorizationRequest(moduleContext(config, logger), options);
-  return {
-    code_verifier: request.codeVerifier,
-    code_challenge: request.codeChallenge,
-    state: request.state,
-    parameters: request.parameters,
-  };
-}
-
-/**
  * Creates a PKCE pair, a state and the authorization parameters for one login.
- * The shared core of {@link buildPKCEOptions} and `OidcClient.createAuthorizationRequest`.
+ * The core of `OidcClient.createAuthorizationRequest`.
  *
  * @throws TypeError if the config has no redirect URI.
  * @throws Error if an extra parameter is a reserved key.

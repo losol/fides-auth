@@ -1,39 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  classifyRefreshFailure,
-  getOAuthConfigLogContext,
-  getOAuthErrorLogContext,
-} from './logging.js';
-import type { OAuthConfig } from './config.js';
-
-const baseConfig: OAuthConfig = {
-  issuer: 'https://issuer.example.com',
-  clientId: 'client-123',
-  clientSecret: 'super-secret',
-  redirect_uri: 'https://app.example.com/callback',
-  scope: 'openid profile',
-};
-
-describe('getOAuthConfigLogContext', () => {
-  it('returns log-safe fields and excludes clientSecret', () => {
-    const ctx = getOAuthConfigLogContext(baseConfig);
-
-    expect(ctx).toEqual({
-      clientId: 'client-123',
-      issuer: 'https://issuer.example.com',
-      redirectUri: 'https://app.example.com/callback',
-      scope: 'openid profile',
-      usePar: false,
-    });
-    expect(ctx).not.toHaveProperty('clientSecret');
-  });
-
-  it('reflects usePar when set', () => {
-    const ctx = getOAuthConfigLogContext({ ...baseConfig, usePar: true });
-    expect(ctx.usePar).toBe(true);
-  });
-});
+import { classifyRefreshFailure, getOAuthErrorLogContext } from './logging.js';
 
 describe('getOAuthErrorLogContext', () => {
   it('returns { value } for non-object errors', () => {

@@ -4,10 +4,8 @@
 // URLs under `allowedBase` and never follows a redirect. It never refreshes: a
 // caller that wants fresh tokens asks for them first, with refreshSession.
 
-import { createLogger } from '../shared/logger.js';
+import type { FidesLogger } from '../shared/logger.js';
 import type { Tokens } from '../shared/types.js';
-
-const logger = createLogger({ namespace: 'fides-auth:server:authorized-fetch' });
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -96,7 +94,7 @@ export interface AuthorizedFetchResult<T> {
 }
 
 /**
- * Calls an API with an access token.
+ * Calls an API with an access token. A refused URL is reported to `logger`.
  *
  * @throws {AuthorizedFetchError} on a disallowed URL, a missing token, non-2xx, timeout or network error.
  * @throws {TypeError} when `allowedBase` is not an http(s) URL without credentials.
@@ -105,9 +103,10 @@ export async function authorizedFetch<T = undefined>(
   tokens: Tokens | null | undefined,
   url: string | URL,
   options: AuthorizedFetchOptions<T>,
+  logger: FidesLogger,
 ): Promise<AuthorizedFetchResult<T>> {
   const { allowedBase, parse, timeoutMs = DEFAULT_TIMEOUT_MS, ...init } = options;
-  const target = resolveAllowedUrl(url, allowedBase);
+  const target = resolveAllowedUrl(url, allowedBase, logger);
   const request = { method: (init.method ?? 'GET').toUpperCase(), url: redactUrl(target) };
 
   const sentAt = Date.now();
@@ -138,7 +137,7 @@ export async function authorizedFetch<T = undefined>(
 }
 
 /** Resolves `url` against the base and throws unless it stays under it. */
-function resolveAllowedUrl(url: string | URL, allowedBase: string | URL): URL {
+function resolveAllowedUrl(url: string | URL, allowedBase: string | URL, logger: FidesLogger): URL {
   const base = new URL(allowedBase);
   if (base.protocol !== 'https:' && base.protocol !== 'http:') {
     throw new TypeError('authorizedFetch: allowedBase must be an http(s) URL');

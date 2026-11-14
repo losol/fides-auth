@@ -1,22 +1,22 @@
 // discovery.ts
 //
-// One place where fides-auth turns an OAuthConfig into an openid-client
-// Configuration, and one cache in front of it.
+// One place where fides-auth turns an OidcClientConfig into an openid-client
+// Configuration, and a cache in front of it.
 //
-// Discovery was previously performed inline at every call site, which meant an
-// HTTP GET to the provider's /.well-known/openid-configuration before *every*
-// token operation. On the heartbeat path that is one extra round-trip per user
-// every few minutes: it doubles the latency of a refresh, doubles the load on
-// the provider, and doubles the surface on which a refresh can fail — a
-// discovery blip is indistinguishable from a token-endpoint blip to the caller.
+// Without the cache, every token operation would start with an HTTP GET to the
+// provider's /.well-known/openid-configuration. On the heartbeat path that is
+// one extra round-trip per user every few minutes: it doubles the latency of a
+// refresh, doubles the load on the provider, and doubles the surface on which a
+// refresh can fail — a discovery blip is indistinguishable from a token-endpoint
+// blip to the caller.
 //
 // Reusing a Configuration is openid-client's intended usage; its own examples
 // build one at startup and keep it.
 
 import * as openid from 'openid-client';
 
-import { createLogger, type FidesLogger } from '../shared/logger.js';
-import type { ClientAuthConfig, OAuthConfig, OidcClientConfig } from './config.js';
+import type { FidesLogger } from '../shared/logger.js';
+import type { ClientAuthConfig, OidcClientConfig } from './config.js';
 
 /**
  * Default lifetime of a cached configuration.
@@ -46,59 +46,10 @@ interface CacheEntry {
 }
 
 /**
- * Options for {@link configureDiscoveryCache}.
- *
- * @deprecated Pass `discoveryTtlMs` to `createOidcClient`.
- */
-export interface DiscoveryCacheOptions {
-  /**
-   * How long a discovered configuration stays reusable, in milliseconds.
-   * Pass `0` to disable caching and discover on every call. Must be finite and
-   * non-negative; anything else throws rather than quietly disabling the cache.
-   * @default 300_000 (5 minutes)
-   */
-  ttlMs?: number;
-}
-
-/**
- * Adjusts the discovery cache. Existing entries are dropped so the new setting
- * takes effect immediately.
- *
- * @throws TypeError if `ttlMs` is not a finite, non-negative number. Rejecting
- * loudly matters here because the alternative is silent: `NaN` — what
- * `Number(process.env.DISCOVERY_TTL)` yields when the variable is unset — would
- * otherwise turn the cache off and restore a discovery round-trip on every
- * token operation, with nothing to show for it in the logs.
- *
- * @deprecated Pass `discoveryTtlMs` to `createOidcClient` (`@eventuras/fides-auth/oidc`).
- */
-export function configureDiscoveryCache(options: DiscoveryCacheOptions): void {
-  if (options.ttlMs !== undefined) {
-    moduleCache.ttlMs = checkTtl(options.ttlMs, 'configureDiscoveryCache: ttlMs');
-  }
-  moduleCache.clear();
-}
-
-/**
- * Drops every cached configuration.
- *
- * Call this after changing provider configuration that discovery would not
- * otherwise pick up until the TTL expires. Tests should call it between cases,
- * since the cache is module state.
- *
- * @deprecated Each OIDC client from `createOidcClient` has its own cache. Create a new client to drop it.
- */
-export function clearDiscoveryCache(): void {
-  moduleCache.clear();
-}
-
-/**
  * Maps `clientAuth` to openid-client's client authentication. Every
  * `Configuration` fides-auth builds gets its client authentication from here.
  *
  * @throws TypeError for an unknown `clientAuth`, rather than falling back to another method.
- *
- * @deprecated Internal from 1.0. `createOidcClient` sets up client authentication from the config.
  */
 export function resolveClientAuth(config: ClientAuthConfig): {
   /** Client metadata shorthand; set only for the secret methods. */
@@ -192,10 +143,10 @@ async function buildConfiguration(config: OidcClientConfig): Promise<openid.Conf
   return new openid.Configuration(metadata, config.clientId, clientSecret, clientAuthentication);
 }
 
-/** A discovery cache: the module keeps one for the free functions, and each OIDC client has its own. */
+/** A discovery cache. Each OIDC client has its own. */
 export interface DiscoveryCache {
   /** How long an entry stays reusable, in milliseconds. `0` disables caching. */
-  ttlMs: number;
+  readonly ttlMs: number;
   /** The configuration for `config`, from the cache or a new discovery. */
   discover(config: OidcClientConfig): Promise<openid.Configuration>;
   /** Drops every entry. */
@@ -217,15 +168,9 @@ export function checkTtl(ttlMs: number, label: string): number {
 /** Creates an empty discovery cache that logs through `logger`. */
 export function createDiscoveryCache(logger: FidesLogger, ttlMs = DEFAULT_TTL_MS): DiscoveryCache {
   const cache = new Map<string, CacheEntry>();
-  let ttl = ttlMs;
 
   return {
-    get ttlMs() {
-      return ttl;
-    },
-    set ttlMs(value) {
-      ttl = value;
-    },
+    ttlMs,
 
     discover(config) {
       const key = cacheKey(config);
@@ -246,8 +191,8 @@ export function createDiscoveryCache(logger: FidesLogger, ttlMs = DEFAULT_TTL_MS
 
       const configuration = buildConfiguration(config);
 
-      if (ttl > 0) {
-        cache.set(key, { configuration, expiresAt: now + ttl, inputs });
+      if (ttlMs > 0) {
+        cache.set(key, { configuration, expiresAt: now + ttlMs, inputs });
 
         // Never cache a failure: a provider that was briefly unreachable must be
         // retried on the next call, not remembered as broken for the whole TTL.
@@ -264,21 +209,4 @@ export function createDiscoveryCache(logger: FidesLogger, ttlMs = DEFAULT_TTL_MS
       cache.clear();
     },
   };
-}
-
-const moduleCache = createDiscoveryCache(createLogger({ namespace: 'fides-auth:oidc-discovery' }));
-
-/**
- * Discovers the provider's OpenID configuration, or builds it from
- * `config.serverMetadata`, reusing a recent result.
- *
- * @param config - OAuth configuration identifying the provider and client.
- * @returns The openid-client `Configuration` for this provider and client.
- *
- * @deprecated Use `oidc.metadata()` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`).
- */
-export async function discoverConfiguration(
-  config: OAuthConfig,
-): Promise<openid.Configuration> {
-  return moduleCache.discover(config);
 }

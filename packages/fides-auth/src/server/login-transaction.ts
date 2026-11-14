@@ -6,13 +6,11 @@
 // sealed under a key derived from the secret, so it never opens as a session.
 
 import { assertCookieWithinLimit, defaultOAuthCookieOptions } from '../shared/cookies.js';
-import { createLogger } from '../shared/logger.js';
-import type { PKCEOptions } from '../protocol/authorization-parameters.js';
+import type { FidesLogger } from '../shared/logger.js';
+import type { AuthorizationRequest } from '../protocol/authorization-parameters.js';
 import { createEncryptedJWT, decryptJWT, hexToUint8Array } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
 import { assertSessionSecret, type SessionSecret } from './session-secret.js';
-
-const logger = createLogger({ namespace: 'fides-auth:server:login-transaction' });
 
 const COOKIE_NAME = 'oauth_tx_';
 
@@ -64,6 +62,8 @@ export class CallbackValidationError extends Error {
 
 export interface CreateTransactionOptions {
   returnTo?: string | null;
+  /** Where a dropped `returnTo` is reported. */
+  logger: FidesLogger;
 }
 
 export interface TransactionCookieOptions {
@@ -71,15 +71,20 @@ export interface TransactionCookieOptions {
   secure?: boolean;
 }
 
+export interface ReadTransactionOptions extends TransactionCookieOptions {
+  /** Where an unreadable transaction cookie is reported. */
+  logger: FidesLogger;
+}
+
 export interface ValidateCallbackOptions {
   /** @default 600000 (10 minutes) */
   maxAgeMs?: number;
 }
 
-/** Starts a login transaction from the PKCE parameters sent to the authorize endpoint. */
+/** Starts a login transaction from the authorization request sent to the provider. */
 export function createTransaction(
-  pkce: Pick<PKCEOptions, 'state' | 'code_verifier'>,
-  { returnTo }: CreateTransactionOptions = {},
+  request: Pick<AuthorizationRequest, 'state' | 'codeVerifier'>,
+  { returnTo, logger }: CreateTransactionOptions,
 ): LoginTransaction {
   let kept = returnTo || undefined;
   if (kept && new TextEncoder().encode(JSON.stringify(kept)).length > MAX_RETURN_TO_BYTES) {
@@ -87,8 +92,8 @@ export function createTransaction(
     kept = undefined;
   }
   return {
-    state: pkce.state,
-    codeVerifier: pkce.code_verifier,
+    state: request.state,
+    codeVerifier: request.codeVerifier,
     ...(kept ? { returnTo: kept } : {}),
     createdAt: Date.now(),
   };
@@ -126,7 +131,7 @@ export async function readTransaction(
   cookies: CookieStore,
   state: string,
   secret: SessionSecret,
-  { secure = true }: TransactionCookieOptions = {},
+  { secure = true, logger }: ReadTransactionOptions,
 ): Promise<LoginTransaction | null> {
   const slots = await readSlots(cookies, await transactionKey(secret), secure);
   const match = findSlot(slots, state);

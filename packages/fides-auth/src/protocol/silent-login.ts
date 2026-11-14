@@ -1,5 +1,5 @@
 /**
- * Silent login functionality for OAuth flows.
+ * Reading the callback of a silent login, started with `OidcClient.silentLoginUrl`.
  *
  * Silent login (also called "prompt=none") attempts to authenticate the user
  * without any user interaction. This is useful for:
@@ -7,25 +7,6 @@
  * - Refreshing authentication silently in the background
  * - Implementing "keep me logged in" features
  */
-
-import * as openid from 'openid-client';
-
-import { createLogger } from '../shared/logger.js';
-import type { OAuthConfig } from './config.js';
-import { joinScope } from './scope.js';
-import { discoverConfiguration } from './discovery.js';
-
-const logger = createLogger({ namespace: 'fides-auth:silent-login' });
-
-/** @deprecated Use `SilentLoginUrlOptions` with `oidc.silentLoginUrl`. */
-export interface SilentLoginOptions {
-  /** Optional hint about the user's identity (e.g., email or user ID) */
-  loginHint?: string;
-  /** Maximum age of authentication in seconds */
-  maxAge?: number;
-  /** Additional parameters to pass to the authorization endpoint */
-  additionalParams?: Record<string, string>;
-}
 
 export interface SilentLoginResult {
   /** Whether silent login was successful */
@@ -36,65 +17,6 @@ export interface SilentLoginResult {
   error?: string;
   /** Detailed error description from OAuth provider */
   errorDescription?: string;
-}
-
-/**
- * Builds an authorization URL for silent authentication.
- *
- * This function creates an authorization URL with prompt=none,
- * which tells the OAuth provider to authenticate without user interaction.
- * If the user doesn't have an active session, the provider will return an error.
- *
- * @param config - OAuth configuration
- * @param options - Silent login options
- * @returns Authorization URL for silent authentication
- *
- * @example
- * ```ts
- * const silentAuthUrl = await buildSilentLoginUrl(oauthConfig, {
- *   loginHint: 'user@example.com',
- *   maxAge: 3600, // Require authentication within last hour
- * });
- *
- * // Use this URL in an iframe or hidden window
- * ```
- *
- * @deprecated Use `oidc.silentLoginUrl(request, options)` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`). It takes a request from `createAuthorizationRequest`, so the callback can check state and PKCE.
- */
-export async function buildSilentLoginUrl(
-  config: OAuthConfig,
-  options: SilentLoginOptions = {}
-): Promise<URL> {
-  logger.debug({ issuer: config.issuer }, 'Building silent login URL');
-
-  try {
-    const server = await discoverConfiguration(config);
-
-    const parameters: Record<string, string> = {
-      redirect_uri: config.redirect_uri,
-      scope: joinScope(config.scope),
-      prompt: 'none', // Critical: tells provider to not show any UI
-      response_type: 'code',
-      ...options.additionalParams,
-    };
-
-    // Add optional parameters
-    if (options.loginHint) {
-      parameters.login_hint = options.loginHint;
-    }
-
-    if (options.maxAge !== undefined) {
-      parameters.max_age = options.maxAge.toString();
-    }
-
-    const authUrl = openid.buildAuthorizationUrl(server, parameters);
-
-    logger.info('Silent login URL built successfully');
-    return authUrl;
-  } catch (error) {
-    logger.error({ error, issuer: config.issuer }, 'Failed to build silent login URL');
-    throw error;
-  }
 }
 
 /**
@@ -131,8 +53,6 @@ export function checkSilentLoginResult(callbackUrl: URL): SilentLoginResult {
   const code = callbackUrl.searchParams.get('code');
 
   if (error) {
-    logger.info({ error, errorDescription }, 'Silent login failed with error');
-
     return {
       success: false,
       error,
@@ -141,13 +61,11 @@ export function checkSilentLoginResult(callbackUrl: URL): SilentLoginResult {
   }
 
   if (code) {
-    logger.info('Silent login successful');
     return {
       success: true,
     };
   }
 
-  logger.warn('Silent login callback missing both code and error');
   return {
     success: false,
     error: 'invalid_callback',

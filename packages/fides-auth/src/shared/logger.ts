@@ -1,40 +1,22 @@
 /**
- * Pluggable logger for fides-auth.
+ * Logging for fides-auth.
  *
- * The default writes newline-delimited JSON to `console.<level>` so output
- * is interoperable with Loki / Grafana / Datadog out of the box, even when
- * the consumer hasn't wired in a structured logger. Users can plug their
- * own backend (pino, winston, @eventuras/logger, ...) via `configureLogger()`.
- *
- * @example
- * // Use default JSONL console logger (no setup needed)
- * import { createLogger } from '@eventuras/fides-auth/logger';
- * const logger = createLogger({ namespace: 'my-app:auth' });
- * logger.info('Authentication successful');
- * // → {"level":"info","time":"…","namespace":"my-app:auth","msg":"Authentication successful"}
+ * Every part that logs takes a `logger` option: a {@link FidesLoggerFactory}
+ * it creates its loggers from. Without one it uses {@link consoleLoggerFactory},
+ * which writes newline-delimited JSON to `console.<level>`, so the output works
+ * with Loki / Grafana / Datadog even when the app hasn't wired in its own logger.
  *
  * @example
  * // Plug in pino
  * import pino from 'pino';
- * import { configureLogger } from '@eventuras/fides-auth/logger';
  *
  * const pinoInstance = pino();
- * configureLogger({
+ * const logger = {
  *   create({ namespace, context }) {
  *     return pinoInstance.child({ namespace, ...context });
  *   },
- * });
- *
- * @example
- * // Plug in @eventuras/logger
- * import { Logger } from '@eventuras/logger';
- * import { configureLogger } from '@eventuras/fides-auth/logger';
- *
- * configureLogger({
- *   create(options) {
- *     return Logger.create(options);
- *   },
- * });
+ * };
+ * const auth = createFidesAuth({ ...config, logger });
  */
 
 /**
@@ -64,22 +46,6 @@ export interface FidesLoggerFactory {
   create(options: FidesLoggerOptions): FidesLogger;
 }
 
-/**
- * Console-based logger implementation that emits newline-delimited JSON.
- *
- * Used as the default when no custom logger factory is configured. JSONL
- * keeps fides-auth's output interoperable with log shippers (Loki, Grafana,
- * Datadog, etc.) even when the consuming app hasn't wired in a structured
- * logger via `configureLogger()`. Each entry preserves the original
- * `console.<level>` call so browser devtools and CI log filters still work.
- *
- * Output shape (example):
- *
- *   {"level":"info","time":"2026-04-15T19:40:57.300Z","namespace":"fides-auth:oauth","msg":"PKCE parameters generated","codeChallenge":"…"}
- *
- * Errors in the `data` field are serialized to `{ name, message, stack }`
- * so they survive `JSON.stringify`.
- */
 type ConsoleMethod = 'debug' | 'info' | 'warn' | 'error';
 
 function serializeError(value: unknown): unknown {
@@ -117,6 +83,17 @@ function safeStringify(record: Record<string, unknown>): string {
   }
 }
 
+/**
+ * Logger that emits newline-delimited JSON. Each entry keeps its
+ * `console.<level>` call so browser devtools and CI log filters still work.
+ *
+ * Output shape (example):
+ *
+ *   {"level":"info","time":"2026-04-15T19:40:57.300Z","namespace":"fides-auth:oidc","msg":"Refreshed access token"}
+ *
+ * Errors in the `data` field are serialized to `{ name, message, stack }`
+ * so they survive `JSON.stringify`.
+ */
 class ConsoleLogger implements FidesLogger {
   constructor(
     private readonly namespace: string,
@@ -129,8 +106,7 @@ class ConsoleLogger implements FidesLogger {
     data?: Record<string, unknown> | string,
     msg?: string,
   ): void {
-    // Skip noisy empty entries — match the pre-JSON ConsoleLogger, which
-    // dropped calls with no data and no message.
+    // A call with no data and no message has nothing to say.
     if (data === undefined && msg === undefined) return;
 
     // Reserved keys are set first so they appear at the front of the JSON
@@ -183,59 +159,9 @@ class ConsoleLogger implements FidesLogger {
   }
 }
 
-const defaultFactory: FidesLoggerFactory = {
+/** The default logger factory: JSON lines on the console. */
+export const consoleLoggerFactory: FidesLoggerFactory = {
   create({ namespace, context }) {
     return new ConsoleLogger(namespace, context);
   },
 };
-
-let currentFactory: FidesLoggerFactory = defaultFactory;
-let factoryVersion = 0;
-
-/**
- * Configure a custom logger factory for fides-auth.
- *
- * Can be called at any time — even after modules have already created loggers.
- * Existing loggers will pick up the new factory on their next log call.
- *
- * If not called, fides-auth uses a console-based logger.
- *
- * @param factory - A factory that creates logger instances
- *
- * @deprecated Pass `logger` to `createOidcClient` (`@eventuras/fides-auth/oidc`). Until 1.0, a client without one uses this factory.
- */
-export function configureLogger(factory: FidesLoggerFactory): void {
-  currentFactory = factory;
-  factoryVersion++;
-}
-
-/**
- * Create a logger instance using the configured factory.
- *
- * Returns a lazy proxy: the underlying logger is created (or re-created)
- * on first use and whenever the factory is changed via `configureLogger()`.
- * This means module-scope loggers work correctly even when `configureLogger()`
- * is called after module imports.
- *
- * @param options - Logger options including namespace and optional context
- * @returns A logger instance
- */
-export function createLogger(options: FidesLoggerOptions): FidesLogger {
-  let cached: FidesLogger | null = null;
-  let cachedVersion = -1;
-
-  function resolve(): FidesLogger {
-    if (cached === null || cachedVersion !== factoryVersion) {
-      cached = currentFactory.create(options);
-      cachedVersion = factoryVersion;
-    }
-    return cached;
-  }
-
-  return {
-    debug(data?, msg?) { resolve().debug(data, msg); },
-    info(data?, msg?) { resolve().info(data, msg); },
-    warn(data?, msg?) { resolve().warn(data, msg); },
-    error(data?, msg?) { resolve().error(data, msg); },
-  };
-}

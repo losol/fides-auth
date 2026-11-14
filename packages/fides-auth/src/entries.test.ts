@@ -22,21 +22,9 @@ const pkg = JSON.parse(readFileSync(new URL('package.json', packageDir), 'utf8')
  * a row when a change makes an entry lighter. A row that grows needs a reason.
  */
 const expected: Record<string, string[]> = {
-  '.': ['jose'],
-  './cookies': [],
-  './logger': [],
+  '.': [],
   './session-events': [],
-  './oauth': ['jose', 'oauth4webapi', 'openid-client'],
   './oidc': ['jose', 'oauth4webapi', 'openid-client'],
-  './oidc-discovery': ['jose', 'oauth4webapi', 'openid-client'],
-  './id-token': ['jose', 'oauth4webapi', 'openid-client'],
-  './oauth-logging': [],
-  './pkce': [],
-  './oauth-browser': [],
-  './silent-login': ['jose', 'oauth4webapi', 'openid-client'],
-  './utils': ['jose'],
-  './types': [],
-  './rate-limit': [],
   './server': ['jose', 'oauth4webapi', 'openid-client'],
   './browser': [],
   './providers/vipps': ['jose', 'oauth4webapi', 'openid-client'],

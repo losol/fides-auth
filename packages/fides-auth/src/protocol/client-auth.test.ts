@@ -7,10 +7,9 @@
 import { jwtVerify } from 'jose';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { clientCredentialsGrant } from './client-credentials.js';
-import { refreshAccessToken } from './refresh.js';
-import type { ClientCredentialsConfig, OAuthConfig } from './config.js';
-import { clearDiscoveryCache, discoverConfiguration } from './discovery.js';
+import type { FidesLogger } from '../shared/logger.js';
+import { createOidcClient } from './client.js';
+import type { OidcClientConfig } from './config.js';
 
 const issuer = 'https://auth.example.test';
 const tokenEndpoint = `${issuer}/token`;
@@ -20,9 +19,15 @@ const clientSecret = 'secret-a';
 const base = {
   issuer,
   clientId,
-  redirect_uri: 'https://app.example.test/callback',
+  redirectUri: 'https://app.example.test/callback',
   scope: 'openid',
 };
+
+const quiet = { create: (): FidesLogger => ({ debug() {}, info() {}, warn() {}, error() {} }) };
+
+/** A new client each time, so each case discovers through `fetchMock`. */
+const clientWith = (auth: Record<string, unknown>) =>
+  createOidcClient({ ...base, ...auth } as OidcClientConfig, { logger: quiet });
 
 function json(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -60,7 +65,6 @@ beforeAll(async () => {
 beforeEach(() => {
   fetchMock.mockClear();
   vi.stubGlobal('fetch', fetchMock);
-  clearDiscoveryCache();
 });
 
 afterEach(() => {
@@ -70,20 +74,8 @@ afterEach(() => {
 type Auth = Record<string, unknown>;
 
 describe.each([
-  [
-    'refreshAccessToken (discovery)',
-    (auth: Auth) => refreshAccessToken({ ...base, ...auth } as OAuthConfig, 'refresh-token'),
-  ],
-  [
-    'clientCredentialsGrant',
-    (auth: Auth) =>
-      clientCredentialsGrant({
-        tokenEndpoint,
-        clientId,
-        issuer,
-        ...auth,
-      } as ClientCredentialsConfig),
-  ],
+  ['refresh', (auth: Auth) => clientWith(auth).refresh('refresh-token')],
+  ['clientCredentials', (auth: Auth) => clientWith(auth).clientCredentials()],
 ])('%s', (_, run) => {
   it('defaults to client_secret_post', async () => {
     await run({ clientSecret });
@@ -138,7 +130,7 @@ describe.each([
 
 describe('clientAuth none', () => {
   it('sends only client_id', async () => {
-    await refreshAccessToken({ ...base, clientAuth: 'none' }, 'refresh-token');
+    await clientWith({ clientAuth: 'none' }).refresh('refresh-token');
 
     const { body, headers } = tokenRequest();
     expect(body.get('client_id')).toBe(clientId);
@@ -150,13 +142,9 @@ describe('clientAuth none', () => {
 
 describe('unknown clientAuth', () => {
   it('rejects instead of falling back to another method', async () => {
-    const config = {
-      ...base,
-      clientAuth: 'client_secret_jwt',
-      clientSecret,
-    } as unknown as OAuthConfig;
+    const client = clientWith({ clientAuth: 'client_secret_jwt', clientSecret });
 
-    await expect(discoverConfiguration(config)).rejects.toThrow(TypeError);
+    await expect(client.metadata()).rejects.toThrow(TypeError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

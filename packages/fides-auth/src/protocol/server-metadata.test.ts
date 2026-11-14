@@ -4,8 +4,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { refreshAccessToken } from './refresh.js';
-import { clearDiscoveryCache } from './discovery.js';
+import type { FidesLogger } from '../shared/logger.js';
+import { createOidcClient } from './client.js';
 
 const issuer = 'https://auth.example.test';
 const tokenEndpoint = `${issuer}/oauth/token`;
@@ -22,7 +22,6 @@ const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestIni
 beforeEach(() => {
   fetchMock.mockClear();
   vi.stubGlobal('fetch', fetchMock);
-  clearDiscoveryCache();
 });
 
 afterEach(() => {
@@ -31,18 +30,20 @@ afterEach(() => {
 
 describe('serverMetadata', () => {
   it('sends the token request without a discovery request', async () => {
-    const tokens = await refreshAccessToken(
+    const quiet = { create: (): FidesLogger => ({ debug() {}, info() {}, warn() {}, error() {} }) };
+    const client = createOidcClient(
       {
         issuer,
         clientId: 'client-a',
         clientAuth: 'client_secret_basic',
         clientSecret: 'secret-a',
-        redirect_uri: 'https://app.example.test/callback',
+        redirectUri: 'https://app.example.test/callback',
         scope: 'openid',
         serverMetadata: { issuer, token_endpoint: tokenEndpoint },
       },
-      'refresh-token',
+      { logger: quiet },
     );
+    const tokens = await client.refresh('refresh-token');
 
     expect(tokens.access_token).toBe('access');
     expect(fetchMock).toHaveBeenCalledTimes(1);

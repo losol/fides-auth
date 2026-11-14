@@ -1,34 +1,11 @@
 import * as openid from 'openid-client';
 
-import { createLogger } from '../shared/logger.js';
-import { redirectUriOf, type OAuthConfig } from './config.js';
-import { moduleContext, type ProtocolContext } from './context.js';
-
-const logger = createLogger({ namespace: 'fides-auth:oauth' });
-
-/**
- * Exchanges an authorization code for tokens using OIDC discovery and PKCE.
- *
- * @param oauthConfig - OAuth configuration
- * @param callbackUrl - The full callback URL with query parameters from the OIDC provider
- * @param codeVerifier - The PKCE code verifier stored during login initiation
- * @param expectedState - The state parameter stored during login initiation
- * @returns Token response from the OIDC provider
- *
- * @deprecated Use `oidc.exchangeCode(callbackUrl, { codeVerifier, state })` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`).
- */
-export async function exchangeAuthorizationCode(
-  oauthConfig: OAuthConfig,
-  callbackUrl: URL,
-  codeVerifier: string,
-  expectedState: string,
-): Promise<openid.TokenEndpointResponse> {
-  return exchangeCode(moduleContext(oauthConfig, logger), callbackUrl, codeVerifier, expectedState);
-}
+import { redirectUriOf } from './config.js';
+import type { ProtocolContext } from './context.js';
 
 /**
  * Exchanges the code in `callbackUrl` for tokens, checking `expectedState` and PKCE.
- * The shared core of {@link exchangeAuthorizationCode} and `OidcClient.exchangeCode`.
+ * The core of `OidcClient.exchangeCode`.
  *
  * @throws TypeError if the config has no redirect URI.
  */

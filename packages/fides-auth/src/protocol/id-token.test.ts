@@ -1,12 +1,13 @@
 /**
- * Tests for `verifyIdToken` with real keys and a JWKS served by a mocked `fetch`.
+ * Tests for ID token verification with real keys and a JWKS served by a mocked `fetch`.
  */
 import { exportJWK, generateKeyPair, type JWK, SignJWT, UnsecuredJWT } from 'jose';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { clearJwksCache, verifyIdToken } from './id-token.js';
-import type { OAuthConfig } from './config.js';
-import { clearDiscoveryCache } from './discovery.js';
+import type { FidesLogger } from '../shared/logger.js';
+import { createOidcClient } from './client.js';
+import type { OidcClientConfig } from './config.js';
+import { createJwksCache, type JwksCache, verifyIdTokenWith } from './id-token.js';
 
 const issuer = 'https://auth.example.test';
 const jwksUri = `${issuer}/jwks`;
@@ -52,6 +53,11 @@ function sign(options: SignOptions = {}): Promise<string> {
   return jwt.sign(options.key ?? key1);
 }
 
+let jwks: JwksCache;
+
+/** Verifies `token` against the JWKS at `jwksUri`. */
+const verify = (token: string) => verifyIdTokenWith(jwks.get(jwksUri), token, { issuer, audience });
+
 function jwksCalls(uri = jwksUri): number {
   return fetchMock.mock.calls.filter(([input]) => String(input) === uri).length;
 }
@@ -69,8 +75,7 @@ beforeEach(() => {
   routes = { [jwksUri]: { keys: [jwk1] } };
   fetchMock.mockClear();
   vi.stubGlobal('fetch', fetchMock);
-  clearJwksCache();
-  clearDiscoveryCache();
+  jwks = createJwksCache();
 });
 
 afterEach(() => {
@@ -78,9 +83,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('verifyIdToken', () => {
+describe('verifyIdTokenWith', () => {
   it('returns the claims of a valid token', async () => {
-    const claims = await verifyIdToken(await sign(), { issuer, audience, jwksUri });
+    const claims = await verify(await sign());
 
     expect(claims).toMatchObject({ iss: issuer, aud: audience, sub: 'user-1', roles: ['admin'] });
     expect(jwksCalls()).toBe(1);
@@ -88,8 +93,8 @@ describe('verifyIdToken', () => {
 
   it('reuses the JWKS for the same URI', async () => {
     const token = await sign();
-    await verifyIdToken(token, { issuer, audience, jwksUri });
-    await verifyIdToken(token, { issuer, audience, jwksUri: new URL(jwksUri) });
+    await verifyIdTokenWith(jwks.get(jwksUri), token, { issuer, audience });
+    await verifyIdTokenWith(jwks.get(new URL(jwksUri)), token, { issuer, audience });
 
     expect(jwksCalls()).toBe(1);
   });
@@ -97,7 +102,7 @@ describe('verifyIdToken', () => {
   it('rejects an expired token', async () => {
     const token = await sign({ exp: Math.floor(Date.now() / 1000) - 60 });
 
-    await expect(verifyIdToken(token, { issuer, audience, jwksUri })).rejects.toMatchObject({
+    await expect(verify(token)).rejects.toMatchObject({
       code: 'ERR_JWT_EXPIRED',
     });
   });
@@ -105,7 +110,7 @@ describe('verifyIdToken', () => {
   it('rejects a token without exp', async () => {
     const token = await sign({ exp: null });
 
-    await expect(verifyIdToken(token, { issuer, audience, jwksUri })).rejects.toMatchObject({
+    await expect(verify(token)).rejects.toMatchObject({
       code: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
       claim: 'exp',
     });
@@ -114,7 +119,7 @@ describe('verifyIdToken', () => {
   it('rejects the wrong issuer', async () => {
     const token = await sign({ iss: 'https://other.example.test' });
 
-    await expect(verifyIdToken(token, { issuer, audience, jwksUri })).rejects.toMatchObject({
+    await expect(verify(token)).rejects.toMatchObject({
       code: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
       claim: 'iss',
     });
@@ -123,7 +128,7 @@ describe('verifyIdToken', () => {
   it('rejects the wrong audience', async () => {
     const token = await sign({ aud: 'client-b' });
 
-    await expect(verifyIdToken(token, { issuer, audience, jwksUri })).rejects.toMatchObject({
+    await expect(verify(token)).rejects.toMatchObject({
       code: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
       claim: 'aud',
     });
@@ -138,7 +143,7 @@ describe('verifyIdToken', () => {
       .setExpirationTime('5m')
       .sign(new TextEncoder().encode('a-shared-secret-of-at-least-32-bytes'));
 
-    await expect(verifyIdToken(token, { issuer, audience, jwksUri })).rejects.toMatchObject({
+    await expect(verify(token)).rejects.toMatchObject({
       code: 'ERR_JOSE_ALG_NOT_ALLOWED',
     });
   });
@@ -151,72 +156,66 @@ describe('verifyIdToken', () => {
       .setExpirationTime('5m')
       .encode();
 
-    await expect(verifyIdToken(token, { issuer, audience, jwksUri })).rejects.toMatchObject({
+    await expect(verify(token)).rejects.toMatchObject({
       code: 'ERR_JOSE_ALG_NOT_ALLOWED',
     });
   });
 
   it('refetches the JWKS for an unknown kid', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
-    await verifyIdToken(await sign(), { issuer, audience, jwksUri });
+    await verify(await sign());
 
     // Rotate keys, and wait out jose's 30 s refetch cooldown.
     routes[jwksUri] = { keys: [jwk1, jwk2] };
     vi.setSystemTime(Date.now() + 31_000);
 
-    const claims = await verifyIdToken(await sign({ key: key2, kid: 'key-2' }), {
-      issuer,
-      audience,
-      jwksUri,
-    });
+    const claims = await verify(await sign({ key: key2, kid: 'key-2' }));
 
     expect(claims.sub).toBe('user-1');
     expect(jwksCalls()).toBe(2);
   });
+});
 
-  describe('with an OAuthConfig', () => {
-    const metadataJwksUri = `${issuer}/oauth/keys`;
-    const oauthConfig: OAuthConfig = {
-      issuer,
-      clientId: audience,
-      clientAuth: 'none',
-      redirect_uri: 'https://app.example.test/callback',
-      scope: 'openid',
+const quiet = { create: (): FidesLogger => ({ debug() {}, info() {}, warn() {}, error() {} }) };
+
+describe('OidcClient.verifyIdToken', () => {
+  const metadataJwksUri = `${issuer}/oauth/keys`;
+  const oauthConfig: OidcClientConfig = {
+    issuer,
+    clientId: audience,
+    clientAuth: 'none',
+    redirectUri: 'https://app.example.test/callback',
+    scope: 'openid',
+  };
+
+  it('uses jwks_uri from serverMetadata', async () => {
+    routes = { [metadataJwksUri]: { keys: [jwk1] } };
+    const client = createOidcClient(
+      { ...oauthConfig, serverMetadata: { issuer, jwks_uri: metadataJwksUri } },
+      { logger: quiet },
+    );
+
+    const claims = await client.verifyIdToken(await sign());
+
+    expect(claims.sub).toBe('user-1');
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([metadataJwksUri]);
+  });
+
+  it('uses jwks_uri from discovery', async () => {
+    routes = {
+      [`${issuer}/.well-known/openid-configuration`]: { issuer, jwks_uri: metadataJwksUri },
+      [metadataJwksUri]: { keys: [jwk1] },
     };
 
-    it('uses jwks_uri from serverMetadata', async () => {
-      routes = { [metadataJwksUri]: { keys: [jwk1] } };
+    const claims = await createOidcClient(oauthConfig, { logger: quiet }).verifyIdToken(await sign());
 
-      const claims = await verifyIdToken(await sign(), {
-        issuer,
-        audience,
-        oauthConfig: { ...oauthConfig, serverMetadata: { issuer, jwks_uri: metadataJwksUri } },
-      });
+    expect(claims.sub).toBe('user-1');
+    expect(jwksCalls(metadataJwksUri)).toBe(1);
+  });
 
-      expect(claims.sub).toBe('user-1');
-      expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([metadataJwksUri]);
-    });
+  it('throws when the metadata has no jwks_uri', async () => {
+    const client = createOidcClient({ ...oauthConfig, serverMetadata: { issuer } }, { logger: quiet });
 
-    it('uses jwks_uri from discovery', async () => {
-      routes = {
-        [`${issuer}/.well-known/openid-configuration`]: { issuer, jwks_uri: metadataJwksUri },
-        [metadataJwksUri]: { keys: [jwk1] },
-      };
-
-      const claims = await verifyIdToken(await sign(), { issuer, audience, oauthConfig });
-
-      expect(claims.sub).toBe('user-1');
-      expect(jwksCalls(metadataJwksUri)).toBe(1);
-    });
-
-    it('throws when the metadata has no jwks_uri', async () => {
-      await expect(
-        verifyIdToken(await sign(), {
-          issuer,
-          audience,
-          oauthConfig: { ...oauthConfig, serverMetadata: { issuer } },
-        }),
-      ).rejects.toThrow(TypeError);
-    });
+    await expect(client.verifyIdToken(await sign())).rejects.toThrow(TypeError);
   });
 });

@@ -1,58 +1,57 @@
 /**
- * Tests for Pushed Authorization Requests (RFC 9126) support in authorization-url.ts.
- *
- * Covers:
- * - `buildAuthorizationUrlWithPAR` — thin wrapper over openid-client.
- * - `discoverAndBuildAuthorizationUrl` — routing between PAR and non-PAR
- *   based on `OAuthConfig.usePar` and provider discovery metadata.
+ * Tests for Pushed Authorization Requests (RFC 9126) support in authorization-url.ts:
+ * routing between PAR and the standard flow, from `usePar` and the provider's
+ * metadata.
  *
  * If these tests fail, run from the repo root:
  *   pnpm --filter @eventuras/fides-auth test
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('openid-client', () => ({
-  discovery: vi.fn(),
   buildAuthorizationUrl: vi.fn(),
   buildAuthorizationUrlWithPAR: vi.fn(),
-  ClientSecretPost: vi.fn(() => () => undefined),
 }));
 
 import * as openid from 'openid-client';
-import { clearDiscoveryCache } from './discovery.js';
-import {
-  buildAuthorizationUrlWithPAR,
-  discoverAndBuildAuthorizationUrl,
-} from './authorization-url.js';
-import { buildPKCEOptions, type PKCEOptions } from './authorization-parameters.js';
-import type { OAuthConfig } from './config.js';
-import { configureLogger, type FidesLogger } from '../shared/logger.js';
 
-function makeOAuthConfig(overrides: Partial<OAuthConfig> = {}): OAuthConfig {
+import type { FidesLogger } from '../shared/logger.js';
+import { createAuthorizationRequest } from './authorization-parameters.js';
+import { authorizationUrl } from './authorization-url.js';
+import type { OidcClientConfig } from './config.js';
+import type { ProtocolContext } from './context.js';
+
+type LogEntry = { level: string; msg?: string; data?: Record<string, unknown> };
+
+const logs: LogEntry[] = [];
+const record = (level: string) => (data?: Record<string, unknown> | string, msg?: string) => {
+  logs.push(typeof data === 'string' ? { level, msg: data } : { level, msg, data });
+};
+const logger: FidesLogger = {
+  debug: record('debug'),
+  info: record('info'),
+  warn: record('warn'),
+  error: record('error'),
+};
+
+function makeConfig(overrides: Partial<OidcClientConfig> = {}): OidcClientConfig {
   return {
     issuer: 'https://auth.example.com',
     clientId: 'test-client',
     clientSecret: 'test-secret',
-    redirect_uri: 'https://app.example.com/callback',
+    redirectUri: 'https://app.example.com/callback',
     scope: 'openid profile email',
     ...overrides,
-  };
+  } as OidcClientConfig;
 }
 
-function makePkce(): PKCEOptions {
-  return {
-    code_verifier: 'verifier-123',
-    code_challenge: 'challenge-abc',
-    state: 'state-xyz',
-    parameters: {
-      redirect_uri: 'https://app.example.com/callback',
-      scope: 'openid profile email',
-      code_challenge: 'challenge-abc',
-      code_challenge_method: 'S256',
-      state: 'state-xyz',
-    },
-  };
-}
+const parameters = {
+  redirect_uri: 'https://app.example.com/callback',
+  scope: 'openid profile email',
+  code_challenge: 'challenge-abc',
+  code_challenge_method: 'S256',
+  state: 'state-xyz',
+};
 
 function makeDiscoveredConfig(parEndpoint?: string): openid.Configuration {
   return {
@@ -62,137 +61,44 @@ function makeDiscoveredConfig(parEndpoint?: string): openid.Configuration {
   } as unknown as openid.Configuration;
 }
 
-type LogEntry = { level: string; msg?: string; data?: Record<string, unknown> };
-
-function installTestLogger(): LogEntry[] {
-  const entries: LogEntry[] = [];
-  const record =
-    (level: string) => (data?: Record<string, unknown> | string, msg?: string) => {
-      const entry: LogEntry = { level };
-      if (typeof data === 'string') {
-        entry.msg = data;
-      } else {
-        if (msg !== undefined) entry.msg = msg;
-        if (data) entry.data = data;
-      }
-      entries.push(entry);
-    };
-  configureLogger({
-    create() {
-      return {
-        debug: record('debug'),
-        info: record('info'),
-        warn: record('warn'),
-        error: record('error'),
-      };
-    },
-  });
-  return entries;
+/** A context whose provider is `discovered`. */
+function ctx(config: OidcClientConfig, discovered: openid.Configuration): ProtocolContext {
+  return { config, configuration: async () => discovered, logger };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Discovery is cached module-globally; without this a case would inherit the
-  // previous case's provider metadata.
-  clearDiscoveryCache();
+  logs.length = 0;
 });
 
-// `installTestLogger()` mutates the module-global logger factory.
-// Restore the default after each test so a test-local factory can't leak
-// into later tests — mirrors the teardown pattern in logger.test.ts.
-afterEach(() => {
-  configureLogger({
-    create({ namespace, context }) {
-      return createDefaultConsoleLogger(namespace, context);
-    },
-  });
-});
+const advisory = () =>
+  logs.find((e) => e.level === 'info' && e.msg?.includes('Provider advertises PAR'));
 
-function createDefaultConsoleLogger(
-  namespace: string,
-  context?: Record<string, unknown>,
-): FidesLogger {
-  const log =
-    (method: 'debug' | 'info' | 'warn' | 'error') =>
-    (data?: Record<string, unknown> | string, msg?: string) => {
-      const entry: Record<string, unknown> = {
-        level: method,
-        time: new Date().toISOString(),
-        namespace,
-        ...context,
-      };
-      if (typeof data === 'string') {
-        entry.msg = data;
-      } else {
-        if (msg !== undefined) entry.msg = msg;
-        if (data) Object.assign(entry, data);
-      }
-      console[method](JSON.stringify(entry));
-    };
-
-  return {
-    debug: log('debug'),
-    info: log('info'),
-    warn: log('warn'),
-    error: log('error'),
-  };
-}
-
-describe('buildAuthorizationUrlWithPAR', () => {
-  it('delegates to openid.buildAuthorizationUrlWithPAR with the PKCE parameters', async () => {
-    const discovered = makeDiscoveredConfig('https://auth.example.com/par');
-    const parUrl = new URL(
-      'https://auth.example.com/authorize?client_id=x&request_uri=urn:ietf:params:oauth:request_uri:1',
-    );
-    vi.mocked(openid.buildAuthorizationUrlWithPAR).mockResolvedValue(parUrl);
-
-    const pkce = makePkce();
-    const result = await buildAuthorizationUrlWithPAR(discovered, pkce);
-
-    expect(openid.buildAuthorizationUrlWithPAR).toHaveBeenCalledWith(
-      discovered,
-      pkce.parameters,
-    );
-    expect(result).toBe(parUrl);
-  });
-
-  it('propagates errors from openid-client', async () => {
-    const discovered = makeDiscoveredConfig('https://auth.example.com/par');
-    vi.mocked(openid.buildAuthorizationUrlWithPAR).mockRejectedValue(new Error('par failed'));
-
-    await expect(
-      buildAuthorizationUrlWithPAR(discovered, makePkce()),
-    ).rejects.toThrow('par failed');
-  });
-});
-
-describe('discoverAndBuildAuthorizationUrl — PAR routing', () => {
+describe('authorizationUrl — PAR routing', () => {
   it('uses PAR when usePar=true and the provider advertises it', async () => {
     const discovered = makeDiscoveredConfig('https://auth.example.com/par');
-    vi.mocked(openid.discovery).mockResolvedValue(discovered);
-    const parUrl = new URL(
-      'https://auth.example.com/authorize?client_id=x&request_uri=urn:1',
-    );
+    const parUrl = new URL('https://auth.example.com/authorize?client_id=x&request_uri=urn:1');
     vi.mocked(openid.buildAuthorizationUrlWithPAR).mockResolvedValue(parUrl);
 
-    const result = await discoverAndBuildAuthorizationUrl(
-      makeOAuthConfig({ usePar: true }),
-      makePkce(),
-    );
+    const result = await authorizationUrl(ctx(makeConfig({ usePar: true }), discovered), parameters);
 
-    expect(openid.buildAuthorizationUrlWithPAR).toHaveBeenCalledTimes(1);
+    expect(openid.buildAuthorizationUrlWithPAR).toHaveBeenCalledWith(discovered, parameters);
     expect(openid.buildAuthorizationUrl).not.toHaveBeenCalled();
     expect(result).toBe(parUrl);
   });
 
-  it('throws when usePar=true but the provider does not advertise PAR', async () => {
-    vi.mocked(openid.discovery).mockResolvedValue(makeDiscoveredConfig());
+  it('propagates errors from openid-client', async () => {
+    vi.mocked(openid.buildAuthorizationUrlWithPAR).mockRejectedValue(new Error('par failed'));
+    const discovered = makeDiscoveredConfig('https://auth.example.com/par');
 
     await expect(
-      discoverAndBuildAuthorizationUrl(
-        makeOAuthConfig({ usePar: true }),
-        makePkce(),
-      ),
+      authorizationUrl(ctx(makeConfig({ usePar: true }), discovered), parameters),
+    ).rejects.toThrow('par failed');
+  });
+
+  it('throws when usePar=true but the provider does not advertise PAR', async () => {
+    await expect(
+      authorizationUrl(ctx(makeConfig({ usePar: true }), makeDiscoveredConfig()), parameters),
     ).rejects.toThrow(/does not advertise pushed_authorization_request_endpoint/);
 
     expect(openid.buildAuthorizationUrlWithPAR).not.toHaveBeenCalled();
@@ -200,64 +106,34 @@ describe('discoverAndBuildAuthorizationUrl — PAR routing', () => {
   });
 
   it('uses the standard flow when usePar is unset and logs an advisory if PAR is advertised', async () => {
-    const discovered = makeDiscoveredConfig('https://auth.example.com/par');
-    vi.mocked(openid.discovery).mockResolvedValue(discovered);
     const authUrl = new URL('https://auth.example.com/authorize?client_id=x');
     vi.mocked(openid.buildAuthorizationUrl).mockReturnValue(authUrl);
+    const discovered = makeDiscoveredConfig('https://auth.example.com/par');
 
-    const logs = installTestLogger();
+    const result = await authorizationUrl(ctx(makeConfig(), discovered), parameters);
 
-    const result = await discoverAndBuildAuthorizationUrl(
-      makeOAuthConfig(),
-      makePkce(),
-    );
-
-    expect(openid.buildAuthorizationUrl).toHaveBeenCalledTimes(1);
+    expect(openid.buildAuthorizationUrl).toHaveBeenCalledWith(discovered, parameters);
     expect(openid.buildAuthorizationUrlWithPAR).not.toHaveBeenCalled();
     expect(result).toBe(authUrl);
-
-    const advisory = logs.find(
-      (e) =>
-        e.level === 'info' &&
-        typeof e.msg === 'string' &&
-        e.msg.includes('Provider advertises PAR but usePar is not enabled'),
-    );
-    expect(advisory).toBeDefined();
-    expect(advisory?.msg).toContain('set OAuthConfig.usePar=true to use it');
+    expect(advisory()?.msg).toContain('set usePar: true in the config to use it');
   });
 
   it('uses the standard flow without advisory when the provider does not advertise PAR', async () => {
-    vi.mocked(openid.discovery).mockResolvedValue(makeDiscoveredConfig());
-    const authUrl = new URL('https://auth.example.com/authorize?client_id=x');
-    vi.mocked(openid.buildAuthorizationUrl).mockReturnValue(authUrl);
+    vi.mocked(openid.buildAuthorizationUrl).mockReturnValue(new URL('https://auth.example.com/authorize'));
 
-    const logs = installTestLogger();
-
-    await discoverAndBuildAuthorizationUrl(makeOAuthConfig(), makePkce());
+    await authorizationUrl(ctx(makeConfig(), makeDiscoveredConfig()), parameters);
 
     expect(openid.buildAuthorizationUrl).toHaveBeenCalledTimes(1);
     expect(openid.buildAuthorizationUrlWithPAR).not.toHaveBeenCalled();
-
-    const advisory = logs.find(
-      (e) =>
-        e.level === 'info' &&
-        typeof e.msg === 'string' &&
-        e.msg.includes('Provider advertises PAR'),
-    );
-    expect(advisory).toBeUndefined();
+    expect(advisory()).toBeUndefined();
   });
 
   it('uses the standard flow when usePar=false even if PAR is advertised', async () => {
-    vi.mocked(openid.discovery).mockResolvedValue(
-      makeDiscoveredConfig('https://auth.example.com/par'),
-    );
     const authUrl = new URL('https://auth.example.com/authorize?client_id=x');
     vi.mocked(openid.buildAuthorizationUrl).mockReturnValue(authUrl);
+    const discovered = makeDiscoveredConfig('https://auth.example.com/par');
 
-    const result = await discoverAndBuildAuthorizationUrl(
-      makeOAuthConfig({ usePar: false }),
-      makePkce(),
-    );
+    const result = await authorizationUrl(ctx(makeConfig({ usePar: false }), discovered), parameters);
 
     expect(openid.buildAuthorizationUrl).toHaveBeenCalledTimes(1);
     expect(openid.buildAuthorizationUrlWithPAR).not.toHaveBeenCalled();
@@ -265,30 +141,34 @@ describe('discoverAndBuildAuthorizationUrl — PAR routing', () => {
   });
 });
 
-describe('discoverAndBuildAuthorizationUrl — extra parameters over PAR', () => {
+describe('authorizationUrl — extra parameters over PAR', () => {
   it('pushes extra parameters and the joined scope to the PAR endpoint', async () => {
     const discovered = makeDiscoveredConfig('https://auth.example.com/par');
-    vi.mocked(openid.discovery).mockResolvedValue(discovered);
     vi.mocked(openid.buildAuthorizationUrlWithPAR).mockResolvedValue(
       new URL('https://auth.example.com/authorize?client_id=x&request_uri=urn:1'),
     );
+    const context = ctx(
+      makeConfig({
+        usePar: true,
+        scope: ['openid', 'profile'],
+        authorizationParameters: { resource: 'https://api.example.com' },
+      }),
+      discovered,
+    );
 
-    const oauthConfig = makeOAuthConfig({
-      usePar: true,
-      scope: ['openid', 'profile'],
-      authorizationParameters: { resource: 'https://api.example.com' },
+    const request = await createAuthorizationRequest(context, {
+      parameters: { login_hint: 'user@example.com' },
     });
-    const pkce = await buildPKCEOptions(oauthConfig, { parameters: { login_hint: 'user@example.com' } });
-    await discoverAndBuildAuthorizationUrl(oauthConfig, pkce);
+    await authorizationUrl(context, request.parameters);
 
     expect(openid.buildAuthorizationUrlWithPAR).toHaveBeenCalledWith(discovered, {
       redirect_uri: 'https://app.example.com/callback',
       scope: 'openid profile',
       resource: 'https://api.example.com',
       login_hint: 'user@example.com',
-      code_challenge: pkce.code_challenge,
+      code_challenge: request.codeChallenge,
       code_challenge_method: 'S256',
-      state: pkce.state,
+      state: request.state,
     });
   });
 });

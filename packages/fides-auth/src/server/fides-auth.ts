@@ -5,7 +5,7 @@
 // from its own cookie API.
 
 import { CookieTooLargeError } from '../shared/cookies.js';
-import { createLogger, type FidesLoggerFactory } from '../shared/logger.js';
+import { consoleLoggerFactory, type FidesLoggerFactory } from '../shared/logger.js';
 import {
   SESSION_EVENT,
   logSessionEvent,
@@ -87,7 +87,7 @@ export interface FidesAuthConfig {
   postLogoutRedirectUri?: string;
   /** Answers false to make a handler respond 429. */
   rateLimit?: (request: Request) => boolean | Promise<boolean>;
-  /** Creates the loggers. Defaults to the factory `configureLogger` set: JSON lines on the console unless changed. */
+  /** Creates the loggers. Defaults to JSON lines on the console. */
   logger?: FidesLoggerFactory;
   /** Gets every session lifecycle event, next to the logger. */
   onSessionEvent?: (event: SessionEvent) => void;
@@ -181,9 +181,6 @@ export interface FidesAuth {
   readonly oidc: OidcClient;
 }
 
-/** The loggers `configureLogger` controls. */
-const configuredLoggers: FidesLoggerFactory = { create: (options) => createLogger(options) };
-
 const NO_STORE = { 'Cache-Control': 'private, no-store' };
 
 /**
@@ -227,12 +224,14 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
   const defaultRedirectPath = config.defaultRedirectPath ?? '/';
   const validateReturnTo = config.validateReturnTo ?? defaultValidateReturnTo;
 
-  const loggers = config.logger ?? configuredLoggers;
+  const loggers = config.logger ?? consoleLoggerFactory;
   const log = {
     login: loggers.create({ namespace: 'fides-auth:server:oidc-login' }),
     callback: loggers.create({ namespace: 'fides-auth:server:oidc-callback' }),
     logout: loggers.create({ namespace: 'fides-auth:server:oidc-logout' }),
     heartbeat: loggers.create({ namespace: 'fides-auth:server:heartbeat' }),
+    returnTo: loggers.create({ namespace: 'fides-auth:server:return-to' }),
+    fetch: loggers.create({ namespace: 'fides-auth:server:authorized-fetch' }),
   };
   const oidc = createOidcClient(oauthConfig, { logger: loggers });
 
@@ -270,7 +269,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
   /** The return path to redirect to: validated, on the app's origin, or the default. */
   function returnUrl(returnTo: string | null | undefined): URL {
     const path = returnTo ? validateReturnTo(returnTo) : null;
-    return validateReturnUrl(path, settings().applicationUrl, defaultRedirectPath);
+    return validateReturnUrl(log.returnTo, path, settings().applicationUrl, defaultRedirectPath);
   }
 
   function loginError(code: string): Response {
@@ -331,10 +330,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
       });
       const url = await oidc.authorizationUrl(authRequest);
 
-      const transaction = createTransaction(
-        { state: authRequest.state, code_verifier: authRequest.codeVerifier },
-        { returnTo },
-      );
+      const transaction = createTransaction(authRequest, { returnTo, logger: log.login });
       try {
         await persistTransaction(cookies, transaction, secret, txCookie);
       } catch (error) {
@@ -374,7 +370,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
         publicUrl.pathname = currentUrl.pathname;
         publicUrl.search = currentUrl.search;
 
-        const transaction = state ? await readTransaction(cookies, state, secret, txCookie) : null;
+        const transaction = state ? await readTransaction(cookies, state, secret, { ...txCookie, logger: log.callback }) : null;
         if (!transaction) {
           log.callback.warn({ error: idpError }, 'Missing login transaction');
           return loginEnded();
@@ -540,7 +536,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
 
     async authorizedFetch(cookies, url, options) {
       const tokens = (await settings().lifecycle.read(cookies)).record?.tokens;
-      return fetchWithTokens(tokens, url, options);
+      return fetchWithTokens(tokens, url, options, log.fetch);
     },
 
     get cookieNames() {
