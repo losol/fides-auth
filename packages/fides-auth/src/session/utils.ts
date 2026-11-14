@@ -1,7 +1,6 @@
 import * as jose from 'jose';
 
 import { createLogger } from '../shared/logger.js';
-import type { Session } from '../shared/types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:utils' });
 
@@ -271,6 +270,6 @@ export const accessTokenExpires = (
  * @param session - The session to check
  * @param scope - The scope string to look for (e.g. "operations.read")
  */
-export function hasScope(session: Session, scope: string): boolean {
+export function hasScope(session: { scopes?: string[] }, scope: string): boolean {
   return session.scopes?.includes(scope) ?? false;
 }

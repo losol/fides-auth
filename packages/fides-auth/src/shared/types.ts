@@ -1,4 +1,4 @@
-/** OAuth/OIDC token set stored in a session. */
+/** The tokens of a session. Only the library and `getTokens` see them. */
 export interface Tokens {
   accessToken?: string;
   /** ISO 8601 string — the session is a JSON/JWT envelope, so dates live as strings on the wire. */
@@ -6,20 +6,48 @@ export interface Tokens {
   refreshToken?: string;
   /** ISO 8601 string — see {@link accessTokenExpiresAt}. */
   refreshTokenExpiresAt?: string;
-  /**
-   * Raw (encoded) ID token, sent as `id_token_hint` on RP-initiated logout. Rides
-   * in the access-token cookie, not the main one — see `server/session-cookies.ts`.
-   */
+  /** Raw (encoded) ID token, sent as `id_token_hint` on RP-initiated logout. */
   idToken?: string;
 }
 
-/** Authenticated user session with tokens, user info, and optional custom data. */
+/** The IdP's own session, from the ID token. Back-channel logout matches on it. */
+export interface IdpSession {
+  iss: string;
+  sub: string;
+  /** The ID token's `sid` claim, when the provider sends one. */
+  sid?: string;
+}
+
+/**
+ * A session as the app sees it. It carries no tokens, so it is safe to hand to
+ * browser code; reach the tokens with `getTokens`.
+ */
 export interface Session<TData = Record<string, unknown>> {
+  /** The library's id for this session, carried across refreshes and logged on every event. */
+  correlationId: string;
+  /** ISO 8601. */
+  createdAt: string;
+  /** ISO 8601. Fixed at login; refreshes don't extend it. */
+  expiresAt: string;
+  /** From the ID token. Absent when the token response has none. */
+  user?: { sub: string; name?: string; email?: string; roles?: string[] };
+  /** Scopes the provider granted (e.g. ["openid", "profile", "email"]). */
+  scopes?: string[];
+  idp?: IdpSession;
+  /** Application data stored with the session. */
+  data?: TData;
+}
+
+/**
+ * A session in the shape the free `/server` functions read and write, with the
+ * tokens inside it.
+ *
+ * @deprecated Use {@link Session} with `createFidesAuth` from `@eventuras/fides-auth/server`.
+ */
+export interface LegacySession<TData = Record<string, unknown>> {
   /**
    * Correlation id for this session, minted at creation and carried across
-   * refreshes. Logged as `sid` on every session lifecycle event so one user's
-   * login, heartbeats and eventual logout can be tied together. Absent on
-   * sessions created before this field existed.
+   * refreshes. Absent on sessions created before this field existed.
    */
   sid?: string;
   tokens?: Tokens;
@@ -35,6 +63,21 @@ export interface Session<TData = Record<string, unknown>> {
   scopes?: string[];
   /** Application-specific data stored alongside the session. */
   data?: TData;
+}
+
+/** What the session info endpoint answers. Never tokens. */
+export interface SessionInfo {
+  authenticated: boolean;
+  user?: Session['user'];
+  scopes?: string[];
+  /** ISO 8601, or null when the provider gave no lifetime. */
+  accessTokenExpiresAt?: string | null;
+}
+
+/** What the heartbeat endpoint answers after a refresh. */
+export interface HeartbeatResponse {
+  /** ISO 8601, or null when the provider gave no lifetime. */
+  accessTokenExpiresAt: string | null;
 }
 
 /** Options for creating or refreshing a session. */

@@ -22,7 +22,7 @@ import {
   type SessionEvent,
   type SessionRejectedReason,
 } from '../shared/session-events.js';
-import type { TokenResponse } from '../shared/types.js';
+import type { Session, TokenResponse } from '../shared/types.js';
 import { hexToUint8Array } from '../session/utils.js';
 import {
   claimsOf,
@@ -33,25 +33,21 @@ import {
   openRecord,
   refreshRecord,
   sealRecord,
-  type SessionData,
   type SessionRecord,
 } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
 import { assertSessionSecret, type SessionSecret } from './session-persistence.js';
 import type { LookupFields, SaveResult, SessionStorage } from './session-storage.js';
 
-/** Why there is no session: a storage's reason, or `session_expired` once the lifetime has run out. */
-export type LifecycleRejectedReason = SessionRejectedReason | 'session_expired';
-
 export type ReadRecordResult =
   | { record: SessionRecord; reason?: undefined }
-  | { record: null; reason: LifecycleRejectedReason };
+  | { record: null; reason: SessionRejectedReason };
 
 export type RefreshRecordResult =
   | { ok: true; record: SessionRecord; rotatedRefreshToken: boolean }
   | {
     ok: false;
-    reason: LifecycleRejectedReason;
+    reason: SessionRejectedReason;
     /** Set only when the provider was asked, that is when `reason` is `refresh_failed`. */
     cause?: RefreshFailureCause;
     correlationId?: string;
@@ -83,7 +79,7 @@ export interface SessionLifecycle {
   /** Changes the user, scopes or data. Null when there is no session to change. */
   update(
     cookies: CookieStore,
-    update: (session: SessionData) => SessionData | Promise<SessionData>,
+    update: (session: Session) => Session | Promise<Session>,
   ): Promise<SessionRecord | null>;
   /** Ends the session. Under store storage, the record is deleted. */
   end(cookies: CookieStore, options?: { trigger?: SessionClearedTrigger }): Promise<void>;
@@ -184,7 +180,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
   function alreadyRefreshed(before: SessionRecord, after: SessionRecord): RefreshRecordResult {
     logger.debug(
-      { sid: after.session.correlationId },
+      { correlationId: after.session.correlationId },
       'Session already refreshed by a concurrent request',
     );
     return {
@@ -216,7 +212,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       const context = getOAuthErrorLogContext(error);
       emit({
         event: SESSION_EVENT.REFRESH_FAILED,
-        sid: correlationId,
+        correlationId,
         cause,
         status: context.status,
         accessTokenExpiresAt: current.tokens.accessTokenExpiresAt,
@@ -229,12 +225,12 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     const rotatedRefreshToken = updated.tokens.refreshToken !== current.tokens.refreshToken;
     const written = await save(cookies, updated, true);
     if (!written.saved) {
-      logger.info({ sid: correlationId }, 'Session ended during refresh; not saved');
+      logger.info({ correlationId }, 'Session ended during refresh; not saved');
       return { ok: false, reason: 'session_not_found', correlationId };
     }
     emit({
       event: SESSION_EVENT.REFRESHED,
-      sid: correlationId,
+      correlationId,
       expiresIn: expiresInSeconds(updated),
       rotatedRefreshToken,
       cookieBytes: written.cookieBytes,
@@ -256,7 +252,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       const written = await save(cookies, record, false);
       emit({
         event: SESSION_EVENT.CREATED,
-        sid: record.session.correlationId,
+        correlationId: record.session.correlationId,
         hasRefreshToken: !!record.tokens.refreshToken,
         scopes: record.session.scopes,
         expiresIn: expiresInSeconds(record),
@@ -312,7 +308,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       if (trigger) {
         emit({
           event: SESSION_EVENT.CLEARED,
-          sid: current?.record?.session.correlationId,
+          correlationId: current?.record?.session.correlationId,
           trigger,
         });
       }

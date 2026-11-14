@@ -4,7 +4,7 @@ import { jwtDecrypt, decodeJwt } from 'jose';
 
 import { createLogger } from '../shared/logger.js';
 import { hexToUint8Array } from './utils.js';
-import { Session } from '../shared/types.js';
+import type { LegacySession as Session } from '../shared/types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:session-validation' });
 

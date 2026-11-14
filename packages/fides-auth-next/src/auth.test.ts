@@ -48,7 +48,7 @@ import { createFidesAuth } from './auth.js';
 import * as core from '@eventuras/fides-auth/server';
 import { createEncryptedJWT } from '@eventuras/fides-auth/utils';
 import type { MapSession } from '@eventuras/fides-auth/oauth';
-import type { Session } from '@eventuras/fides-auth/types';
+import type { LegacySession as Session } from '@eventuras/fides-auth';
 
 const secret = 'a'.repeat(64);
 const oauthConfig = {

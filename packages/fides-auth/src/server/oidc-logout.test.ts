@@ -12,7 +12,7 @@ import { persistSession } from './session.js';
 import { serverPersistence } from './session-persistence.js';
 import { createMemorySessionStore } from './session-store.js';
 import type { CookieStore } from './cookie-store.js';
-import type { Session } from '../shared/types.js';
+import type { LegacySession as Session } from '../shared/types.js';
 import { SESSION_EVENT } from '../shared/session-events.js';
 import { sha256 } from '../session/utils.js';
 

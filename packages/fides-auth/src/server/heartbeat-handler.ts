@@ -90,7 +90,7 @@ export async function handleHeartbeat(
   // Everything left is a session that genuinely cannot continue.
   logSessionEvent(logger, {
     event: SESSION_EVENT.REJECTED,
-    sid: result.sid,
+    correlationId: result.sid,
     reason: result.reason,
     source: 'heartbeat',
   });

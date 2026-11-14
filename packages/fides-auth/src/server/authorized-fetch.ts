@@ -6,7 +6,7 @@
 
 import { createLogger } from '../shared/logger.js';
 import type { RefreshFailureCause, SessionRejectedReason } from '../shared/session-events.js';
-import type { Session } from '../shared/types.js';
+import type { LegacySession as Session } from '../shared/types.js';
 import type { RefreshSessionResult } from './session.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:authorized-fetch' });

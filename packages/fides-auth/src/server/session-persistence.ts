@@ -24,7 +24,7 @@ import {
 } from './session-cookies.js';
 import type { SessionPersistenceMode, SessionRejectedReason } from '../shared/session-events.js';
 import { isSession } from '../session/validation.js';
-import type { Session } from '../shared/types.js';
+import type { LegacySession as Session } from '../shared/types.js';
 import { createEncryptedJWT, decryptJWT, generateToken, sha256 } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
 import type { SessionStore } from './session-store.js';
