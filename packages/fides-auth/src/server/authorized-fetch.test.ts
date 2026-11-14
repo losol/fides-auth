@@ -9,15 +9,9 @@ import type { AddressInfo } from 'node:net';
 import { inspect } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock only the OAuth exchange, so the tryRefreshSessionInStore test runs for real.
-vi.mock('./session-refresh.js', () => ({ refreshSession: vi.fn() }));
-
 import { configureLogger } from '../shared/logger.js';
-import { refreshSession } from './session-refresh.js';
-import type { LegacySession as Session } from '../shared/types.js';
+import type { Tokens } from '../shared/types.js';
 import { AuthorizedFetchError, authorizedFetch } from './authorized-fetch.js';
-import type { CookieStore } from './cookie-store.js';
-import { persistSession, readSession, tryRefreshSessionInStore } from './session.js';
 
 interface Seen {
   path: string;
@@ -82,17 +76,13 @@ async function close(server: Server): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
-const session = (accessToken = 'old-token'): Session => ({
-  sid: 'sid-1',
-  tokens: {
-    accessToken,
-    refreshToken: 'refresh-token',
-    accessTokenExpiresAt: '2099-01-01T00:00:00.000Z',
-  },
-  user: { name: 'Ada', email: 'ada@example.test' },
+const tokens = (accessToken = 'old-token'): Tokens => ({
+  accessToken,
+  refreshToken: 'refresh-token',
+  accessTokenExpiresAt: '2099-01-01T00:00:00.000Z',
 });
 
-const refreshed = () => ({ ok: true as const, session: session('new-token'), rotatedRefreshToken: false });
+const refreshed = () => ({ ok: true as const, tokens: tokens('new-token') });
 
 /** Awaits a rejection and returns it as an AuthorizedFetchError. */
 async function failure(promise: Promise<unknown>): Promise<AuthorizedFetchError> {
@@ -145,7 +135,7 @@ afterEach(() => {
 
 describe('authorizedFetch — allowedBase', () => {
   it('sends the token to a URL under allowedBase', async () => {
-    const result = await authorizedFetch(session(), `${base}/ok`, {
+    const result = await authorizedFetch(tokens(), `${base}/ok`, {
       allowedBase: base,
       parse: (r) => r.json(),
     });
@@ -156,20 +146,20 @@ describe('authorizedFetch — allowedBase', () => {
   });
 
   it('resolves a relative path under the base path, with or without a trailing slash', async () => {
-    await authorizedFetch(session(), 'users/42?page=2', { allowedBase: base });
-    await authorizedFetch(session(), 'users/43', { allowedBase: `${base}/` });
+    await authorizedFetch(tokens(), 'users/42?page=2', { allowedBase: base });
+    await authorizedFetch(tokens(), 'users/43', { allowedBase: `${base}/` });
 
     expect(apiSeen.map((s) => s.path)).toEqual(['/v1/users/42?page=2', '/v1/users/43']);
   });
 
   it('allows the base path itself', async () => {
-    await authorizedFetch(session(), base, { allowedBase: `${base}/` });
+    await authorizedFetch(tokens(), base, { allowedBase: `${base}/` });
 
     expect(apiSeen.map((s) => s.path)).toEqual(['/v1']);
   });
 
   it('allows the whole origin when allowedBase has no path', async () => {
-    await authorizedFetch(session(), '/anything', { allowedBase: api.url });
+    await authorizedFetch(tokens(), '/anything', { allowedBase: api.url });
 
     expect(apiSeen.map((s) => s.path)).toEqual(['/anything']);
   });
@@ -189,7 +179,7 @@ describe('authorizedFetch — allowedBase', () => {
     ['credentials in the URL', () => `http://user:pass@${new URL(api.url).host}/v1/ok`],
     ['an unparseable URL', () => 'http://[::1'],
   ])('refuses %s and sends nothing', async (_, url) => {
-    const error = await failure(authorizedFetch(session(), url(), { allowedBase: base }));
+    const error = await failure(authorizedFetch(tokens(), url(), { allowedBase: base }));
 
     expect(error.reason).toBe('url_not_allowed');
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -199,7 +189,7 @@ describe('authorizedFetch — allowedBase', () => {
 
   it('throws a TypeError for an allowedBase that is relative, not http(s), or has credentials', async () => {
     for (const allowedBase of ['/v1', 'file:///etc/', `http://u:p@${new URL(api.url).host}/v1`]) {
-      await expect(authorizedFetch(session(), 'ok', { allowedBase })).rejects.toThrow(TypeError);
+      await expect(authorizedFetch(tokens(), 'ok', { allowedBase })).rejects.toThrow(TypeError);
     }
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -207,7 +197,7 @@ describe('authorizedFetch — allowedBase', () => {
 
 describe('authorizedFetch — redirects', () => {
   it('refuses a redirect to another origin, so the token never reaches it', async () => {
-    const error = await failure(authorizedFetch(session(), 'redirect-out', { allowedBase: base }));
+    const error = await failure(authorizedFetch(tokens(), 'redirect-out', { allowedBase: base }));
 
     expect(error.reason).toBe('network_error');
     expect(fetchSpy.mock.calls[0]?.[1]?.redirect).toBe('error');
@@ -216,7 +206,7 @@ describe('authorizedFetch — redirects', () => {
   });
 
   it('refuses a redirect inside allowedBase too', async () => {
-    const error = await failure(authorizedFetch(session(), 'redirect-in', { allowedBase: base }));
+    const error = await failure(authorizedFetch(tokens(), 'redirect-in', { allowedBase: base }));
 
     expect(error.reason).toBe('network_error');
     expect(apiSeen.map((s) => s.path)).toEqual(['/v1/redirect-in']);
@@ -226,7 +216,7 @@ describe('authorizedFetch — redirects', () => {
 describe('authorizedFetch — timeout', () => {
   it('times out a request that gets no response', async () => {
     const error = await failure(
-      authorizedFetch(session(), 'slow', { allowedBase: base, timeoutMs: 50 }),
+      authorizedFetch(tokens(), 'slow', { allowedBase: base, timeoutMs: 50 }),
     );
 
     expect(error.reason).toBe('timeout');
@@ -235,7 +225,7 @@ describe('authorizedFetch — timeout', () => {
 
   it('times out a body that stalls while parse reads it', async () => {
     const error = await failure(
-      authorizedFetch(session(), 'stall-body', {
+      authorizedFetch(tokens(), 'stall-body', {
         allowedBase: base,
         timeoutMs: 100,
         parse: (r) => r.json(),
@@ -248,7 +238,7 @@ describe('authorizedFetch — timeout', () => {
   it('defaults to 10 seconds', async () => {
     const timeout = vi.spyOn(AbortSignal, 'timeout');
 
-    await authorizedFetch(session(), 'ok', { allowedBase: base });
+    await authorizedFetch(tokens(), 'ok', { allowedBase: base });
 
     expect(timeout).toHaveBeenCalledWith(10_000);
   });
@@ -257,7 +247,7 @@ describe('authorizedFetch — timeout', () => {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 20);
 
-    const error = await authorizedFetch(session(), 'slow', {
+    const error = await authorizedFetch(tokens(), 'slow', {
       allowedBase: base,
       signal: controller.signal,
     }).catch((e: unknown) => e);
@@ -282,7 +272,7 @@ describe('authorizedFetch — caller signal without AbortSignal.any', () => {
   });
 
   it('sends the request', async () => {
-    const result = await authorizedFetch(session(), 'ok', {
+    const result = await authorizedFetch(tokens(), 'ok', {
       allowedBase: base,
       signal: new AbortController().signal,
       parse: (r) => r.json(),
@@ -297,7 +287,7 @@ describe('authorizedFetch — caller signal without AbortSignal.any', () => {
     const reason = new Error('navigated away');
     setTimeout(() => controller.abort(reason), 20);
 
-    const error = await authorizedFetch(session(), 'slow', {
+    const error = await authorizedFetch(tokens(), 'slow', {
       allowedBase: base,
       signal: controller.signal,
     }).catch((e: unknown) => e);
@@ -310,7 +300,7 @@ describe('authorizedFetch — caller signal without AbortSignal.any', () => {
     const reason = new Error('too late');
     const signal = AbortSignal.abort(reason);
 
-    const error = await authorizedFetch(session(), 'ok', { allowedBase: base, signal }).catch(
+    const error = await authorizedFetch(tokens(), 'ok', { allowedBase: base, signal }).catch(
       (e: unknown) => e,
     );
 
@@ -323,7 +313,7 @@ describe('authorizedFetch — caller signal without AbortSignal.any', () => {
     const { signal } = new AbortController();
 
     const error = await failure(
-      authorizedFetch(session(), 'slow', { allowedBase: base, signal, timeoutMs: 50 }),
+      authorizedFetch(tokens(), 'slow', { allowedBase: base, signal, timeoutMs: 50 }),
     );
 
     expect(error.reason).toBe('timeout');
@@ -335,29 +325,29 @@ describe('authorizedFetch — caller signal without AbortSignal.any', () => {
     const { signal } = new AbortController();
     const options = { allowedBase: base, signal, parse: (r: Response) => r.json() };
 
-    await authorizedFetch(session(), 'ok', options);
+    await authorizedFetch(tokens(), 'ok', options);
     expect(listeners(signal)).toHaveLength(0);
 
     // Two requests: the 401 and the retry.
-    await authorizedFetch(session(), 'protected', { ...options, refresh: async () => refreshed() });
+    await authorizedFetch(tokens(), 'protected', { ...options, refresh: async () => refreshed() });
     expect(listeners(signal)).toHaveLength(0);
 
-    await failure(authorizedFetch(session(), 'redirect-in', options));
+    await failure(authorizedFetch(tokens(), 'redirect-in', options));
     expect(listeners(signal)).toHaveLength(0);
 
     const invalid = () => { throw new Error('invalid body'); };
-    await failure(authorizedFetch(session(), 'ok', { ...options, parse: invalid }));
+    await failure(authorizedFetch(tokens(), 'ok', { ...options, parse: invalid }));
     expect(listeners(signal)).toHaveLength(0);
 
     // No body, so nothing is left to read.
-    await authorizedFetch(session(), 'empty', { allowedBase: base, signal });
+    await authorizedFetch(tokens(), 'empty', { allowedBase: base, signal });
     expect(listeners(signal)).toHaveLength(0);
   });
 
   it('times out a body that parse hands back unread', async () => {
     const { signal } = new AbortController();
 
-    const { data } = await authorizedFetch(session(), 'stall-body', {
+    const { data } = await authorizedFetch(tokens(), 'stall-body', {
       allowedBase: base,
       signal,
       timeoutMs: 100,
@@ -371,7 +361,7 @@ describe('authorizedFetch — caller signal without AbortSignal.any', () => {
   it('times out a body the caller reads after the call', async () => {
     const { signal } = new AbortController();
 
-    const { response } = await authorizedFetch(session(), 'stall-body', {
+    const { response } = await authorizedFetch(tokens(), 'stall-body', {
       allowedBase: base,
       signal,
       timeoutMs: 100,
@@ -385,7 +375,7 @@ describe('authorizedFetch — caller signal without AbortSignal.any', () => {
     const controller = new AbortController();
     const reason = new Error('navigated away');
 
-    const { response } = await authorizedFetch(session(), 'stall-body', {
+    const { response } = await authorizedFetch(tokens(), 'stall-body', {
       allowedBase: base,
       signal: controller.signal,
     });
@@ -400,7 +390,7 @@ describe('authorizedFetch — caller signal without AbortSignal.any', () => {
 describe('authorizedFetch — errors and parse', () => {
   it('turns a non-2xx into an http_error without the query or the token', async () => {
     const error = await failure(
-      authorizedFetch(session(), 'missing?email=ada%40example.test', {
+      authorizedFetch(tokens(), 'missing?email=ada%40example.test', {
         allowedBase: base,
         method: 'post',
         body: '{}',
@@ -421,7 +411,7 @@ describe('authorizedFetch — errors and parse', () => {
   });
 
   it('returns what parse returns', async () => {
-    const result = await authorizedFetch(session(), 'ok', {
+    const result = await authorizedFetch(tokens(), 'ok', {
       allowedBase: base,
       parse: async (r) => {
         const body = (await r.json()) as { hello?: unknown };
@@ -434,7 +424,7 @@ describe('authorizedFetch — errors and parse', () => {
   });
 
   it('leaves data undefined without parse', async () => {
-    const result = await authorizedFetch(session(), 'ok', { allowedBase: base });
+    const result = await authorizedFetch(tokens(), 'ok', { allowedBase: base });
 
     expect(result.data).toBeUndefined();
     expect(result.response.status).toBe(200);
@@ -443,7 +433,7 @@ describe('authorizedFetch — errors and parse', () => {
   it('wraps a parse failure as parse_failed', async () => {
     const invalid = new Error('invalid body');
     const error = await failure(
-      authorizedFetch(session(), 'ok', {
+      authorizedFetch(tokens(), 'ok', {
         allowedBase: base,
         parse: () => { throw invalid; },
       }),
@@ -458,13 +448,13 @@ describe('authorizedFetch — errors and parse', () => {
     const gone = await listen(() => undefined);
     await close(gone.server);
 
-    const error = await failure(authorizedFetch(session(), `${gone.url}/x`, { allowedBase: gone.url }));
+    const error = await failure(authorizedFetch(tokens(), `${gone.url}/x`, { allowedBase: gone.url }));
 
     expect(error.reason).toBe('network_error');
   });
 
-  it('sends nothing for a session without an access token', async () => {
-    const error = await failure(authorizedFetch({ sid: 'sid-1' }, 'ok', { allowedBase: base }));
+  it('sends nothing without an access token', async () => {
+    const error = await failure(authorizedFetch({}, 'ok', { allowedBase: base }));
 
     expect(error.reason).toBe('no_access_token');
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -475,7 +465,7 @@ describe('authorizedFetch — refresh on 401', () => {
   it('refreshes once and retries with the new token', async () => {
     const refresh = vi.fn(async () => refreshed());
 
-    const result = await authorizedFetch(session(), 'protected', {
+    const result = await authorizedFetch(tokens(), 'protected', {
       allowedBase: base,
       refresh,
       parse: (r) => r.json(),
@@ -483,30 +473,18 @@ describe('authorizedFetch — refresh on 401', () => {
 
     expect(result.data).toEqual({ hello: 'again' });
     expect(result.refreshed).toBe(true);
-    expect(result.session.tokens?.accessToken).toBe('new-token');
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(apiSeen.map((s) => s.authorization)).toEqual(['Bearer old-token', 'Bearer new-token']);
   });
 
-  it('accepts a session from refreshSessionInStore', async () => {
-    const result = await authorizedFetch(session(), 'protected', {
-      allowedBase: base,
-      refresh: async () => session('new-token'),
-    });
-
-    expect(result.refreshed).toBe(true);
-    expect(apiSeen).toHaveLength(2);
-  });
-
   it('does not retry when the refresh fails, and says why', async () => {
     const error = await failure(
-      authorizedFetch(session(), 'protected', {
+      authorizedFetch(tokens(), 'protected', {
         allowedBase: base,
         refresh: async () => ({
           ok: false,
           reason: 'refresh_failed',
           cause: 'invalid_grant',
-          sid: 'sid-1',
         }),
       }),
     );
@@ -517,23 +495,27 @@ describe('authorizedFetch — refresh on 401', () => {
     expect(apiSeen).toHaveLength(1);
   });
 
-  it('does not retry when refreshSessionInStore returns null or the refresh throws', async () => {
+  it('does not retry when the refresh throws', async () => {
     const boom = new Error('store down');
-    for (const refresh of [async () => null, async () => { throw boom; }]) {
-      const error = await failure(
-        authorizedFetch(session(), 'protected', { allowedBase: base, refresh }),
-      );
-      expect(error.reason).toBe('refresh_failed');
-    }
+    const error = await failure(
+      authorizedFetch(tokens(), 'protected', {
+        allowedBase: base,
+        refresh: async () => {
+          throw boom;
+        },
+      }),
+    );
 
-    expect(apiSeen).toHaveLength(2); // one per call, no retries
+    expect(error.reason).toBe('refresh_failed');
+    expect(error.cause).toBe(boom);
+    expect(apiSeen).toHaveLength(1);
   });
 
   it('refreshes only once: a second 401 is an http_error', async () => {
     const refresh = vi.fn(async () => refreshed());
 
     const error = await failure(
-      authorizedFetch(session(), 'always-401', { allowedBase: base, refresh }),
+      authorizedFetch(tokens(), 'always-401', { allowedBase: base, refresh }),
     );
 
     expect(error.reason).toBe('http_error');
@@ -543,45 +525,21 @@ describe('authorizedFetch — refresh on 401', () => {
   });
 
   it('treats a 401 as an http_error without refresh', async () => {
-    const error = await failure(authorizedFetch(session(), 'protected', { allowedBase: base }));
+    const error = await failure(authorizedFetch(tokens(), 'protected', { allowedBase: base }));
 
     expect(error.reason).toBe('http_error');
     expect(apiSeen).toHaveLength(1);
-  });
-
-  it('works with tryRefreshSessionInStore, which persists the new session', async () => {
-    const secret = 'a'.repeat(64);
-    const jar = new Map<string, string>();
-    const store: CookieStore = {
-      get: (name) => jar.get(name) ?? null,
-      set: (name, value) => { jar.set(name, value); },
-      delete: (name) => { jar.delete(name); },
-    };
-    const oauthConfig = {
-      issuer: 'https://idp.test',
-      clientId: 'c',
-      clientSecret: 's',
-      redirect_uri: 'https://app.test/cb',
-      scope: 'openid',
-    };
-    await persistSession(store, session(), secret);
-    vi.mocked(refreshSession).mockResolvedValue(session('new-token'));
-
-    const result = await authorizedFetch(session(), 'protected', {
-      allowedBase: base,
-      refresh: () => tryRefreshSessionInStore(store, oauthConfig, secret),
-    });
-
-    expect(result.session.tokens?.accessToken).toBe('new-token');
-    expect((await readSession(store, secret))?.tokens?.accessToken).toBe('new-token');
   });
 });
 
 describe('authorizedFetch — logging', () => {
   it('never logs a token', async () => {
-    await authorizedFetch(session(), `${other.url}/v1/ok?x=1`, { allowedBase: base }).catch(() => undefined);
-    await authorizedFetch(session(), 'protected', { allowedBase: base, refresh: async () => refreshed() });
-    await authorizedFetch(session(), 'always-401', { allowedBase: base, refresh: async () => null }).catch(() => undefined);
+    await authorizedFetch(tokens(), `${other.url}/v1/ok?x=1`, { allowedBase: base }).catch(() => undefined);
+    await authorizedFetch(tokens(), 'protected', { allowedBase: base, refresh: async () => refreshed() });
+    await authorizedFetch(tokens(), 'always-401', {
+      allowedBase: base,
+      refresh: async () => ({ ok: false as const, reason: 'refresh_failed' as const }),
+    }).catch(() => undefined);
 
     const logged = inspect(logs, { depth: 10 });
     expect(logs.length).toBeGreaterThan(0);

@@ -1,54 +1,34 @@
 # Server-side sessions
 
-By default fides-auth keeps the whole session, tokens included, encrypted in
-three cookies. That stops working when one token alone is bigger than a cookie.
-OpenIddict, for one, encrypts access and refresh tokens (JWE); once fides-auth
-encrypts and base64-encodes them again, a split cookie crosses 4096 bytes, the
-browser drops it, and the login loops.
+By default fides-auth seals the whole session, tokens included, into the
+`__Host-session` cookie, cut into up to three chunks. That stops working when
+the tokens are bigger than three cookies. OpenIddict, for one, encrypts access
+and refresh tokens (JWE). Once fides-auth seals them again, the session no
+longer fits, and the callback answers 431.
 
-Server persistence is the opt-in fix: the session lives in a `SessionStore` you
-provide, and the browser holds one small cookie with a random handle. It also
-buys three things a cookie cannot offer: real revocation, one refresh per
-session under concurrency, and a cookie that is worthless without the store.
+A `SessionStore` is the opt-in fix: the session lives in a store you provide,
+and the browser holds one small cookie with a random handle. It also buys three
+things a cookie can't offer: real revocation, one refresh per session across
+instances, and a cookie that is worthless without the store.
 
 ## Wiring
 
 ```ts
-import {
-  handleOidcCallback,
-  handleHeartbeat,
-  handleOidcLogout,
-  serverPersistence,
-  tryReadSession,
-  clearSession,
-} from "@eventuras/fides-auth/server";
+import { createFidesAuth } from "@eventuras/fides-auth/server";
 
-const secret = process.env.SESSION_SECRET!;
-const persistence = serverPersistence({
-  store: sessionStore, // your SessionStore — see below
-  secret,
+export const auth = createFidesAuth({
+  oauthConfig,
+  secret: process.env.SESSION_SECRET!,
+  sessionStore, // your SessionStore, see below
 });
-
-// Handlers: pass `persistence` where you passed `secret`. Login and callback
-// still take `secret`, which seals the login transaction.
-handleOidcCallback(request, { oauthConfig, applicationUrl, cookies, secret, persistence });
-handleHeartbeat(request, { oauthConfig, cookies, persistence });
-handleOidcLogout(request, { oauthConfig, cookies, postLogoutRedirectUri, persistence });
-
-// Session helpers: `persistence` goes in the secret's position.
-const { session, reason } = await tryReadSession(cookies, persistence);
-await clearSession(cookies, { trigger: "logout", persistence });
 ```
 
-Cookie persistence stays the default: a bare secret means
-`cookiePersistence(secret)`, and nothing changes for consumers that don't opt in.
+Every handler and session member on `auth` then uses the store. `secret` is
+still required: it seals the records and the login transaction. Next.js apps
+pass the same option to `createFidesAuth` from `@eventuras/fides-auth-next`.
 
-The secret is checked on first use, not when the persistence is created, so a
-module can build it at import time in a build that runs without the secret.
-
-`serverPersistence` takes two more options: `cookieName` (default
-`session_ref`) and `sessionDurationDays` (default 30), the absolute lifetime of
-a session from login, refreshes notwithstanding.
+A session lasts `sessionDurationDays` (30 by default) from login, and refreshes
+don't extend it. The handle cookie expires with it.
 
 ## The store contract
 
@@ -61,24 +41,28 @@ interface SessionStore {
 }
 
 interface StoredSession {
-  data: string;       // the session, encrypted under the secret
-  expiresAt: string;  // ISO 8601, absolute
-  sid?: string;       // correlation id, so a record can be found from a log line
+  data: string;           // the sealed session; opaque to the store
+  expiresAt: string;      // ISO 8601, absolute
+  correlationId?: string; // so a record can be found from a log line
+  iss?: string;           // the ID token's issuer
+  subHash?: string;       // HMAC of the ID token's sub, never sub itself
+  idpSidHash?: string;    // HMAC of the ID token's sid claim
 }
 ```
 
-Keys are `SHA-256(handle)` as hex, never the handle itself. On the library's
-side:
+Keys are `SHA-256(handle)` as hex, never the handle itself. Save every field the
+library sets: `iss`, `subHash` and `idpSidHash` are what finds a user's sessions
+for back-channel logout. On the library's side:
 
-- `data` is encrypted before `set` and decrypted after `get`. A store dump alone
+- `data` is sealed before `set` and opened after `get`. A store dump alone
   yields no tokens.
-- `expiresAt` is checked on every read. An expired record is rejected and
-  deleted whatever the adapter returned, so a late TTL sweep never revives a
-  session.
+- `expiresAt` is checked on every read, so a late TTL sweep never revives a
+  session. An expired record reads as `session_expired`; a store that drops it
+  first reads as `session_not_found`.
 - `expiresAt` is fixed at login and kept across refreshes.
 
 `createMemorySessionStore()` ships for tests and single-instance development;
-sessions do not survive a restart. Database adapters belong in your app. A
+sessions don't survive a restart. Database adapters belong in your app. A
 MongoDB one, with the TTL index doing the sweeping:
 
 ```ts
@@ -91,7 +75,9 @@ await sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 export const sessionStore: SessionStore = {
   async get(key) {
     const doc = await sessions.findOne({ _id: key });
-    return doc && { data: doc.data, sid: doc.sid, expiresAt: doc.expiresAt.toISOString() };
+    if (!doc) return null;
+    const { _id, expiresAt, ...record } = doc;
+    return { ...record, expiresAt: expiresAt.toISOString() };
   },
   async set(key, record) {
     await sessions.replaceOne(
@@ -109,46 +95,48 @@ export const sessionStore: SessionStore = {
 ## Refresh under concurrency
 
 Two requests refreshing one session at once is the failure mode of rotating
-refresh tokens: both spend the token, one wins, the other now holds a dead one.
-OpenIddict goes further and treats the reuse as theft, revoking the whole
-authorization. Under server persistence `tryRefreshSessionInStore`:
+refresh tokens: both spend the token, one wins, and the other now holds a dead
+one. OpenIddict goes further and treats the reuse as theft, revoking the whole
+authorization. The instance:
 
-- coalesces concurrent calls within one process into a single token request,
-  and hands every caller the same result;
+- joins concurrent refreshes of one session within one process into a single
+  token request, and hands every caller the same result;
 - takes `store.withLock(key)` when the adapter provides it, and re-reads the
-  record under the lock, so a refresh that already happened on another instance
-  is reused rather than repeated;
-- on `invalid_grant`, re-reads once more before ending the session, in case a
-  concurrent refresh elsewhere spent the token first.
+  record under the lock, so a refresh another instance already did is reused
+  rather than repeated;
+- on `invalid_grant`, re-reads once more before giving up, in case a concurrent
+  refresh elsewhere spent the token first.
 
 Implement `withLock` when you run more than one instance. Give the lock a
-timeout, so a crashed holder does not wedge the session.
+timeout, so a crashed holder doesn't wedge the session.
+
+A refresh keeps the handle, so it writes no cookie. It works where cookies
+can't be set, such as a Next.js Server Component.
 
 ## Security notes
 
 - **Handle.** 256 bits from `crypto.getRandomValues`, hex-encoded, in
-  `session_ref` with `httpOnly`, `secure`, `SameSite=Lax` and a max-age equal
-  to the session lifetime. The library never logs it.
+  `__Host-session` with `HttpOnly`, `Secure`, `SameSite=Lax` and a max-age
+  equal to the time left in the session. The library never logs it.
 - **Key.** `SHA-256(handle)`. Neither a leaked store nor a logged key can be
   replayed as a cookie.
 - **Fixation.** Every login mints a new handle and deletes the record the old
-  one pointed at. Only a refresh keeps the handle.
-- **Revocation.** `clearSession` deletes the record before the cookie. From
-  then on a copied cookie reads as `session_not_found`.
-- **At rest.** Records are encrypted with the same secret as cookie sessions.
+  one pointed at. Only a refresh or an update keeps the handle.
+- **Revocation.** Logout and `clearSession` delete the record before the
+  cookie. From then on a copied cookie reads as `session_not_found`.
+- **At rest.** Records are sealed with the same secret as cookie sessions.
   Rotating the secret ends stored sessions (`unreadable_session`), as it ends
   cookie ones.
 
 ## Switching from cookies
 
-A browser that arrives with the old `session` / `session_at` / `session_it`
-cookies and no handle reads as `stale_legacy_session`: one re-login, logged as
-such rather than as corruption. The next write under server persistence, and
-any logout, deletes the old cookies.
+A browser that still carries a cookie session when the app moves to a store
+sends a value that isn't a handle. It reads as `unreadable_session`, which
+costs one re-login. The login deletes the cookie chunks.
 
 ## What the logs say
 
 `session.created` and `session.refreshed` carry `persistence: "server"` and no
-`cookieBytes`. The one new rejection reason is `session_not_found`: a handle was
-sent, but no live record exists for it. Revoked, expired or evicted. See
-[session-events.md](./session-events.md).
+`cookieBytes`. The store adds one rejection reason, `session_not_found`: a
+handle was sent, but no live record exists for it. Revoked, expired or evicted.
+See [session-events.md](./session-events.md).

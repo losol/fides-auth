@@ -43,7 +43,6 @@ endpoint all report the same word for the same situation.
 | `reason`               | Level | Means                                                          |
 | ---------------------- | ----- | -------------------------------------------------------------- |
 | `no_session_cookie`    | debug | No cookie was sent. The ordinary anonymous case.                |
-| `stale_legacy_session` | info  | A pre-split single-cookie session, or split cookies under server persistence. Costs one re-login. |
 | `session_not_found`    | info  | A handle was sent but the server store has no live record: revoked, expired or evicted. Server persistence only. |
 | `session_expired`      | info  | The session's lifetime has run out. Refreshes don't extend it, so the user logs in again. |
 | `refresh_failed`       | info  | The provider rejected the refresh token. See `cause`.           |
@@ -124,16 +123,17 @@ you debug one.
 Any hit here guarantees logouts at access-token TTL. Alert on it: it should be
 zero.
 
-**Are sessions about to outgrow the cookie?**
+**Are sessions about to outgrow the cookies?**
 
 ```logql
-{app="web"} | json | event =~ `session\.(created|refreshed)` | cookieBytes > 3500
+{app="web"} | json | event =~ `session\.(created|refreshed)` | cookieBytes > 10000
 ```
 
-Browsers drop a cookie over ~4096 bytes silently, producing a login that appears
-to work and then doesn't. Under [server persistence](./server-sessions.md) the
-cookie holds only a handle, so `cookieBytes` is absent and `persistence` is
-`server`.
+The session is cut into at most three cookies of up to 4096 bytes, and
+`cookieBytes` counts them all. A session that doesn't fit fails at login with
+431, rather than being dropped by the browser. With a
+[`sessionStore`](./server-sessions.md) the cookie holds only a handle, so
+`cookieBytes` is absent and `persistence` is `server`.
 
 ## Suggested alerts
 
@@ -142,7 +142,7 @@ cookie holds only a handle, so `cookieBytes` is absent and `persistence` is
 | any `session.created` with `hasRefreshToken=false` | Guaranteed logouts at access-token TTL. |
 | `session.refresh_failed` with `cause=idp_error` above baseline | The provider is failing. |
 | `session.rejected` with `reason=unreadable_session` above ~0 | Corruption, or a secret rotated without draining sessions. |
-| `cookieBytes` p99 approaching 4096 | Sessions about to break silently. |
+| `cookieBytes` p99 approaching 12000 | Sessions about to stop fitting: logins start failing with 431. |
 
 Rate-of-`invalid_grant` is deliberately *not* on this list — it rises whenever an
 SSO lifetime ends, which is normal.
@@ -170,15 +170,14 @@ unrecognised value is dropped rather than passed through.
 
 ## Consuming the vocabulary
 
-`tryReadSession` and `tryRefreshSessionInStore` return the reason and cause
-instead of a bare `null`, so your own proxy and status routes can log the same
-words the library does:
+`tryReadSession` and `refreshSession` on the `createFidesAuth` instance return
+the reason and cause instead of a bare `null`, so your own proxy and status
+routes can log the same words the library does:
 
 ```ts
-import { tryReadSession } from "@eventuras/fides-auth/server";
 import { SESSION_EVENT, logSessionEvent } from "@eventuras/fides-auth/session-events";
 
-const { session, reason } = await tryReadSession(cookies, secret);
+const { session, reason } = await auth.tryReadSession(cookies);
 if (!session) {
   logSessionEvent(logger, {
     event: SESSION_EVENT.REJECTED,
@@ -192,17 +191,13 @@ if (!session) {
 `logSessionEvent` picks the level from the policy above, so every caller stays
 consistent without repeating it.
 
-Next.js apps get the same from `createFidesAuth` in `@eventuras/fides-auth-next`,
-without a cookie store. Its `tryReadSession` is cached per render together with
-`readSession`, so asking for the reason costs no extra decrypt:
+`refreshSession` returns `cause` on failure, so a route can answer 503 rather
+than end a session over a provider blip.
+
+In Next.js, `createFidesAuth` from `@eventuras/fides-auth-next` has the same
+members without the cookie argument. Its `tryReadSession` is cached per render
+together with `readSession`, so asking for the reason costs no extra decrypt:
 
 ```ts
-import { createFidesAuth } from "@eventuras/fides-auth-next";
-
-const auth = createFidesAuth({ oauthConfig, secret: process.env.SESSION_SECRET! });
-
 const { session, reason } = await auth.tryReadSession();
 ```
-
-`auth.refreshSession` is the matching refresh. It returns `cause`, so a route can
-answer 503 rather than end a session over a provider blip.

@@ -1,12 +1,8 @@
 // cookies.ts
 //
-// Framework-agnostic cookie attributes, size limits, and the access-token cookie
-// name. This module performs no I/O — it never reads or writes cookies. Framework
-// adapters (Next.js, React Router, …) own the actual cookie store and use these
-// values and helpers to configure and size-check the cookies they set.
-//
-// The companion module `server/session-cookies.ts` encodes/decodes a session into cookie
-// *values*; this module is about the cookie *attributes* and *limits*.
+// Framework-agnostic cookie attributes and size limits. This module performs no
+// I/O: it never reads or writes cookies. The session storages in
+// `server/session-storage.ts` use these values to set and size-check theirs.
 
 /**
  * Browser per-cookie size limit (RFC 6265: browsers must support at least
@@ -98,39 +94,21 @@ export const defaultOAuthCookieOptions: CookieOptions = {
   secure: true,
 };
 
-/**
- * Name of the cookie holding the (split-out) access token.
- *
- * The access token — typically a large JWT carrying scopes/roles — is stored in
- * its own cookie so it gets a full per-cookie byte budget, instead of competing
- * for space with the rest of the session inside a single "session" cookie. See
- * {@link CookieTooLargeError} for the limit this works around.
- */
+// The cookie names of the earlier session format, which split the session into
+// a session, an access token and an ID token cookie, or a handle cookie with a
+// store. Nothing writes them any more; the session storages delete them when
+// they write a session (`LEGACY_COOKIE_NAMES` in `server/session-storage.ts`).
+
+/** The earlier format's access token cookie. */
 export const ACCESS_TOKEN_COOKIE_NAME = 'session_at';
 
-/**
- * Name of the cookie holding the (split-out) ID token, kept for `id_token_hint`
- * on RP-initiated logout.
- *
- * It gets its own cookie for two reasons: it is a second large JWT, which would
- * eat into the access token's byte budget, and it must outlive access-token
- * expiry — a logout after the session has gone stale is exactly when the hint is
- * needed.
- */
+/** The earlier format's ID token cookie. */
 export const ID_TOKEN_COOKIE_NAME = 'session_it';
 
-/**
- * Name of the main session cookie (everything except the split-out access and ID
- * tokens). See {@link ACCESS_TOKEN_COOKIE_NAME} for why the raw tokens are stored
- * apart.
- */
+/** The earlier format's main session cookie. */
 export const SESSION_COOKIE_NAME = 'session';
 
-/**
- * Name of the cookie holding the opaque session handle under server
- * persistence, where the session itself lives in a `SessionStore` and no token
- * reaches the browser. See `server/session-persistence.ts`.
- */
+/** The earlier format's handle cookie, with a session store. */
 export const SESSION_REF_COOKIE_NAME = 'session_ref';
 
 /**

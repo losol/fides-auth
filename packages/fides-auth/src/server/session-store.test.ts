@@ -8,8 +8,8 @@ describe('createMemorySessionStore', () => {
   it('stores, returns and deletes records', async () => {
     const store = createMemorySessionStore();
 
-    await store.set('k', { data: 'd', expiresAt: future, sid: 's' });
-    expect(await store.get('k')).toEqual({ data: 'd', expiresAt: future, sid: 's' });
+    await store.set('k', { data: 'd', expiresAt: future, correlationId: 's' });
+    expect(await store.get('k')).toEqual({ data: 'd', expiresAt: future, correlationId: 's' });
 
     await store.delete('k');
     expect(await store.get('k')).toBeNull();

@@ -46,7 +46,7 @@ describe('sessionEventLevel — rejection reasons', () => {
   });
 
   it('treats an expected end-of-life session as info, not warn', () => {
-    for (const reason of ['stale_legacy_session', 'refresh_failed'] as const) {
+    for (const reason of ['session_expired', 'session_not_found', 'refresh_failed'] as const) {
       expect(sessionEventLevel({ event: SESSION_EVENT.REJECTED, reason }), reason).toBe('info');
     }
   });
@@ -65,7 +65,7 @@ describe('sessionEventLevel — rejection reasons', () => {
 describe('sessionEventLevel — refresh causes', () => {
   it('escalates by whose fault the failure is', () => {
     const level = (cause: 'invalid_grant' | 'transport' | 'idp_error') =>
-      sessionEventLevel({ event: SESSION_EVENT.REFRESH_FAILED, cause, sid: 'x' });
+      sessionEventLevel({ event: SESSION_EVENT.REFRESH_FAILED, cause, correlationId: 'x' });
 
     // Expected end of an SSO lifetime — not an incident.
     expect(level('invalid_grant')).toBe('info');
@@ -82,7 +82,7 @@ describe('logSessionEvent', () => {
 
     logSessionEvent(logger, {
       event: SESSION_EVENT.CREATED,
-      sid: 'abc123',
+      correlationId: 'abc123',
       hasRefreshToken: true,
       scopes: ['openid', 'offline_access'],
       expiresIn: 300,
@@ -92,7 +92,7 @@ describe('logSessionEvent', () => {
     expect(logger.info).toHaveBeenCalledWith(
       {
         event: 'session.created',
-        sid: 'abc123',
+        correlationId: 'abc123',
         hasRefreshToken: true,
         scopes: ['openid', 'offline_access'],
         expiresIn: 300,
@@ -107,11 +107,11 @@ describe('logSessionEvent', () => {
 
     logSessionEvent(logger, {
       event: SESSION_EVENT.CREATED,
-      sid: undefined,
+      correlationId: undefined,
       hasRefreshToken: false,
     });
 
-    // A `"sid":null` in every anonymous line is noise the log backend has to
+    // A `"correlationId":null` in every anonymous line is noise the log backend has to
     // index for nothing.
     expect(logger.info).toHaveBeenCalledWith(
       { event: 'session.created', hasRefreshToken: false },

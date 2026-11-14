@@ -31,43 +31,33 @@ yarn add @eventuras/fides-auth
 
 ## Quick Start
 
-### Node.js — OAuth with PKCE
+The server side of an app is one object from `/server`. Its members take the
+`Request` and a `CookieStore`, a small adapter over your framework's cookies:
 
 ```typescript
-import {
-  buildPKCEOptions,
-  buildAuthorizationUrl,
-  exchangeAuthorizationCode,
-} from "@eventuras/fides-auth/oauth";
-import { validateSessionJwt, createEncryptedJWT } from "@eventuras/fides-auth";
+import { createFidesAuth } from "@eventuras/fides-auth/server";
 
-const oauthConfig = {
-  issuer: "https://auth.example.com",
-  clientId: "your-client-id",
-  clientSecret: "your-client-secret",
-  redirect_uri: "https://app.example.com/callback",
-  scope: "openid profile email offline_access",
-};
+export const auth = createFidesAuth({
+  oauthConfig: {
+    issuer: "https://auth.example.com",
+    clientId: "your-client-id",
+    clientSecret: process.env.OIDC_CLIENT_SECRET!,
+    redirectUri: "https://app.example.com/api/auth/callback",
+    scope: "openid profile email offline_access",
+  },
+  secret: process.env.SESSION_SECRET!, // openssl rand -hex 32
+});
 
-// 1. Start login — redirect user to auth URL
-const pkce = await buildPKCEOptions(oauthConfig);
-const authUrl = await buildAuthorizationUrl(oauthConfig, pkce);
+// Route handlers
+const login = (request: Request) => auth.handleOidcLogin(request, cookies);
+const callback = (request: Request) => auth.handleOidcCallback(request, cookies);
 
-// 2. Handle callback — exchange code for tokens
-const tokens = await exchangeAuthorizationCode(
-  oauthConfig,
-  callbackUrl,
-  pkce.code_verifier,
-  pkce.state,
-);
-
-// 3. Create encrypted session
-const secret = "0123456789abcdef..."; // 64 hex chars (32 bytes)
-const jwt = await createEncryptedJWT({ user, tokens }, secret);
-
-// 4. Validate session later
-const { status, session } = await validateSessionJwt(jwt, secret);
+// Anywhere on the server
+const session = await auth.readSession(cookies);
 ```
+
+Next.js apps use [`@eventuras/fides-auth-next`](../fides-auth-next), which binds
+the instance to `cookies()`. See [Server](#server-server) for the rest.
 
 ## Modules
 
@@ -75,20 +65,18 @@ Each module is available as a separate entry point for tree-shaking:
 
 | Entry Point                                | Environment | Description                                           |
 | ------------------------------------------ | ----------- | ----------------------------------------------------- |
-| `@eventuras/fides-auth`                    | Node.js     | Main entry — re-exports utils, session, types, logger |
+| `@eventuras/fides-auth`                    | Universal   | Types, and the utilities, logger and session events   |
 | `@eventuras/fides-auth/oauth`              | Node.js     | **Deprecated** — use `/oidc`                          |
 | `@eventuras/fides-auth/oidc`               | Universal   | The OIDC client (`createOidcClient`) and pure helpers |
 | `@eventuras/fides-auth/pkce`               | Universal   | **Deprecated** — same functions on `/oidc`            |
 | `@eventuras/fides-auth/id-token`           | Universal   | **Deprecated** — use `oidc.verifyIdToken`             |
 | `@eventuras/fides-auth/oauth-browser`      | Browser     | **Deprecated** — OAuth/OIDC flows with Web Crypto API |
-| `@eventuras/fides-auth/session-validation` | Node.js     | Encrypted JWT session validation                      |
-| `@eventuras/fides-auth/session-refresh`    | Node.js     | Automatic token refresh for sessions                  |
 | `@eventuras/fides-auth/silent-login`       | Node.js     | **Deprecated** — use `oidc.silentLoginUrl`            |
 | `@eventuras/fides-auth/utils`              | Universal   | **Deprecated** — no replacement                       |
 | `@eventuras/fides-auth/rate-limit`         | Universal   | **Deprecated** — pass `rateLimit` to the handlers     |
 | `@eventuras/fides-auth/logger`             | Universal   | **Deprecated** — types on the root entry              |
 | `@eventuras/fides-auth/types`              | Universal   | **Deprecated** — types on the root entry              |
-| `@eventuras/fides-auth/server`             | Node.js     | Request handlers (login, callback, logout, heartbeat) |
+| `@eventuras/fides-auth/server`             | Node.js     | `createFidesAuth`: the handlers, sessions and API calls |
 | `@eventuras/fides-auth/providers/vipps`    | Node.js     | Vipps Login identity provider                         |
 
 Deprecated entries keep working until 1.0. [Migrating to 1.0](docs/migrating-to-1.0.md)
@@ -139,314 +127,75 @@ await oidc.metadata();
   `requiresInteractiveLogin`, `getOAuthErrorLogContext` and
   `classifyRefreshFailure`.
 
-### OAuth — Node.js (`/oauth`)
+### Server (`/server`)
 
-Full OIDC flows using `openid-client`:
+`createFidesAuth` is the server side as one object. It holds the OIDC client,
+the session storage and the guards, and each member takes the `Request` and a
+`CookieStore` over the request's cookies:
 
 ```typescript
-import {
-  buildPKCEOptions,
-  buildAuthorizationUrl,
-  buildAuthorizationUrlWithPAR,
-  discoverAndBuildAuthorizationUrl,
-  exchangeAuthorizationCode,
-  refreshAccessToken,
-  extractUserFromTokens,
-  buildSessionFromTokens,
-  validateReturnUrl,
-  buildOidcLogoutUrl,
-  clientCredentialsGrant,
-} from "@eventuras/fides-auth/oauth";
+import { createFidesAuth, type CookieStore } from "@eventuras/fides-auth/server";
+
+export const auth = createFidesAuth({ oauthConfig, secret: process.env.SESSION_SECRET! });
+
+const cookies: CookieStore = {
+  get: (name) => requestCookies.get(name),
+  set: (name, value, options) => responseCookies.set(name, value, options),
+};
 ```
 
-`extractUserFromTokens` and `buildSessionFromTokens` only decode the ID token —
-they don't check its signature, `iss`, `aud` or `exp`. That is safe on tokens
-straight from `exchangeAuthorizationCode`. Verify tokens from anywhere else
-first with `verifyIdToken` from `@eventuras/fides-auth/id-token`.
+It does no I/O until a member needs it, and checks the secret and the redirect
+URI on first use, so a build can load the module that creates it. A client with
+`clientAuth: 'none'` throws at once: the server side of an app is a
+confidential client.
 
-#### Session mapping
+| Member | |
+|---|---|
+| `handleOidcLogin(request, cookies, { authorizationParameters? })` | `GET`, with an optional `?returnTo=`. Redirects to the provider. |
+| `handleOidcCallback(request, cookies)` | Starts the session. Redirects to the return path with `?login=success`, or home with `?login=error&error=<code>`. |
+| `handleOidcLogout(request, cookies, { state?, logoutHint? })` | `POST` from the app's own pages. Ends the session and redirects to the provider's end-session endpoint. |
+| `handleSessionInfo(request, cookies)` | `GET`. Whether there is a session, and whose. Never refreshes, never returns tokens. |
+| `handleHeartbeat(request, cookies)` | `POST`. Refreshes the session: 401 when it is over, 503 when the provider can't be reached. |
+| `readSession`, `tryReadSession` | The session or null, or why there is none. |
+| `getTokens` | The tokens, which the session doesn't carry. |
+| `refreshSession`, `createSession`, `updateSession`, `clearSession` | |
+| `authorizedFetch(cookies, url, options)` | Calls an API with the access token. |
+| `cookieNames`, `oidc` | The session cookie's name, and the instance's OIDC client. |
 
-`buildSessionFromTokens` keeps the standard fields. To keep more of the token
-response or the ID token claims, pass `mapSession`, here or to
-`handleOidcCallback`:
+Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
+`sessionDurationDays` (30), `applicationUrl` (the redirect URI's origin),
+`mapSession`, `rolesClaim` (`roles`), `validateReturnTo`, `defaultRedirectPath`
+(`/`), `postLogoutRedirectUri` (`applicationUrl`), `rateLimit`, `logger` and
+`onSessionEvent`.
+
+#### Sessions
+
+A session lasts `sessionDurationDays` from login, and refreshes don't extend it.
+It is sealed with AES-256-GCM into the `__Host-session` cookie, in up to three
+chunks (`session` over plain http). A `Session` has `correlationId`,
+`createdAt`, `expiresAt`, `user`, `scopes`, `idp` and `data`. The tokens aren't
+on it: `getTokens` returns them.
+
+To keep more of the token response or the ID token claims, pass `mapSession`:
 
 ```typescript
-const session = buildSessionFromTokens(tokens, {
+const auth = createFidesAuth({
+  oauthConfig,
+  secret,
   rolesClaim: "groups",
-  mapSession: (tokens, claims, session) => ({
-    ...session,
-    data: { tenant: tokens.tenant },
-  }),
+  mapSession: (tokens, claims, session) => ({ ...session, data: { tenant: claims?.tenant } }),
 });
 ```
 
 `claims` are decoded, not verified. Without an `id_token` (no `openid` scope),
-`claims` is undefined and the session has no `user`. `user.email` is optional.
-Extra fields make the session bigger; large ones need
-[server-side sessions](./docs/server-sessions.md).
-
-#### Client authentication
-
-`clientAuth` sets how the client authenticates at the token endpoint. Omit it
-for `client_secret_post`:
-
-```typescript
-{ clientSecret: "…" }                                    // client_secret_post
-{ clientAuth: "client_secret_basic", clientSecret: "…" }
-{ clientAuth: "none" }                                   // public client, PKCE only
-{ clientAuth: "private_key_jwt", privateKey }            // CryptoKey or { key, kid }
-```
-
-`clientCredentialsGrant` takes the same options except `none`.
-
-#### Server metadata instead of discovery
-
-If the server publishes its metadata somewhere other than
-`/.well-known/openid-configuration` (an RFC 8414 document, say), fetch it
-yourself and pass it as `serverMetadata`. fides-auth then skips discovery:
-
-```typescript
-const oauthConfig: OAuthConfig = {
-  issuer: "https://auth.example.com",
-  clientId: "your-client-id",
-  clientAuth: "none",
-  redirect_uri: "https://app.example.com/callback",
-  scope: "openid profile",
-  serverMetadata: await fetch(metadataUrl).then((r) => r.json()),
-};
-```
-
-With `openid` in the scope the metadata must include `issuer`, so the ID token's
-`iss` can be checked.
-
-#### PKCE and state (`/pkce`)
-
-For flows that manage their own login transaction. Web Crypto only, so it also
-runs in the browser and on edge runtimes:
-
-```typescript
-import { createPkcePair, createState } from "@eventuras/fides-auth/pkce";
-
-const { verifier, challenge } = await createPkcePair(); // S256
-const state = createState();
-```
-
-`buildPKCEOptions` is built on the same two functions.
-
-#### ID token verification (`/id-token`)
-
-Checks an ID token's signature, `iss`, `aud` and `exp` against the provider's
-JWKS and returns the claims. Also runs in the browser:
-
-```typescript
-import { verifyIdToken } from "@eventuras/fides-auth/id-token";
-
-const claims = await verifyIdToken(idToken, {
-  issuer: "https://auth.example.com",
-  audience: "your-client-id",
-  oauthConfig, // or jwksUri: "https://auth.example.com/jwks"
-});
-```
-
-`algorithms` defaults to `RS*`, `PS*`, `ES*` and `EdDSA`. The JWKS is cached per URI.
-
-#### Scope and extra authorization parameters
-
-`scope` takes a string or an array. Other authorization parameters (`prompt`,
-`login_hint`, `resource`, …) can be set on the config, per call, or per request
-in `handleOidcLogin`. They go through PAR too.
-
-```typescript
-const oauthConfig = {
-  // …
-  scope: ["openid", "profile", "offline_access"],
-  authorizationParameters: { resource: "https://api.example.com" },
-};
-
-const pkce = await buildPKCEOptions(oauthConfig, {
-  parameters: { login_hint: "user@example.com" },
-});
-
-// Or per request in the server handler
-return handleOidcLogin(request, {
-  oauthConfig,
-  cookies,
-  secret: process.env.SESSION_SECRET!,
-  authorizationParameters: (request) =>
-    new URL(request.url).searchParams.has("reauth") ? { prompt: "login" } : {},
-});
-```
-
-Per-call parameters override the config's, and a `scope` among them replaces
-`OAuthConfig.scope`. These keys are reserved, and passing one throws:
-
-- `state`, `code_challenge`, `code_challenge_method` and `redirect_uri`, which
-  fides-auth sets.
-- `client_id` and `response_type`, which openid-client sets.
-- `request` and `request_uri`, which would bypass PKCE and `state`.
-- `nonce`, which the callback doesn't check, so the login would fail.
-
-#### Pushed Authorization Requests (PAR, RFC 9126)
-
-Opt in by setting `usePar: true` on your `OAuthConfig`. The convenience
-helper `discoverAndBuildAuthorizationUrl` then posts the authorization
-parameters to the provider's PAR endpoint and returns a URL containing
-only `client_id` and `request_uri`:
-
-```typescript
-const oauthConfig = {
-  issuer: "https://auth.example.com",
-  clientId: "your-client-id",
-  clientSecret: "your-client-secret",
-  redirect_uri: "https://app.example.com/callback",
-  scope: "openid profile email offline_access",
-  usePar: true,
-};
-
-const pkce = await buildPKCEOptions(oauthConfig);
-const authUrl = await discoverAndBuildAuthorizationUrl(oauthConfig, pkce);
-// redirect user to authUrl
-```
-
-Behaviour:
-
-- `usePar: true` + provider advertises `pushed_authorization_request_endpoint` → uses PAR.
-- `usePar: true` + provider does **not** advertise PAR → throws.
-- `usePar` unset/false + provider advertises PAR → standard flow, with a
-  one-line `info` log noting that PAR is available but not enabled.
-- `usePar` unset/false + no PAR endpoint → standard flow, no advisory.
-
-If you already have a discovered `Configuration` you can call the
-low-level wrapper directly:
-
-```typescript
-const authUrl = await buildAuthorizationUrlWithPAR(config, pkce);
-```
-
-#### RP-Initiated Logout
-
-Clearing your own session cookie is not a logout — the provider's session survives,
-so the next `/authorize` re-authenticates silently. `buildOidcLogoutUrl` builds the
-request that ends the provider session too, and returns `null` when the provider
-advertises no `end_session_endpoint`:
-
-```typescript
-const logoutUrl = await buildOidcLogoutUrl(oauthConfig, {
-  postLogoutRedirectUri: "https://app.example.com/",
-  idTokenHint: session?.tokens?.idToken,
-});
-```
-
-The `/server` entry point wraps the whole dance — read the hint, clear the cookies,
-redirect. Its handlers never read the environment; pass the session `secret` in:
-
-```typescript
-import { handleOidcLogout } from "@eventuras/fides-auth/server";
-
-return handleOidcLogout(request, {
-  oauthConfig,
-  cookies,
-  secret: process.env.SESSION_SECRET!,
-  postLogoutRedirectUri: "https://app.example.com/",
-});
-```
-
-See [docs/rp-initiated-logout.md](./docs/rp-initiated-logout.md) for the full
-parameter set, where the ID token is stored, and why `client_id` is still sent.
-
-#### Server-side sessions
-
-By default the session is encrypted into cookies. When a provider's tokens are
-too large for that (OpenIddict's encrypted JWE tokens, for instance), keep the
-session in a store and give the browser only a handle:
-
-```typescript
-import { serverPersistence, createMemorySessionStore } from "@eventuras/fides-auth/server";
-
-const persistence = serverPersistence({
-  store: createMemorySessionStore(), // or your own SessionStore (Mongo, Redis, …)
-  secret: process.env.SESSION_SECRET!,
-});
-
-return handleHeartbeat(request, { oauthConfig, cookies, persistence });
-```
-
-Logout, heartbeat and the session helpers take `persistence` in place of
-`secret`. The callback takes both: `secret` also opens the login transaction.
-The store gets encrypted records keyed by a hash of the handle; `clearSession`
-deletes the record, so logout revokes a copied cookie too. See
-[docs/server-sessions.md](./docs/server-sessions.md).
-
-#### Login transaction
-
-`handleOidcLogin` seals each login (state, PKCE verifier, returnTo, start time)
-into one of three `__Host-oauth_tx_<n>` cookies, so parallel logins don't
-collide; a fourth evicts the oldest, and a `returnTo` over 1 KB as JSON is dropped. With
-an `http:` `redirect_uri` (plain-http development) the cookie is a plain,
-non-Secure `oauth_tx_<n>`. `handleOidcCallback` rejects it after 10 minutes and
-deletes it whatever the outcome. Pass both handlers the same `secret`. A denied
-or cancelled login redirects to `defaultRedirectPath` with
-`?login=error&error=<code>`, or `error=login_expired` once the login has ended.
-
-Custom flows use the same helpers. Pass them the handlers' cookie options, so a
-custom login and the built-in callback (or the reverse) agree on the cookie:
-
-```typescript
-import {
-  createTransaction,
-  persistTransaction,
-  readTransaction,
-  clearTransaction,
-  validateCallback,
-  transactionCookieOptions,
-} from "@eventuras/fides-auth/server";
-
-const txCookie = transactionCookieOptions(oauthConfig.redirect_uri);
-
-// Login
-const pkce = await buildPKCEOptions(oauthConfig);
-await persistTransaction(cookies, createTransaction(pkce, { returnTo }), secret, txCookie);
-
-// Callback
-try {
-  const transaction = await readTransaction(cookies, state, secret, txCookie);
-  if (!transaction) throw new Error("No login in progress");
-  validateCallback(query, transaction); // throws CallbackValidationError
-  // … exchangeAuthorizationCode(oauthConfig, url, transaction.codeVerifier, transaction.state)
-} finally {
-  await clearTransaction(cookies, state, secret, txCookie);
-}
-```
-
-#### API calls with the access token
-
-`authorizedFetch` sends the session's access token only to URLs under
-`allowedBase` (same origin, and a path under its path), never follows a
-redirect, and times out after 10 seconds by default. A refused URL, non-2xx
-response, timeout or failed `parse` throws an `AuthorizedFetchError` with a
-`reason`, the status, and the URL without its query. On a 401 it calls `refresh`
-once and retries once:
-
-```typescript
-import { authorizedFetch, tryRefreshSessionInStore } from "@eventuras/fides-auth/server";
-
-const { data, session: current } = await authorizedFetch(session, `users/${id}`, {
-  allowedBase: "https://api.example.com/v1/",
-  parse: async (response) => parseUser(await response.json()),
-  refresh: () => tryRefreshSessionInStore(cookies, oauthConfig, secret),
-});
-```
-
-`refresh` may also return `refreshSessionInStore`'s result. Both persist the new
-session; use the returned `session` for later calls. When the refresh fails, the
-error is `refresh_failed`, and `error.refreshFailure.cause === "invalid_grant"`
-means the user must log in again.
+`claims` is undefined and the session has no `user`. Extra fields make the
+session bigger; large ones need a `sessionStore`.
 
 ### OAuth — Browser (`/oauth-browser`)
 
 > **Deprecated.** It hardcodes the provider endpoints and doesn't validate the
-> token response. Use the server flow instead (`handleOidcLogin` /
-> `handleOidcCallback` from `/server`). It will be removed in a later minor.
+> token response. Use the server flow instead (`createFidesAuth` from
+> `/server`). It goes in 1.0.
 
 Lightweight browser-only flows using Web Crypto:
 
@@ -456,28 +205,6 @@ import {
   buildAuthorizationUrl,
   exchangeCodeForTokens,
 } from "@eventuras/fides-auth/oauth-browser";
-```
-
-### Session Management
-
-```typescript
-import { createEncryptedJWT, validateSessionJwt } from "@eventuras/fides-auth";
-import { refreshSession } from "@eventuras/fides-auth/session-refresh";
-
-// Secrets accept hex strings or Uint8Array
-const secret = process.env.SESSION_SECRET!; // 64 hex chars = 32 bytes
-
-// Create session JWT (AES-256-GCM encrypted)
-const jwt = await createEncryptedJWT(sessionData, secret);
-
-// Validate and decrypt
-const { status, session } = await validateSessionJwt(jwt, secret);
-if (status === "VALID") {
-  // session is typed as Session
-}
-
-// Refresh expired tokens
-const refreshed = await refreshSession(session, oauthConfig);
 ```
 
 ### Crypto Utilities (`/utils`)
@@ -606,30 +333,30 @@ const authUrl = await client.buildAuthorizationUrl(pkce);
 
 - **PKCE** — All OAuth flows use Proof Key for Code Exchange
 - **AES-256-GCM** — Sessions encrypted with authenticated encryption
-- **Open redirect protection** — `validateReturnUrl` prevents redirect attacks
+- **Open redirect protection** — Return paths are validated and kept on the app's origin
+- **CSRF** — Logout and heartbeat answer only a same-origin `POST`
 - **No secret logging** — Tokens, keys, and PII are never logged
 - **Web Crypto API** — Uses the platform cryptographic primitives (not userland crypto)
 
 ## TypeScript
 
-All types are exported from `@eventuras/fides-auth/types`:
+The shared types come from the root entry, and the server's from `/server`:
 
 ```typescript
 import type {
   Session,
   Tokens,
-  CreateSessionOptions,
-} from "@eventuras/fides-auth/types";
-import type {
   OAuthConfig,
-  OidcUserInfo,
-  PKCEOptions,
-} from "@eventuras/fides-auth/oauth";
-import type {
+  TokenResponse,
   FidesLogger,
   FidesLoggerFactory,
-  FidesLoggerOptions,
-} from "@eventuras/fides-auth/logger";
+} from "@eventuras/fides-auth";
+import type {
+  CookieStore,
+  FidesAuth,
+  FidesAuthConfig,
+  SessionStore,
+} from "@eventuras/fides-auth/server";
 ```
 
 ## License

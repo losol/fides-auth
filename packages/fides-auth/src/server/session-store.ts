@@ -15,11 +15,6 @@ export interface StoredSession {
   expiresAt: string;
   /** Correlation id of the session, so a record can be found from a log line. Not a secret. */
   correlationId?: string;
-  /**
-   * Written by the free `/server` functions, which `createFidesAuth` replaces.
-   * @deprecated Read `correlationId`.
-   */
-  sid?: string;
   /** The ID token's issuer. With `subHash` or `idpSidHash`, finds a user's sessions for back-channel logout. */
   iss?: string;
   /** HMAC-SHA-256 of the ID token's `sub`, under a key derived from the session secret. Never `sub` itself. */

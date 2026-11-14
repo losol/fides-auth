@@ -36,7 +36,7 @@ import {
   type SessionRecord,
 } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
-import { assertSessionSecret, type SessionSecret } from './session-persistence.js';
+import { assertSessionSecret, type SessionSecret } from './session-secret.js';
 import type { LookupFields, SaveResult, SessionStorage } from './session-storage.js';
 
 export type ReadRecordResult =

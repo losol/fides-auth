@@ -47,18 +47,6 @@
       "types": "./dist/logger.d.ts",
       "import": "./dist/logger.js"
     },
-    "./session-refresh": {
-      "types": "./dist/session-refresh.d.ts",
-      "import": "./dist/session-refresh.js"
-    },
-    "./session-validation": {
-      "types": "./dist/session-validation.d.ts",
-      "import": "./dist/session-validation.js"
-    },
-    "./session-cookies": {
-      "types": "./dist/session-cookies.d.ts",
-      "import": "./dist/session-cookies.js"
-    },
     "./session-events": {
       "types": "./dist/session-events.d.ts",
       "import": "./dist/session-events.js"

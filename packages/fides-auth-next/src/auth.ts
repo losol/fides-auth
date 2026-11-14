@@ -92,9 +92,9 @@ export interface FidesAuth {
   readonly oidc: OidcClient;
 }
 
-/** A cookie written while the proxy handled a request. A null value deletes it. */
+/** A cookie written while the proxy handled a request. `maxAge: 0` deletes it. */
 interface CookieWrite {
-  value: string | null;
+  value: string;
   options?: CookieOptions;
 }
 
@@ -117,9 +117,6 @@ function proxyCookieStore(request: NextRequest): {
     set: (name, value, options) => {
       writes.set(name, { value, options });
     },
-    delete: (name) => {
-      writes.set(name, { value: null });
-    },
   };
   return { cookies, writes };
 }
@@ -129,14 +126,12 @@ function forward(request: NextRequest, writes: Map<string, CookieWrite>): NextRe
   if (writes.size === 0) return NextResponse.next();
 
   for (const [name, { value, options }] of writes) {
-    if (value === null || options?.maxAge === 0) request.cookies.delete(name);
+    if (options?.maxAge === 0) request.cookies.delete(name);
     else request.cookies.set(name, value);
   }
   const response = NextResponse.next({ request: { headers: request.headers } });
-  for (const [name, { value, options }] of writes) {
-    if (value === null) response.cookies.delete(name);
-    else response.cookies.set(name, value, options);
-  }
+  // A delete is a set with `maxAge: 0`, so the browser gets it with the cookie's own attributes.
+  for (const [name, { value, options }] of writes) response.cookies.set(name, value, options);
   return response;
 }
 

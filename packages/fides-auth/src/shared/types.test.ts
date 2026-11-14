@@ -7,7 +7,7 @@
 import type { TokenEndpointResponse } from 'openid-client';
 import { describe, expect, it } from 'vitest';
 
-import type { MapSession } from '../session/build.js';
+import type { MapSession } from '../server/fides-auth.js';
 import type { TokenResponse } from './types.js';
 
 type Extends<A, B> = [A] extends [B] ? true : false;
