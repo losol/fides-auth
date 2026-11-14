@@ -375,6 +375,7 @@ The heartbeat endpoint and its client stay, for apps that want refresh tied to u
 | returnTo | One `validateReturnTo: (returnTo) => string \| null`, set on the factory, for both login and callback. | It's a breaking signature change. |
 | HTTP behaviour | The table below. | Client code and the client package depend on it. |
 | Packaging | Core, `fides-auth-next` and `fides-auth-client` release 1.0 together. Core is a `peerDependency` (`^1.0.0`) of the other two, so an app has one copy. `engines` is Node 22 or later. | A peer range and an engine floor can only tighten at a major. |
+| Client store | `fides-auth-client` has its own store: `getSnapshot`, `subscribe`, and a method per action, such as `authSuccess(user)`, in place of `send({ type })`. `./react` reads it with React's `useSyncExternalStore`. `@xstate/store` and `@xstate/store-react` go. The store is a context with a handful of events and no state machine, so a library adds little, and `createAuthStore` returning the XState store makes XState's majors ours. | Only a major can take a dependency out of the public API. |
 
 What the handlers answer:
 
@@ -475,6 +476,7 @@ Set `sessionStore` when:
 | 18 | `createFidesAuth` throws when `clientAuth` is `'none'`. | The changeset |
 | 19 | Core becomes a peer dependency of `fides-auth-next` and `fides-auth-client`, and all three need Node 22. | Install core next to them |
 | 20 | `fides-auth-store` and `fides-auth-react` are replaced by `fides-auth-client`, with the hooks under `./react`. | Their last 0.x is deprecated on npm at 1.0 |
+| 21 | The client store has a method per action instead of `send({ type })`, and no XState dependency. | The migration doc |
 
 
 ## Migration plan
@@ -516,8 +518,9 @@ The work, as PRs in beta. The numbers in brackets are rows in the breaking-chang
 3. **Next (10, 16).**
    - `fides-auth-next` is rebuilt on the core factory, with `sessionStore` and `refreshInProxy`. Its old subpaths, member names and default limiter go.
    - Then the free `/server` functions go, with `LegacySession`, `CookieStore.delete` and `StoredSession.sid`.
-4. **The client side (9, 20).**
+4. **The client side (9, 20, 21).**
    - `fides-auth-client`, with the store, the session monitor, heartbeat and the activity tracker, and the hooks under `./react`.
+   - The store is the package's own, with no XState dependency.
    - `handleSessionInfo` becomes the monitor's default. `getTokens` and `authorizedFetch` refresh on demand.
    - Core's `/heartbeat` and `/activity-tracker` go.
    - `fides-auth-store` and `fides-auth-react` get no 1.0. Their last 0.x is deprecated on npm, and their publish workflows are removed.
