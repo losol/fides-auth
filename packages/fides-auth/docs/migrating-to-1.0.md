@@ -1,12 +1,15 @@
 # Migrating to 1.0
 
-fides-auth reaches 1.0 in four minor releases, 0.16 to 0.19, as
-[ADR 0001](https://github.com/losol/fides-auth/blob/main/docs/adr/0001-module-structure-and-bff.md) plans. Each
-release adds part of the new API next to the old one and deprecates what it
-replaces. Nothing is removed before 1.0, so you can move one release at a time.
+fides-auth reaches 1.0 in two steps, as
+[ADR 0001](https://github.com/losol/fides-auth/blob/main/docs/adr/0001-module-structure-and-bff.md) plans:
 
-This doc grows a section per release. Every `@deprecated` tag in the code names
-the replacement, and this doc collects them.
+- **0.16** adds the OIDC client and deprecates what it replaces. Nothing changes
+  behaviour, so you can move at your own pace.
+- **1.0** replaces the server side and removes everything deprecated. It doesn't
+  read 0.x sessions, so your users log in again once when you upgrade.
+
+This doc has a section per step. Every `@deprecated` tag in the code names the
+replacement, and this doc collects them.
 
 ## 0.16: the OIDC client
 
@@ -79,7 +82,7 @@ These go in 1.0:
 
 - **`/rate-limit` and `TokenBucket`.** Pass a `rateLimit` callback to the
   handlers instead.
-- **The `/cookies` constants and helpers.** From 0.17, read the cookie names
+- **The `/cookies` constants and helpers.** From 1.0, read the cookie names
   from the `createFidesAuth` instance.
 - **`createLogger` from `/logger`.** Log through your own logger.
 - **`resolveClientAuth`.** The client sets up client authentication from its
@@ -98,10 +101,10 @@ These go in 1.0:
 `createEncryptedJWT`, `decryptJWT`, `accessTokenExpires` and `hasScope` become
 internal. For `hasScope(session, scope)`, check `session.scopes?.includes(scope)`.
 
-### Not deprecated yet
+### Not deprecated
 
 - **`buildSessionFromTokens`, `validateReturnUrl` and `MapSession` in `/oauth`,
-  and the free `/server` functions.** In 0.17, `createFidesAuth` replaces them.
+  and the free `/server` functions.** In 1.0, `createFidesAuth` replaces them.
 - **The root entry's functions.** The root becomes types-only in 1.0. Import
   functions from their own entries, such as `SESSION_EVENT` from
   `/session-events`.

@@ -35,11 +35,11 @@ export const defaultOAuthCookieOptions = defaultOAuthCookieOptionsImpl;
 export const cookieByteSize = cookieByteSizeImpl;
 /** @deprecated `/cookies` goes in 1.0. The library sets its own cookies. */
 export const assertCookieWithinLimit = assertCookieWithinLimitImpl;
-/** @deprecated `/cookies` goes in 1.0. From 0.17, read the names from the `createFidesAuth` instance. */
+/** @deprecated `/cookies` goes in 1.0. From 1.0, read the names from the `createFidesAuth` instance. */
 export const ACCESS_TOKEN_COOKIE_NAME = ACCESS_TOKEN_COOKIE_NAME_IMPL;
-/** @deprecated `/cookies` goes in 1.0. From 0.17, read the names from the `createFidesAuth` instance. */
+/** @deprecated `/cookies` goes in 1.0. From 1.0, read the names from the `createFidesAuth` instance. */
 export const ID_TOKEN_COOKIE_NAME = ID_TOKEN_COOKIE_NAME_IMPL;
-/** @deprecated `/cookies` goes in 1.0. From 0.17, read the names from the `createFidesAuth` instance. */
+/** @deprecated `/cookies` goes in 1.0. From 1.0, read the names from the `createFidesAuth` instance. */
 export const SESSION_COOKIE_NAME = SESSION_COOKIE_NAME_IMPL;
-/** @deprecated `/cookies` goes in 1.0. From 0.17, read the names from the `createFidesAuth` instance. */
+/** @deprecated `/cookies` goes in 1.0. From 1.0, read the names from the `createFidesAuth` instance. */
 export const SESSION_REF_COOKIE_NAME = SESSION_REF_COOKIE_NAME_IMPL;
