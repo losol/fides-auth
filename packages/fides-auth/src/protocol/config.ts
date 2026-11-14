@@ -31,12 +31,10 @@ export type OidcClientConfig = ClientAuthConfig & {
   clientId: string;
   /** The callback URL registered with the provider. */
   redirectUri?: string;
-  /** The older spelling of `redirectUri`. Set one, or both to the same value. */
-  redirect_uri?: string;
   /** Space-separated string or an array of scopes. */
   scope: string | string[];
   /**
-   * Extra authorization request parameters (e.g. `prompt`, `resource`), added by `buildPKCEOptions`.
+   * Extra authorization request parameters (e.g. `prompt`, `resource`), added by `createAuthorizationRequest`.
    * Reserved keys throw: `state`, `code_challenge`, `code_challenge_method`, `redirect_uri`,
    * `client_id`, `response_type`, `request`, `request_uri` and `nonce`.
    */
@@ -58,47 +56,11 @@ export type OidcClientConfig = ClientAuthConfig & {
 };
 
 /**
- * Configuration for server-side OAuth / OIDC flows. Takes `redirectUri` too,
- * but `redirect_uri` stays required, so code that reads it still compiles.
- */
-export type OAuthConfig = OidcClientConfig & { redirect_uri: string };
-
-/**
- * The redirect URI from either spelling.
+ * The redirect URI, for an operation that needs one.
  *
- * @throws TypeError if neither is set, or if both are set to different values.
+ * @throws TypeError if `redirectUri` is not set.
  */
 export function redirectUriOf(config: OidcClientConfig): string {
-  const { redirectUri, redirect_uri } = config;
-  if (redirectUri !== undefined && redirect_uri !== undefined && redirectUri !== redirect_uri) {
-    throw new TypeError('redirectUri and redirect_uri differ; set one of them');
-  }
-  const uri = redirectUri ?? redirect_uri;
-  if (!uri) throw new TypeError('This operation needs redirectUri in the OIDC config');
-  return uri;
+  if (!config.redirectUri) throw new TypeError('This operation needs redirectUri in the OIDC config');
+  return config.redirectUri;
 }
-
-/**
- * Configuration for OAuth client credentials flow (machine-to-machine authentication).
- * Takes any {@link ClientAuthConfig} except `none`: the grant needs client authentication.
- *
- * @deprecated Configure a client with `createOidcClient` (`@eventuras/fides-auth/oidc`) and call `oidc.clientCredentials()`.
- */
-export type ClientCredentialsConfig = Exclude<ClientAuthConfig, { clientAuth: 'none' }> & {
-  /** OAuth token endpoint URL. Must be https. */
-  tokenEndpoint: string;
-  /** OAuth client ID */
-  clientId: string;
-  /** Optional scope for the access token */
-  scope?: string;
-  /**
-   * Issuer identifier; defaults to the token endpoint's origin. With
-   * `private_key_jwt` it is the client assertion's `aud`, so set it to what the server expects.
-   */
-  issuer?: string;
-  /**
-   * Request timeout in seconds.
-   * @default 30
-   */
-  timeout?: number;
-};

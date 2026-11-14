@@ -1,23 +1,20 @@
-import { createLogger } from '../shared/logger.js';
-
-// The namespace from before the split out of oauth.ts, so existing log filters still match.
-const logger = createLogger({ namespace: 'fides-auth:oauth' });
+import type { FidesLogger } from '../shared/logger.js';
 
 /**
- * Validates a return URL against open redirect attacks.
- * Ensures the URL is same-origin and passes optional custom validation.
+ * Validates a return URL against open redirect attacks: it must resolve on the
+ * application's origin, or the default path is used instead.
  *
+ * @param logger - Where a refused return URL is reported
  * @param returnTo - The raw returnTo path/URL to validate
  * @param applicationOrigin - The application's origin URL (e.g., 'https://example.com')
  * @param defaultPath - Fallback path if validation fails (default: '/')
- * @param validate - Optional custom validation function for the pathname
  * @returns A safe, validated URL
  */
 export function validateReturnUrl(
+  logger: FidesLogger,
   returnTo: string | null | undefined,
   applicationOrigin: string,
   defaultPath: string = '/',
-  validate?: (pathname: string) => boolean,
 ): URL {
   const redirectPath = returnTo ?? defaultPath;
   let redirectUrl: URL;
@@ -35,15 +32,6 @@ export function validateReturnUrl(
     logger.error(
       { returnTo: redirectPath, redirectOrigin: redirectUrl.origin, applicationOrigin: originUrl.origin },
       'Possible open redirect attack: returnTo points outside application origin',
-    );
-    return new URL(defaultPath, applicationOrigin);
-  }
-
-  // Custom validation
-  if (validate && !validate(redirectUrl.pathname)) {
-    logger.warn(
-      { pathname: redirectUrl.pathname },
-      'returnTo failed custom validation, falling back to default',
     );
     return new URL(defaultPath, applicationOrigin);
   }

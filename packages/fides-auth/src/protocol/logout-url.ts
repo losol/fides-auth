@@ -1,10 +1,6 @@
 import * as openid from 'openid-client';
 
-import { createLogger } from '../shared/logger.js';
-import type { OAuthConfig } from './config.js';
-import { moduleContext, type ProtocolContext } from './context.js';
-
-const logger = createLogger({ namespace: 'fides-auth:oauth' });
+import type { ProtocolContext } from './context.js';
 
 /** Parameters for an RP-initiated logout request (OIDC RP-Initiated Logout 1.0 §2). */
 export interface OidcLogoutOptions {
@@ -34,39 +30,8 @@ export interface OidcLogoutOptions {
 }
 
 /**
- * Discovers the OIDC provider's end_session_endpoint and builds an RP-initiated
- * logout URL. Returns null when the provider exposes none, so callers can fall
- * back to clearing the local session only.
- *
- * @param oauthConfig - OAuth configuration (issuer, clientId, clientSecret)
- * @param options - Logout parameters, or a string as shorthand for
- *   `postLogoutRedirectUri`
- * @returns Logout URL or null if not supported
- *
- * @example
- * ```typescript
- * const session = await readSession(cookies, secret);
- * const logoutUrl = await buildOidcLogoutUrl(oauthConfig, {
- *   postLogoutRedirectUri: 'https://app.example.com/',
- *   idTokenHint: session?.tokens?.idToken,
- * });
- * ```
- *
- * @deprecated Use `oidc.logoutUrl(options)` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`).
- */
-export async function buildOidcLogoutUrl(
-  oauthConfig: OAuthConfig,
-  options: OidcLogoutOptions | string,
-): Promise<URL | null> {
-  return logoutUrl(
-    moduleContext(oauthConfig, logger),
-    typeof options === 'string' ? { postLogoutRedirectUri: options } : options,
-  );
-}
-
-/**
  * Builds an RP-initiated logout URL, or null when the provider has no end-session endpoint.
- * The shared core of {@link buildOidcLogoutUrl} and `OidcClient.logoutUrl`.
+ * The core of `OidcClient.logoutUrl`.
  */
 export async function logoutUrl(
   { config: oauthConfig, configuration, logger }: ProtocolContext,

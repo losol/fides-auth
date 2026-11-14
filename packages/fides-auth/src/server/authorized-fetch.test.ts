@@ -9,9 +9,13 @@ import type { AddressInfo } from 'node:net';
 import { inspect } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { configureLogger } from '../shared/logger.js';
+import type { FidesLogger } from '../shared/logger.js';
 import type { Tokens } from '../shared/types.js';
-import { AuthorizedFetchError, authorizedFetch } from './authorized-fetch.js';
+import {
+  AuthorizedFetchError,
+  type AuthorizedFetchOptions,
+  authorizedFetch as fetchWithTokens,
+} from './authorized-fetch.js';
 
 interface Seen {
   path: string;
@@ -21,6 +25,25 @@ interface Seen {
 const apiSeen: Seen[] = [];
 const otherSeen: Seen[] = [];
 const logs: unknown[] = [];
+
+const record = (level: string) => (data?: unknown, msg?: string) => {
+  logs.push({ level, data, msg });
+};
+const recorder: FidesLogger = {
+  debug: record('debug'),
+  info: record('info'),
+  warn: record('warn'),
+  error: record('error'),
+};
+
+/** `authorizedFetch`, logging to `logs`. */
+function authorizedFetch<T = undefined>(
+  tokens: Tokens | null | undefined,
+  url: string | URL,
+  options: AuthorizedFetchOptions<T>,
+) {
+  return fetchWithTokens(tokens, url, options, recorder);
+}
 
 let api: { server: Server; url: string };
 let other: { server: Server; url: string };
@@ -113,18 +136,6 @@ beforeAll(async () => {
     json(res, 200, { stolen: true });
   });
   base = `${api.url}/v1`;
-
-  const record = (level: string) => (data?: unknown, msg?: string) => {
-    logs.push({ level, data, msg });
-  };
-  configureLogger({
-    create: () => ({
-      debug: record('debug'),
-      info: record('info'),
-      warn: record('warn'),
-      error: record('error'),
-    }),
-  });
 });
 
 afterAll(async () => {

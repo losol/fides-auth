@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vites
 
 import { CookieTooLargeError, type CookieOptions } from '../shared/cookies.js';
 import { decryptJWT } from '../session/utils.js';
+import type { FidesLogger } from '../shared/logger.js';
 import type { CookieStore } from './cookie-store.js';
 import {
   CallbackValidationError,
@@ -50,7 +51,9 @@ afterAll(() => {
   random.mockRestore();
 });
 
-const pkce = (state: string) => ({ state, code_verifier: `verifier-for-${state}` });
+const pkce = (state: string) => ({ state, codeVerifier: `verifier-for-${state}` });
+const quiet: FidesLogger = { debug() {}, info() {}, warn() {}, error() {} };
+
 
 /** The rejection reason, or undefined when validateCallback returns. */
 function rejection(query: string, transaction: LoginTransaction, maxAgeMs?: number) {
@@ -68,14 +71,14 @@ describe('login transaction cookie', () => {
     const { store, jar } = memoryStore();
 
     await expect(
-      persistTransaction(store, createTransaction(pkce('st')), 'a'.repeat(32)),
+      persistTransaction(store, createTransaction(pkce('st'), { logger: quiet }), 'a'.repeat(32)),
     ).rejects.toThrow('fides-auth: session secret must be 32 bytes');
     expect(jar.size).toBe(0);
   });
 
   it('seals one cookie per login and reads it back by state', async () => {
     const { store, jar, options } = memoryStore();
-    const transaction = createTransaction(pkce('st'), { returnTo: '/dash' });
+    const transaction = createTransaction(pkce('st'), { logger: quiet, returnTo: '/dash' });
 
     await persistTransaction(store, transaction, secret);
 
@@ -88,12 +91,12 @@ describe('login transaction cookie', () => {
       httpOnly: true,
       secure: true,
     });
-    expect(await readTransaction(store, 'st', secret)).toEqual(transaction);
+    expect(await readTransaction(store, 'st', secret, { logger: quiet })).toEqual(transaction);
   });
 
   it('clears a __Host- cookie with a Secure, expired cookie', async () => {
     const { store, jar, options } = memoryStore();
-    await persistTransaction(store, createTransaction(pkce('st')), secret);
+    await persistTransaction(store, createTransaction(pkce('st'), { logger: quiet }), secret);
 
     await clearTransaction(store, 'st', secret);
 
@@ -103,11 +106,11 @@ describe('login transaction cookie', () => {
 
   it('uses a plain, non-Secure cookie when secure is off', async () => {
     const { store, jar, options } = memoryStore();
-    await persistTransaction(store, createTransaction(pkce('st')), secret, { secure: false });
+    await persistTransaction(store, createTransaction(pkce('st'), { logger: quiet }), secret, { secure: false });
 
     expect([...jar.keys()]).toEqual(['oauth_tx_0']);
     expect(options.get('oauth_tx_0')?.secure).toBe(false);
-    expect(await readTransaction(store, 'st', secret, { secure: false })).not.toBeNull();
+    expect(await readTransaction(store, 'st', secret, { secure: false, logger: quiet })).not.toBeNull();
 
     await clearTransaction(store, 'st', secret, { secure: false });
     expect(jar.size).toBe(0);
@@ -121,14 +124,14 @@ describe('login transaction cookie', () => {
 
   it('ignores an unprefixed cookie when secure, so a subdomain cannot plant one', async () => {
     const { store } = memoryStore();
-    await persistTransaction(store, createTransaction(pkce('st')), secret, { secure: false });
+    await persistTransaction(store, createTransaction(pkce('st'), { logger: quiet }), secret, { secure: false });
 
-    expect(await readTransaction(store, 'st', secret)).toBeNull();
+    expect(await readTransaction(store, 'st', secret, { logger: quiet })).toBeNull();
   });
 
   it('is sealed under its own key, so it never opens as a session', async () => {
     const { store, jar } = memoryStore();
-    await persistTransaction(store, createTransaction(pkce('st')), secret);
+    await persistTransaction(store, createTransaction(pkce('st'), { logger: quiet }), secret);
     const [value] = [...jar.values()];
 
     await expect(decryptJWT(value!, secret)).rejects.toThrow();
@@ -137,56 +140,56 @@ describe('login transaction cookie', () => {
 
   it('keeps parallel logins apart', async () => {
     const { store, jar } = memoryStore();
-    await persistTransaction(store, createTransaction(pkce('one')), secret);
-    await persistTransaction(store, createTransaction(pkce('two')), secret);
+    await persistTransaction(store, createTransaction(pkce('one'), { logger: quiet }), secret);
+    await persistTransaction(store, createTransaction(pkce('two'), { logger: quiet }), secret);
     expect(jar.size).toBe(2);
 
     await clearTransaction(store, 'one', secret);
     await clearTransaction(store, 'unknown', secret);
 
     expect(jar.size).toBe(1);
-    expect(await readTransaction(store, 'one', secret)).toBeNull();
-    expect((await readTransaction(store, 'two', secret))?.codeVerifier).toBe('verifier-for-two');
+    expect(await readTransaction(store, 'one', secret, { logger: quiet })).toBeNull();
+    expect((await readTransaction(store, 'two', secret, { logger: quiet }))?.codeVerifier).toBe('verifier-for-two');
   });
 
   it('keeps at most three logins, evicting the oldest', async () => {
     const { store, jar } = memoryStore();
     const startedAt = { a: 4000, b: 1000, c: 3000, d: 5000 };
     for (const [state, createdAt] of Object.entries(startedAt)) {
-      await persistTransaction(store, { ...createTransaction(pkce(state)), createdAt }, secret);
+      await persistTransaction(store, { ...createTransaction(pkce(state), { logger: quiet }), createdAt }, secret);
     }
 
     expect([...jar.keys()].sort()).toEqual([SLOT_0, '__Host-oauth_tx_1', '__Host-oauth_tx_2']);
-    expect(await readTransaction(store, 'b', secret)).toBeNull();
+    expect(await readTransaction(store, 'b', secret, { logger: quiet })).toBeNull();
     for (const state of ['a', 'c', 'd']) {
-      expect(await readTransaction(store, state, secret)).not.toBeNull();
+      expect(await readTransaction(store, state, secret, { logger: quiet })).not.toBeNull();
     }
   });
 
   it('reuses a slot holding an unreadable cookie', async () => {
     const { store, jar } = memoryStore();
-    await persistTransaction(store, createTransaction(pkce('one')), secret);
-    await persistTransaction(store, createTransaction(pkce('two')), secret);
-    await persistTransaction(store, createTransaction(pkce('three')), secret);
+    await persistTransaction(store, createTransaction(pkce('one'), { logger: quiet }), secret);
+    await persistTransaction(store, createTransaction(pkce('two'), { logger: quiet }), secret);
+    await persistTransaction(store, createTransaction(pkce('three'), { logger: quiet }), secret);
     jar.set(SLOT_0, 'garbage');
 
-    await persistTransaction(store, createTransaction(pkce('st')), secret);
+    await persistTransaction(store, createTransaction(pkce('st'), { logger: quiet }), secret);
 
     expect(jar.size).toBe(3);
-    expect(await readTransaction(store, 'st', secret)).not.toBeNull();
-    expect(await readTransaction(store, 'two', secret)).not.toBeNull();
-    expect(await readTransaction(store, 'three', secret)).not.toBeNull();
+    expect(await readTransaction(store, 'st', secret, { logger: quiet })).not.toBeNull();
+    expect(await readTransaction(store, 'two', secret, { logger: quiet })).not.toBeNull();
+    expect(await readTransaction(store, 'three', secret, { logger: quiet })).not.toBeNull();
   });
 
   it('picks a random free slot, leaving taken ones alone', async () => {
     const { store, jar } = memoryStore();
     random.mockReturnValueOnce(0.5);
-    await persistTransaction(store, createTransaction(pkce('one')), secret);
+    await persistTransaction(store, createTransaction(pkce('one'), { logger: quiet }), secret);
     expect([...jar.keys()]).toEqual(['__Host-oauth_tx_1']);
 
     // Free slots are 0 and 2; a draw near 1 takes the last of them.
     random.mockReturnValueOnce(0.99);
-    await persistTransaction(store, createTransaction(pkce('two')), secret);
+    await persistTransaction(store, createTransaction(pkce('two'), { logger: quiet }), secret);
     expect([...jar.keys()].sort()).toEqual(['__Host-oauth_tx_1', '__Host-oauth_tx_2']);
   });
 
@@ -200,31 +203,31 @@ describe('login transaction cookie', () => {
     random.mockReturnValueOnce(0.1).mockReturnValueOnce(0.9);
 
     await Promise.all([
-      persistTransaction(request(), createTransaction(pkce('one')), secret),
-      persistTransaction(request(), createTransaction(pkce('two')), secret),
+      persistTransaction(request(), createTransaction(pkce('one'), { logger: quiet }), secret),
+      persistTransaction(request(), createTransaction(pkce('two'), { logger: quiet }), secret),
     ]);
 
     expect(browser.size).toBe(2);
     const { store } = memoryStore(Object.fromEntries(browser));
-    expect(await readTransaction(store, 'one', secret)).not.toBeNull();
-    expect(await readTransaction(store, 'two', secret)).not.toBeNull();
+    expect(await readTransaction(store, 'one', secret, { logger: quiet })).not.toBeNull();
+    expect(await readTransaction(store, 'two', secret, { logger: quiet })).not.toBeNull();
   });
 
   it('drops a returnTo over 1 KB once serialized', () => {
     // 1024 bytes with the JSON quotes.
     const fits = `/${'a'.repeat(1021)}`;
-    expect(createTransaction(pkce('st'), { returnTo: fits }).returnTo).toBe(fits);
-    expect(createTransaction(pkce('st'), { returnTo: `${fits}a` }).returnTo).toBeUndefined();
+    expect(createTransaction(pkce('st'), { logger: quiet, returnTo: fits }).returnTo).toBe(fits);
+    expect(createTransaction(pkce('st'), { logger: quiet, returnTo: `${fits}a` }).returnTo).toBeUndefined();
 
     // 201 raw bytes, but each control character escapes to six.
     const escaped = `/${'\u0001'.repeat(200)}`;
-    expect(createTransaction(pkce('st'), { returnTo: escaped }).returnTo).toBeUndefined();
+    expect(createTransaction(pkce('st'), { logger: quiet, returnTo: escaped }).returnTo).toBeUndefined();
   });
 
   it('keeps a cookie at the returnTo cap under 2 KB, even when escaped', async () => {
     for (const returnTo of [`/${'a'.repeat(1021)}`, `/${'\u0001'.repeat(170)}`]) {
       const { store, jar } = memoryStore();
-      const transaction = createTransaction(pkce('st'), { returnTo });
+      const transaction = createTransaction(pkce('st'), { logger: quiet, returnTo });
       expect(transaction.returnTo).toBe(returnTo);
 
       await persistTransaction(store, transaction, secret);
@@ -235,7 +238,7 @@ describe('login transaction cookie', () => {
 
   it('refuses to store a transaction too large for a cookie', async () => {
     const { store, jar } = memoryStore();
-    const huge = { ...createTransaction(pkce('st')), returnTo: `/${'a'.repeat(4000)}` };
+    const huge = { ...createTransaction(pkce('st'), { logger: quiet }), returnTo: `/${'a'.repeat(4000)}` };
 
     await expect(persistTransaction(store, huge, secret)).rejects.toBeInstanceOf(
       CookieTooLargeError,
@@ -245,19 +248,19 @@ describe('login transaction cookie', () => {
 
   it('returns null for a missing, tampered or foreign-secret cookie', async () => {
     const { store, jar } = memoryStore();
-    expect(await readTransaction(store, 'st', secret)).toBeNull();
+    expect(await readTransaction(store, 'st', secret, { logger: quiet })).toBeNull();
 
-    await persistTransaction(store, createTransaction(pkce('st')), secret);
-    expect(await readTransaction(store, 'st', 'b'.repeat(64))).toBeNull();
+    await persistTransaction(store, createTransaction(pkce('st'), { logger: quiet }), secret);
+    expect(await readTransaction(store, 'st', 'b'.repeat(64), { logger: quiet })).toBeNull();
 
     const [name, value] = [...jar.entries()][0]!;
     jar.set(name, `${value.slice(0, -4)}AAAA`);
-    expect(await readTransaction(store, 'st', secret)).toBeNull();
+    expect(await readTransaction(store, 'st', secret, { logger: quiet })).toBeNull();
   });
 });
 
 describe('validateCallback', () => {
-  const transaction = createTransaction(pkce('st'));
+  const transaction = createTransaction(pkce('st'), { logger: quiet });
 
   it('returns the code', () => {
     expect(validateCallback(new URLSearchParams('code=abc&state=st'), transaction)).toBe('abc');

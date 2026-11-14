@@ -109,7 +109,7 @@ internal. For `hasScope(session, scope)`, check `session.scopes?.includes(scope)
   functions from their own entries, such as `SESSION_EVENT` from
   `/session-events`.
 
-## 1.0: the server side
+## 1.0: the server side, and what 0.16 deprecated
 
 **New**
 
@@ -184,6 +184,53 @@ internal. For `hasScope(session, scope)`, check `session.scopes?.includes(scope)
   cookies, so a browser that still has them reads as `no_session_cookie`, or as
   `unreadable_session` over plain http, where the new cookie is also called
   `session`.
+
+### What 0.16 deprecated
+
+All of it goes in 1.0. The [0.16 tables](#016-the-oidc-client) say what
+replaces each export.
+
+- **The entries** `/oauth`, `/pkce`, `/id-token`, `/oidc-discovery`,
+  `/oauth-logging`, `/silent-login`, `/types`, `/logger`, `/cookies`, `/utils`,
+  `/rate-limit` and `/oauth-browser`. Core has six entries: the root, `/oidc`,
+  `/server`, `/browser`, `/session-events` and `/providers/vipps`.
+- **The free protocol functions.** Create a client with `createOidcClient` and
+  call its methods.
+- **The global settings**: `configureLogger`, `configureDiscoveryCache`,
+  `clearDiscoveryCache` and `clearJwksCache`. Pass `logger` to each part that
+  logs: `createFidesAuth`, `createOidcClient`, `createAuthStore`,
+  `startSessionMonitor`, `createHeartbeat` and `VippsLoginClient`. A part
+  without one writes JSON lines to the console.
+- **`redirect_uri`.** Set `redirectUri`. `OAuthConfig` goes with it: the config
+  type is `OidcClientConfig`, from the root or `/oidc`.
+- **The root entry's functions and constants.** The root exports only types:
+  `Session`, `Tokens`, `TokenResponse`, `SessionInfo`, `HeartbeatResponse`,
+  `IdpSession`, `CookieOptions`, `OidcClientConfig`, `ClientAuthConfig`,
+  `FidesLogger`, `FidesLoggerFactory` and `FidesLoggerOptions`.
+- **`logSessionEvent`, `sessionEventLevel`, `newSessionId` and
+  `SESSION_REJECTED_REASONS`.** `/session-events` keeps `SESSION_EVENT`,
+  `isSessionRejectedReason` and the event types. To log an event yourself, see
+  [Consuming the vocabulary](./session-events.md#consuming-the-vocabulary), and
+  to get the library's own, pass `onSessionEvent` to `createFidesAuth`.
+
+**Changed**
+
+- **`VippsLoginClient` is built on the OIDC client**, with its method names:
+
+  | 0.x | 1.0 |
+  |---|---|
+  | `buildPKCEOptions(options)` | `createAuthorizationRequest(options)` |
+  | `buildAuthorizationUrl(pkce)` | `authorizationUrl(request)` |
+  | `exchangeCodeForTokens(callbackUrl, codeVerifier, state)` | `exchangeCode(callbackUrl, { codeVerifier, state })` |
+  | `refreshTokens(refreshToken)` | `refresh(refreshToken)` |
+  | `getUserInfo(accessToken)` | `getUserInfo(accessToken)` |
+
+  `vipps.oidc` is the client underneath, and a second constructor argument
+  takes `logger` and `discoveryTtlMs`.
+- **Core is a peer dependency** of `fides-auth-next` and `fides-auth-react`.
+  Install it next to them, for example
+  `pnpm add @eventuras/fides-auth @eventuras/fides-auth-next`. All three need
+  Node 22.
 
 ### fides-auth-next
 

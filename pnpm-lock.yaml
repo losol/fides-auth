@@ -78,13 +78,13 @@ importers:
 
   packages/fides-auth-next:
     dependencies:
-      '@eventuras/fides-auth':
-        specifier: workspace:*
-        version: link:../fides-auth
       next:
         specifier: ^16.0.0
         version: 16.2.9(@opentelemetry/api@1.10.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     devDependencies:
+      '@eventuras/fides-auth':
+        specifier: workspace:*
+        version: link:../fides-auth
       '@eventuras/typescript-config':
         specifier: workspace:*
         version: link:../../config/typescript-config
@@ -108,11 +108,10 @@ importers:
         version: 4.1.10(@opentelemetry/api@1.10.0)(@types/node@24.13.2)(jsdom@30.1.3)(vite@8.3.5(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))
 
   packages/fides-auth-react:
-    dependencies:
+    devDependencies:
       '@eventuras/fides-auth':
         specifier: workspace:*
         version: link:../fides-auth
-    devDependencies:
       '@eventuras/typescript-config':
         specifier: workspace:*
         version: link:../../config/typescript-config

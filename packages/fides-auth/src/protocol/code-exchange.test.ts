@@ -1,5 +1,5 @@
 /**
- * Regression test for `exchangeAuthorizationCode` callback URL normalization.
+ * Regression test for `OidcClient.exchangeCode` callback URL normalization.
  *
  * If these tests fail, run from the repo root:
  *   pnpm --filter @eventuras/fides-auth test
@@ -13,28 +13,31 @@ vi.mock('openid-client', () => ({
 }));
 
 import * as openid from 'openid-client';
-import { clearDiscoveryCache } from './discovery.js';
-import { exchangeAuthorizationCode } from './code-exchange.js';
-import type { OAuthConfig } from './config.js';
 
-function makeOAuthConfig(overrides: Partial<OAuthConfig> = {}): OAuthConfig {
-  return {
-    issuer: 'https://auth.example.com',
-    clientId: 'test-client',
-    clientSecret: 'test-secret',
-    redirect_uri: 'https://app.example.com/callback',
-    scope: 'openid profile email',
-    ...overrides,
-  };
+import type { FidesLogger } from '../shared/logger.js';
+import { createOidcClient } from './client.js';
+
+const quiet = { create: (): FidesLogger => ({ debug() {}, info() {}, warn() {}, error() {} }) };
+
+/** Exchanges the code on `callbackUrl` with a new client. */
+function exchange(callbackUrl: URL, codeVerifier: string, state: string) {
+  const client = createOidcClient(
+    {
+      issuer: 'https://auth.example.com',
+      clientId: 'test-client',
+      clientSecret: 'test-secret',
+      redirectUri: 'https://app.example.com/callback',
+      scope: 'openid profile email',
+    },
+    { logger: quiet },
+  );
+  return client.exchangeCode(callbackUrl, { codeVerifier, state });
 }
 
 const discoveredConfig = {} as unknown as openid.Configuration;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Discovery is cached module-globally; without this a case would inherit the
-  // previous case's provider metadata.
-  clearDiscoveryCache();
   vi.mocked(openid.discovery).mockResolvedValue(discoveredConfig);
   vi.mocked(openid.authorizationCodeGrant).mockResolvedValue({
     access_token: 'access',
@@ -43,20 +46,15 @@ beforeEach(() => {
   } as openid.TokenEndpointResponse);
 });
 
-describe('exchangeAuthorizationCode — callback URL normalization', () => {
-  it('rewrites the callback URL origin to oauthConfig.redirect_uri before exchange', async () => {
+describe('exchangeCode — callback URL normalization', () => {
+  it('rewrites the callback URL origin to the configured redirectUri before exchange', async () => {
     // Reverse proxy without trust-proxy hands the pod an http:// request,
     // even though the public origin is https://.
     const proxyStrippedCallback = new URL(
       'http://pod.internal:3000/callback?code=auth-code-123&state=state-xyz',
     );
 
-    await exchangeAuthorizationCode(
-      makeOAuthConfig(),
-      proxyStrippedCallback,
-      'verifier-123',
-      'state-xyz',
-    );
+    await exchange(proxyStrippedCallback, 'verifier-123', 'state-xyz');
 
     const [, passedCallbackUrl] = vi.mocked(openid.authorizationCodeGrant).mock.calls[0];
     expect(passedCallbackUrl).toBeInstanceOf(URL);
@@ -75,12 +73,7 @@ describe('exchangeAuthorizationCode — callback URL normalization', () => {
     );
     expect(maliciousCallback.pathname).toBe('//evil.com/callback');
 
-    await exchangeAuthorizationCode(
-      makeOAuthConfig(),
-      maliciousCallback,
-      'verifier-789',
-      'state-pwn',
-    );
+    await exchange(maliciousCallback, 'verifier-789', 'state-pwn');
 
     const [, passedCallbackUrl] = vi.mocked(openid.authorizationCodeGrant).mock.calls[0];
     expect((passedCallbackUrl as URL).host).toBe('app.example.com');
@@ -92,12 +85,7 @@ describe('exchangeAuthorizationCode — callback URL normalization', () => {
       'https://app.example.com/callback?code=auth-code-456&state=state-abc',
     );
 
-    await exchangeAuthorizationCode(
-      makeOAuthConfig(),
-      matchingCallback,
-      'verifier-456',
-      'state-abc',
-    );
+    await exchange(matchingCallback, 'verifier-456', 'state-abc');
 
     const [, passedCallbackUrl] = vi.mocked(openid.authorizationCodeGrant).mock.calls[0];
     expect((passedCallbackUrl as URL).toString()).toBe(matchingCallback.toString());

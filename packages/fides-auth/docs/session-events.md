@@ -22,8 +22,8 @@ messages are for humans and may be reworded, names are the contract.
 | `session.cleared`        | info              | `trigger`            | `correlationId`                                  |
 
 A "may be absent" field is *omitted* when unknown, never logged as `null` —
-`logSessionEvent` drops undefined values, so an absent field costs the log
-backend nothing. Write queries that tolerate absence.
+the library drops undefined values, so an absent field costs the log backend
+nothing. Write queries that tolerate absence.
 
 `correlationId` is absent when no session was read to take it from, as for a
 request rejected with `no_session_cookie` or `unreadable_session`.
@@ -170,26 +170,26 @@ unrecognised value is dropped rather than passed through.
 
 ## Consuming the vocabulary
 
+The library logs these events through its `logger`. To send them somewhere
+else as well, a metrics pipeline say, pass `onSessionEvent` to
+`createFidesAuth`: it gets every event above as an object, with the same fields.
+
 `tryReadSession` and `refreshSession` on the `createFidesAuth` instance return
 the reason and cause instead of a bare `null`, so your own proxy and status
 routes can log the same words the library does:
 
 ```ts
-import { SESSION_EVENT, logSessionEvent } from "@eventuras/fides-auth/session-events";
+import { SESSION_EVENT } from "@eventuras/fides-auth/session-events";
 
 const { session, reason } = await auth.tryReadSession(cookies);
 if (!session) {
-  logSessionEvent(logger, {
-    event: SESSION_EVENT.REJECTED,
-    reason,
-    source: "proxy",
-  });
+  logger.info({ event: SESSION_EVENT.REJECTED, reason, source: "proxy" }, "Session rejected");
   return unauthorized();
 }
 ```
 
-`logSessionEvent` picks the level from the policy above, so every caller stays
-consistent without repeating it.
+Take the level from the `reason` table above, as the library does, so your
+lines and the library's agree.
 
 `refreshSession` returns `cause` on failure, so a route can answer 503 rather
 than end a session over a provider blip.

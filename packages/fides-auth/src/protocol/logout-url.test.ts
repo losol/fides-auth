@@ -15,17 +15,25 @@ vi.mock('openid-client', () => ({
 }));
 
 import * as openid from 'openid-client';
-import { clearDiscoveryCache } from './discovery.js';
-import { buildOidcLogoutUrl } from './logout-url.js';
-import type { OAuthConfig } from './config.js';
 
-const oauthConfig: OAuthConfig = {
+import type { FidesLogger } from '../shared/logger.js';
+import { createOidcClient } from './client.js';
+import type { OidcClientConfig } from './config.js';
+import type { OidcLogoutOptions } from './logout-url.js';
+
+const quiet = { create: (): FidesLogger => ({ debug() {}, info() {}, warn() {}, error() {} }) };
+
+const oauthConfig: OidcClientConfig = {
   issuer: 'https://auth.example.com',
   clientId: 'test-client',
   clientSecret: 'test-secret',
-  redirect_uri: 'https://app.example.com/callback',
+  redirectUri: 'https://app.example.com/callback',
   scope: 'openid profile email',
 };
+
+/** The logout URL from a new client, so each case discovers afresh. */
+const logoutUrl = (options: OidcLogoutOptions) =>
+  createOidcClient(oauthConfig, { logger: quiet }).logoutUrl(options);
 
 function mockDiscovery(endSessionEndpoint?: string) {
   vi.mocked(openid.discovery).mockResolvedValue({
@@ -51,16 +59,13 @@ function mockEndSessionUrl(endpoint: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Discovery is cached module-globally; without this a case would inherit the
-  // previous case's provider metadata.
-  clearDiscoveryCache();
   mockDiscovery('https://auth.example.com/connect/logout');
   mockEndSessionUrl('https://auth.example.com/connect/logout');
 });
 
-describe('buildOidcLogoutUrl', () => {
+describe('OidcClient.logoutUrl', () => {
   it('sends id_token_hint alongside post_logout_redirect_uri', async () => {
-    const url = await buildOidcLogoutUrl(oauthConfig, {
+    const url = await logoutUrl({
       postLogoutRedirectUri: 'https://app.example.com/',
       idTokenHint: 'the-id-token',
     });
@@ -70,7 +75,7 @@ describe('buildOidcLogoutUrl', () => {
   });
 
   it('keeps client_id when id_token_hint is present — the spec allows both', async () => {
-    const url = await buildOidcLogoutUrl(oauthConfig, {
+    const url = await logoutUrl({
       postLogoutRedirectUri: 'https://app.example.com/',
       idTokenHint: 'the-id-token',
     });
@@ -79,7 +84,7 @@ describe('buildOidcLogoutUrl', () => {
   });
 
   it('drops client_id only when includeClientId is false', async () => {
-    const url = await buildOidcLogoutUrl(oauthConfig, {
+    const url = await logoutUrl({
       idTokenHint: 'the-id-token',
       includeClientId: false,
     });
@@ -93,7 +98,7 @@ describe('buildOidcLogoutUrl', () => {
     mockDiscovery(endpoint);
     mockEndSessionUrl(endpoint);
 
-    const url = await buildOidcLogoutUrl(oauthConfig, {
+    const url = await logoutUrl({
       idTokenHint: 'the-id-token',
       includeClientId: false,
     });
@@ -102,7 +107,7 @@ describe('buildOidcLogoutUrl', () => {
   });
 
   it('passes state and logout_hint through when supplied', async () => {
-    const url = await buildOidcLogoutUrl(oauthConfig, {
+    const url = await logoutUrl({
       postLogoutRedirectUri: 'https://app.example.com/',
       state: 'correlation-123',
       logoutHint: 'ola@example.com',
@@ -113,7 +118,7 @@ describe('buildOidcLogoutUrl', () => {
   });
 
   it('omits parameters that were not supplied', async () => {
-    const url = await buildOidcLogoutUrl(oauthConfig, {
+    const url = await logoutUrl({
       postLogoutRedirectUri: 'https://app.example.com/',
     });
 
@@ -122,29 +127,21 @@ describe('buildOidcLogoutUrl', () => {
     expect(url?.searchParams.has('logout_hint')).toBe(false);
   });
 
-  it('accepts a string as shorthand for postLogoutRedirectUri (the pre-0.11 call)', async () => {
-    const url = await buildOidcLogoutUrl(oauthConfig, 'https://app.example.com/');
-
-    expect(url?.searchParams.get('post_logout_redirect_uri')).toBe('https://app.example.com/');
-    expect(url?.searchParams.get('client_id')).toBe('test-client');
-    expect(url?.searchParams.has('id_token_hint')).toBe(false);
-  });
-
   it('returns null when the provider advertises no end_session_endpoint', async () => {
     mockDiscovery(undefined);
-    expect(await buildOidcLogoutUrl(oauthConfig, { idTokenHint: 'x' })).toBeNull();
+    expect(await logoutUrl({ idTokenHint: 'x' })).toBeNull();
     expect(openid.buildEndSessionUrl).not.toHaveBeenCalled();
   });
 
   it('returns null when discovery fails', async () => {
     vi.mocked(openid.discovery).mockRejectedValue(new Error('unreachable'));
-    expect(await buildOidcLogoutUrl(oauthConfig, 'https://app.example.com/')).toBeNull();
+    expect(await logoutUrl({ postLogoutRedirectUri: 'https://app.example.com/' })).toBeNull();
   });
 
   it('refuses a non-https end_session_endpoint on the manual branch', async () => {
     mockDiscovery('http://auth.example.com/connect/logout');
 
-    const url = await buildOidcLogoutUrl(oauthConfig, {
+    const url = await logoutUrl({
       idTokenHint: 'the-id-token',
       includeClientId: false,
     });

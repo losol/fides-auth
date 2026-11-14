@@ -1,8 +1,9 @@
 # Discovery cache
 
 Every OIDC flow needs the provider's metadata — token endpoint, authorization
-endpoint, end-session endpoint. fides-auth fetches it once per provider and
-reuses it for five minutes.
+endpoint, end-session endpoint. An OIDC client from `createOidcClient` fetches
+it once and reuses it for five minutes. The instance from `createFidesAuth` has
+one such client.
 
 ## Why it matters
 
@@ -38,35 +39,20 @@ key rollover does not wait for this cache.
 
 ## Changing it
 
-```ts
-import { configureDiscoveryCache, clearDiscoveryCache } from "@eventuras/fides-auth/oidc-discovery";
-
-// Shorten the window, or pass 0 to discover on every call.
-configureDiscoveryCache({ ttlMs: 60_000 });
-
-// Drop everything now — after changing provider configuration you need picked
-// up immediately.
-clearDiscoveryCache();
-```
-
-Both are process-local: the cache lives in memory, so each instance of your app
-holds its own, and a deploy starts empty.
-
-If you write tests that mock discovery, call `clearDiscoveryCache()` between
-cases. The cache is module state and will otherwise serve one test's provider
-metadata to the next.
-
-## On an OIDC client
-
-A client from `createOidcClient` (`/oidc`) has its own cache, so it is neither
-shared with other clients nor touched by `configureDiscoveryCache` or
-`clearDiscoveryCache`. Set its TTL when you create it:
+Each client has its own cache, shared with no other client. Set its TTL when
+you create it:
 
 ```ts
 import { createOidcClient } from "@eventuras/fides-auth/oidc";
 
-const oidc = createOidcClient(oauthConfig, { discoveryTtlMs: 60_000 }); // 0 discovers on every call
+// Shorten the window, or pass 0 to discover on every call.
+const oidc = createOidcClient(oauthConfig, { discoveryTtlMs: 60_000 });
 ```
 
-To drop its cache, create a new client. Tests that create a client per case need
-no cache resets.
+A TTL that isn't a finite number of zero or more throws when the client is
+created. `Number(process.env.DISCOVERY_TTL)` is `NaN` when the variable is
+unset, and that would otherwise turn the cache off without a word in the logs.
+
+To drop the cache, create a new client. The cache lives in memory, so each
+instance of your app holds its own, and a deploy starts empty. Tests that
+create a client per case need no cache resets.

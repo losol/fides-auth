@@ -5,7 +5,7 @@
 import type { JWTPayload } from 'jose';
 import type * as openid from 'openid-client';
 
-import { createLogger, type FidesLoggerFactory } from '../shared/logger.js';
+import { consoleLoggerFactory, type FidesLoggerFactory } from '../shared/logger.js';
 import {
   createAuthorizationRequest,
   type AuthorizationRequest,
@@ -23,10 +23,7 @@ import { refresh } from './refresh.js';
 
 /** Options for {@link createOidcClient}. */
 export interface OidcClientOptions {
-  /**
-   * Creates the client's loggers. Defaults to the factory set with
-   * `configureLogger`, which writes JSON lines to the console unless changed.
-   */
+  /** Creates the client's loggers. Defaults to JSON lines on the console. */
   logger?: FidesLoggerFactory;
   /**
    * How long discovered metadata is reused, in milliseconds. `0` discovers on
@@ -108,9 +105,6 @@ export interface OidcClient {
   verifyIdToken(idToken: string, options?: VerifyOptions): Promise<JWTPayload>;
 }
 
-/** The default: loggers from the factory `configureLogger` set, JSON lines on the console unless changed. */
-const configuredLoggers: FidesLoggerFactory = { create: (options) => createLogger(options) };
-
 /**
  * Creates an OIDC client. It does no I/O until a method needs the provider.
  *
@@ -120,7 +114,7 @@ export function createOidcClient(
   config: OidcClientConfig,
   options: OidcClientOptions = {},
 ): OidcClient {
-  const loggers = options.logger ?? configuredLoggers;
+  const loggers = options.logger ?? consoleLoggerFactory;
   const ttlMs =
     options.discoveryTtlMs === undefined
       ? undefined

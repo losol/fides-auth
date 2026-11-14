@@ -1,13 +1,14 @@
 /**
- * Tests for buildPKCEOptions: the PKCE values, the assembled authorization
- * parameters, and the log line.
+ * Tests for createAuthorizationRequest: the PKCE values, the assembled
+ * authorization parameters, and the log line.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { configureLogger } from '../shared/logger.js';
-import { buildPKCEOptions } from './authorization-parameters.js';
+import type { FidesLogger } from '../shared/logger.js';
+import { createAuthorizationRequest } from './authorization-parameters.js';
+import type { OidcClientConfig } from './config.js';
+import type { ProtocolContext } from './context.js';
 import { defaultScope } from './scope.js';
-import type { OAuthConfig } from './config.js';
 
 // RFC 7636 Appendix B octets and the verifier/challenge they produce.
 const RFC_7636_OCTETS = [
@@ -21,22 +22,27 @@ const logs: { level: string; msg?: string; data?: Record<string, unknown> }[] = 
 const record = (level: string) => (data?: Record<string, unknown> | string, msg?: string) => {
   logs.push(typeof data === 'string' ? { level, msg: data } : { level, msg, data });
 };
-configureLogger({
-  create: () => ({
-    debug: record('debug'),
-    info: record('info'),
-    warn: record('warn'),
-    error: record('error'),
-  }),
-});
+const logger: FidesLogger = {
+  debug: record('debug'),
+  info: record('info'),
+  warn: record('warn'),
+  error: record('error'),
+};
 
-const oauthConfig: OAuthConfig = {
+const oauthConfig: OidcClientConfig = {
   issuer: 'https://auth.example.com',
   clientId: 'test-client',
   clientSecret: 'test-secret',
-  redirect_uri: 'https://app.example.com/callback',
+  redirectUri: 'https://app.example.com/callback',
   scope: 'openid profile',
 };
+
+/** No operation here needs the provider, so `configuration` is never called. */
+const ctx = (config: OidcClientConfig): ProtocolContext => ({
+  config,
+  configuration: () => Promise.reject(new Error('not used')),
+  logger,
+});
 
 beforeEach(() => {
   logs.length = 0;
@@ -46,7 +52,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('buildPKCEOptions', () => {
+describe('createAuthorizationRequest', () => {
   it('derives the S256 challenge from the verifier', async () => {
     // First draw is the verifier; the state draw stays random.
     vi.spyOn(crypto, 'getRandomValues').mockImplementationOnce(
@@ -56,27 +62,27 @@ describe('buildPKCEOptions', () => {
       },
     );
 
-    const pkce = await buildPKCEOptions(oauthConfig);
+    const pkce = await createAuthorizationRequest(ctx(oauthConfig));
 
-    expect(pkce.code_verifier).toBe(RFC_7636_VERIFIER);
-    expect(pkce.code_challenge).toBe(RFC_7636_CHALLENGE);
+    expect(pkce.codeVerifier).toBe(RFC_7636_VERIFIER);
+    expect(pkce.codeChallenge).toBe(RFC_7636_CHALLENGE);
     expect(pkce.state).not.toBe(RFC_7636_VERIFIER);
   });
 
   it('assembles the authorization parameters', async () => {
-    const pkce = await buildPKCEOptions(oauthConfig);
+    const pkce = await createAuthorizationRequest(ctx(oauthConfig));
 
     expect(pkce.parameters).toEqual({
       redirect_uri: 'https://app.example.com/callback',
       scope: 'openid profile',
-      code_challenge: pkce.code_challenge,
+      code_challenge: pkce.codeChallenge,
       code_challenge_method: 'S256',
       state: pkce.state,
     });
   });
 
   it('creates a fresh state each call', async () => {
-    const [a, b] = await Promise.all([buildPKCEOptions(oauthConfig), buildPKCEOptions(oauthConfig)]);
+    const [a, b] = await Promise.all([createAuthorizationRequest(ctx(oauthConfig)), createAuthorizationRequest(ctx(oauthConfig))]);
 
     expect(a.state).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(a.state).not.toBe(b.state);
@@ -84,13 +90,13 @@ describe('buildPKCEOptions', () => {
 
   it('falls back to defaultScope when scope is missing', async () => {
     const { scope: _scope, ...withoutScope } = oauthConfig;
-    const pkce = await buildPKCEOptions(withoutScope as OAuthConfig);
+    const pkce = await createAuthorizationRequest(ctx(withoutScope as OidcClientConfig));
 
     expect(pkce.parameters.scope).toBe(defaultScope);
   });
 
   it('logs at debug, not info', async () => {
-    await buildPKCEOptions(oauthConfig);
+    await createAuthorizationRequest(ctx(oauthConfig));
 
     expect(logs).toEqual([
       expect.objectContaining({ level: 'debug', msg: 'PKCE parameters generated' }),
@@ -98,30 +104,30 @@ describe('buildPKCEOptions', () => {
   });
 
   it('joins an array scope with spaces', async () => {
-    const pkce = await buildPKCEOptions({ ...oauthConfig, scope: ['openid', 'profile', 'email'] });
+    const pkce = await createAuthorizationRequest(ctx({ ...oauthConfig, scope: ['openid', 'profile', 'email'] }));
 
     expect(pkce.parameters.scope).toBe('openid profile email');
   });
 });
 
-describe('buildPKCEOptions — extra authorization parameters', () => {
-  it('adds OAuthConfig.authorizationParameters', async () => {
-    const pkce = await buildPKCEOptions({
+describe('createAuthorizationRequest — extra authorization parameters', () => {
+  it('adds authorizationParameters from the config', async () => {
+    const pkce = await createAuthorizationRequest(ctx({
       ...oauthConfig,
       authorizationParameters: { prompt: 'login', resource: 'https://api.example.com' },
-    });
+    }));
 
     expect(pkce.parameters).toMatchObject({
       prompt: 'login',
       resource: 'https://api.example.com',
       state: pkce.state,
-      code_challenge: pkce.code_challenge,
+      code_challenge: pkce.codeChallenge,
     });
   });
 
   it('merges per-request parameters over the config ones', async () => {
-    const pkce = await buildPKCEOptions(
-      { ...oauthConfig, authorizationParameters: { prompt: 'login', ui_locales: 'nb' } },
+    const pkce = await createAuthorizationRequest(
+      ctx({ ...oauthConfig, authorizationParameters: { prompt: 'login', ui_locales: 'nb' } }),
       { parameters: { prompt: 'consent', login_hint: 'user@example.com' } },
     );
 
@@ -132,8 +138,8 @@ describe('buildPKCEOptions — extra authorization parameters', () => {
     });
   });
 
-  it('lets an extra scope replace OAuthConfig.scope', async () => {
-    const pkce = await buildPKCEOptions(oauthConfig, { parameters: { scope: 'openid admin' } });
+  it('lets an extra scope replace the configured scope', async () => {
+    const pkce = await createAuthorizationRequest(ctx(oauthConfig), { parameters: { scope: 'openid admin' } });
 
     expect(pkce.parameters.scope).toBe('openid admin');
   });
@@ -152,22 +158,22 @@ describe('buildPKCEOptions — extra authorization parameters', () => {
     'rejects reserved key %s from either source',
     async (key) => {
       await expect(
-        buildPKCEOptions({ ...oauthConfig, authorizationParameters: { [key]: 'x' } }),
+        createAuthorizationRequest(ctx({ ...oauthConfig, authorizationParameters: { [key]: 'x' } })),
       ).rejects.toThrow(`Reserved authorization parameters can't be overridden: ${key}`);
       await expect(
-        buildPKCEOptions(oauthConfig, { parameters: { [key]: 'x' } }),
+        createAuthorizationRequest(ctx(oauthConfig), { parameters: { [key]: 'x' } }),
       ).rejects.toThrow(`Reserved authorization parameters can't be overridden: ${key}`);
     },
   );
 
   it('names every reserved key it rejects', async () => {
     await expect(
-      buildPKCEOptions(oauthConfig, { parameters: { state: 'a', prompt: 'login', redirect_uri: 'b' } }),
+      createAuthorizationRequest(ctx(oauthConfig), { parameters: { state: 'a', prompt: 'login', redirect_uri: 'b' } }),
     ).rejects.toThrow("Reserved authorization parameters can't be overridden: state, redirect_uri");
   });
 
   it('logs the extra parameter names, not their values', async () => {
-    await buildPKCEOptions(oauthConfig, { parameters: { login_hint: 'user@example.com' } });
+    await createAuthorizationRequest(ctx(oauthConfig), { parameters: { login_hint: 'user@example.com' } });
 
     expect(logs[0]?.data).toMatchObject({ extraParameters: ['login_hint'] });
     expect(JSON.stringify(logs)).not.toContain('user@example.com');

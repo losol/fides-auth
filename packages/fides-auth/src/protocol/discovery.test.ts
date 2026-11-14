@@ -21,19 +21,19 @@ vi.mock('openid-client', () => ({
 
 import * as openid from 'openid-client';
 
-import {
-  clearDiscoveryCache,
-  configureDiscoveryCache,
-  discoverConfiguration,
-} from './discovery.js';
-import { refreshAccessToken } from './refresh.js';
-import type { OAuthConfig } from './config.js';
+import type { FidesLogger } from '../shared/logger.js';
+import { createOidcClient } from './client.js';
+import type { OidcClientConfig } from './config.js';
+import { checkTtl, createDiscoveryCache, type DiscoveryCache } from './discovery.js';
 
-const config: OAuthConfig = {
+const quietLogger: FidesLogger = { debug() {}, info() {}, warn() {}, error() {} };
+const quiet = { create: () => quietLogger };
+
+const config: OidcClientConfig = {
   issuer: 'https://auth.example.test',
   clientId: 'client-a',
   clientSecret: 'secret-a',
-  redirect_uri: 'https://app.example.test/callback',
+  redirectUri: 'https://app.example.test/callback',
   scope: 'openid',
 };
 
@@ -41,11 +41,11 @@ const config: OAuthConfig = {
 const keyA = { type: 'private' } as unknown as CryptoKey;
 const keyB = { type: 'private' } as unknown as CryptoKey;
 
-function keyConfig(privateKey: CryptoKey | openid.PrivateKey): OAuthConfig {
+function keyConfig(privateKey: CryptoKey | openid.PrivateKey): OidcClientConfig {
   return {
     issuer: config.issuer,
     clientId: config.clientId,
-    redirect_uri: config.redirect_uri,
+    redirectUri: config.redirectUri,
     scope: config.scope,
     clientAuth: 'private_key_jwt',
     privateKey,
@@ -57,23 +57,24 @@ function discovered(tag: string) {
   return { tag } as unknown as openid.Configuration;
 }
 
+let cache: DiscoveryCache;
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
-  configureDiscoveryCache({ ttlMs: 300_000 });
+  cache = createDiscoveryCache(quietLogger);
 });
 
 afterEach(() => {
   vi.useRealTimers();
-  clearDiscoveryCache();
 });
 
-describe('discoverConfiguration — caching', () => {
+describe('createDiscoveryCache — caching', () => {
   it('discovers once and reuses the result', async () => {
     vi.mocked(openid.discovery).mockResolvedValue(discovered('first'));
 
-    const a = await discoverConfiguration(config);
-    const b = await discoverConfiguration(config);
+    const a = await cache.discover(config);
+    const b = await cache.discover(config);
 
     expect(openid.discovery).toHaveBeenCalledTimes(1);
     expect(b).toBe(a);
@@ -91,7 +92,7 @@ describe('discoverConfiguration — caching', () => {
     );
 
     const pending = Promise.all(
-      Array.from({ length: 10 }, () => discoverConfiguration(config)),
+      Array.from({ length: 10 }, () => cache.discover(config)),
     );
     resolve(discovered('shared'));
     const results = await pending;
@@ -104,13 +105,13 @@ describe('discoverConfiguration — caching', () => {
     vi.mocked(openid.discovery)
       .mockResolvedValueOnce(discovered('first'))
       .mockResolvedValueOnce(discovered('second'));
-    configureDiscoveryCache({ ttlMs: 1_000 });
+    cache = createDiscoveryCache(quietLogger, 1_000);
 
-    const first = await discoverConfiguration(config);
+    const first = await cache.discover(config);
 
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 1_001);
-    const second = await discoverConfiguration(config);
+    const second = await cache.discover(config);
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
     expect(second).not.toBe(first);
@@ -121,8 +122,8 @@ describe('discoverConfiguration — caching', () => {
       .mockResolvedValueOnce(discovered('a'))
       .mockResolvedValueOnce(discovered('b'));
 
-    await discoverConfiguration(config);
-    await discoverConfiguration({ ...config, issuer: 'https://other.example.test' });
+    await cache.discover(config);
+    await cache.discover({ ...config, issuer: 'https://other.example.test' });
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
   });
@@ -132,8 +133,8 @@ describe('discoverConfiguration — caching', () => {
       .mockResolvedValueOnce(discovered('a'))
       .mockResolvedValueOnce(discovered('b'));
 
-    await discoverConfiguration(config);
-    await discoverConfiguration({ ...config, clientId: 'client-b' });
+    await cache.discover(config);
+    await cache.discover({ ...config, clientId: 'client-b' });
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
   });
@@ -145,8 +146,8 @@ describe('discoverConfiguration — caching', () => {
       .mockResolvedValueOnce(discovered('old'))
       .mockResolvedValueOnce(discovered('new'));
 
-    await discoverConfiguration(config);
-    const after = await discoverConfiguration({ ...config, clientSecret: 'secret-b' });
+    await cache.discover(config);
+    const after = await cache.discover({ ...config, clientSecret: 'secret-b' });
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
     expect(after).toEqual(discovered('new'));
@@ -157,8 +158,8 @@ describe('discoverConfiguration — caching', () => {
       .mockResolvedValueOnce(discovered('post'))
       .mockResolvedValueOnce(discovered('basic'));
 
-    await discoverConfiguration(config);
-    const basic = await discoverConfiguration({ ...config, clientAuth: 'client_secret_basic' });
+    await cache.discover(config);
+    const basic = await cache.discover({ ...config, clientAuth: 'client_secret_basic' });
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
     expect(basic).toEqual(discovered('basic'));
@@ -167,8 +168,8 @@ describe('discoverConfiguration — caching', () => {
   it('reuses an entry for the same private key', async () => {
     vi.mocked(openid.discovery).mockResolvedValue(discovered('key'));
 
-    await discoverConfiguration(keyConfig(keyA));
-    await discoverConfiguration(keyConfig(keyA));
+    await cache.discover(keyConfig(keyA));
+    await cache.discover(keyConfig(keyA));
 
     expect(openid.discovery).toHaveBeenCalledTimes(1);
   });
@@ -178,8 +179,8 @@ describe('discoverConfiguration — caching', () => {
       .mockResolvedValueOnce(discovered('old'))
       .mockResolvedValueOnce(discovered('new'));
 
-    await discoverConfiguration(keyConfig(keyA));
-    const after = await discoverConfiguration(keyConfig(keyB));
+    await cache.discover(keyConfig(keyA));
+    const after = await cache.discover(keyConfig(keyB));
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
     expect(after).toEqual(discovered('new'));
@@ -189,23 +190,23 @@ describe('discoverConfiguration — caching', () => {
     // A wrapper rebuilt per call must not defeat the cache; a new kid must.
     vi.mocked(openid.discovery).mockResolvedValue(discovered('key'));
 
-    await discoverConfiguration(keyConfig({ key: keyA, kid: '1' }));
-    await discoverConfiguration(keyConfig({ key: keyA, kid: '1' }));
-    await discoverConfiguration(keyConfig({ key: keyA, kid: '2' }));
+    await cache.discover(keyConfig({ key: keyA, kid: '1' }));
+    await cache.discover(keyConfig({ key: keyA, kid: '1' }));
+    await cache.discover(keyConfig({ key: keyA, kid: '2' }));
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
   });
 });
 
-describe('discoverConfiguration — serverMetadata', () => {
+describe('createDiscoveryCache — serverMetadata', () => {
   const metadata = {
     issuer: config.issuer,
     token_endpoint: `${config.issuer}/token`,
   } as openid.ServerMetadata;
-  const withMetadata: OAuthConfig = { ...config, serverMetadata: metadata };
+  const withMetadata: OidcClientConfig = { ...config, serverMetadata: metadata };
 
   it('builds the configuration without discovering', async () => {
-    await discoverConfiguration(withMetadata);
+    await cache.discover(withMetadata);
 
     expect(openid.discovery).not.toHaveBeenCalled();
     expect(openid.Configuration).toHaveBeenCalledWith(
@@ -217,8 +218,8 @@ describe('discoverConfiguration — serverMetadata', () => {
   });
 
   it('caches it like a discovered configuration', async () => {
-    const a = await discoverConfiguration(withMetadata);
-    const b = await discoverConfiguration(withMetadata);
+    const a = await cache.discover(withMetadata);
+    const b = await cache.discover(withMetadata);
 
     expect(openid.Configuration).toHaveBeenCalledTimes(1);
     expect(b).toBe(a);
@@ -227,16 +228,16 @@ describe('discoverConfiguration — serverMetadata', () => {
   it('does not serve a discovered entry once serverMetadata is set', async () => {
     vi.mocked(openid.discovery).mockResolvedValue(discovered('discovered'));
 
-    await discoverConfiguration(config);
-    const built = await discoverConfiguration(withMetadata);
+    await cache.discover(config);
+    const built = await cache.discover(withMetadata);
 
     expect(openid.Configuration).toHaveBeenCalledTimes(1);
     expect(built).not.toEqual(discovered('discovered'));
   });
 
   it('treats new metadata as a new entry', async () => {
-    await discoverConfiguration(withMetadata);
-    await discoverConfiguration({ ...config, serverMetadata: { ...metadata } });
+    await cache.discover(withMetadata);
+    await cache.discover({ ...config, serverMetadata: { ...metadata } });
 
     expect(openid.Configuration).toHaveBeenCalledTimes(2);
   });
@@ -246,7 +247,7 @@ describe('discoverConfiguration — serverMetadata', () => {
     const noIssuer = { token_endpoint: metadata.token_endpoint } as openid.ServerMetadata;
 
     await expect(
-      discoverConfiguration({ ...config, scope: 'profile openid', serverMetadata: noIssuer }),
+      cache.discover({ ...config, scope: 'profile openid', serverMetadata: noIssuer }),
     ).rejects.toThrow(/serverMetadata\.issuer is required/);
     expect(openid.Configuration).not.toHaveBeenCalled();
   });
@@ -254,7 +255,7 @@ describe('discoverConfiguration — serverMetadata', () => {
   it('allows a missing issuer when openid is not requested', async () => {
     const noIssuer = { token_endpoint: metadata.token_endpoint } as openid.ServerMetadata;
 
-    await discoverConfiguration({ ...config, scope: 'api:read', serverMetadata: noIssuer });
+    await cache.discover({ ...config, scope: 'api:read', serverMetadata: noIssuer });
 
     expect(openid.Configuration).toHaveBeenCalledTimes(1);
   });
@@ -263,24 +264,24 @@ describe('discoverConfiguration — serverMetadata', () => {
     const noIssuer = { token_endpoint: metadata.token_endpoint } as openid.ServerMetadata;
 
     await expect(
-      discoverConfiguration({ ...config, scope: ['profile', 'openid'], serverMetadata: noIssuer }),
+      cache.discover({ ...config, scope: ['profile', 'openid'], serverMetadata: noIssuer }),
     ).rejects.toThrow(/serverMetadata\.issuer is required/);
-    await discoverConfiguration({ ...config, scope: ['api:read'], serverMetadata: noIssuer });
+    await cache.discover({ ...config, scope: ['api:read'], serverMetadata: noIssuer });
 
     expect(openid.Configuration).toHaveBeenCalledTimes(1);
   });
 });
 
-describe('discoverConfiguration — failures', () => {
+describe('createDiscoveryCache — failures', () => {
   it('retries instead of remembering a provider as broken', async () => {
     vi.mocked(openid.discovery)
       .mockRejectedValueOnce(new Error('unreachable'))
       .mockResolvedValueOnce(discovered('recovered'));
 
-    await expect(discoverConfiguration(config)).rejects.toThrow('unreachable');
+    await expect(cache.discover(config)).rejects.toThrow('unreachable');
     // A cached rejection would keep every later call failing for the whole TTL,
     // turning one blip into five minutes of downtime.
-    await expect(discoverConfiguration(config)).resolves.toEqual(discovered('recovered'));
+    await expect(cache.discover(config)).resolves.toEqual(discovered('recovered'));
     expect(openid.discovery).toHaveBeenCalledTimes(2);
   });
 
@@ -290,59 +291,41 @@ describe('discoverConfiguration — failures', () => {
     const cause = Object.assign(new TypeError('fetch failed'), { code: 'ECONNREFUSED' });
     vi.mocked(openid.discovery).mockRejectedValue(cause);
 
-    await expect(discoverConfiguration(config)).rejects.toBe(cause);
+    await expect(cache.discover(config)).rejects.toBe(cause);
   });
 });
 
-describe('configureDiscoveryCache', () => {
-  it('disables caching at ttlMs 0', async () => {
-    vi.mocked(openid.discovery).mockResolvedValue(discovered('always'));
-    configureDiscoveryCache({ ttlMs: 0 });
-
-    await discoverConfiguration(config);
-    await discoverConfiguration(config);
-
-    expect(openid.discovery).toHaveBeenCalledTimes(2);
+describe('createDiscoveryCache — TTL', () => {
+  it('caches for five minutes by default', () => {
+    expect(cache.ttlMs).toBe(300_000);
   });
 
-  it('drops existing entries so a new setting takes effect at once', async () => {
-    vi.mocked(openid.discovery).mockResolvedValue(discovered('x'));
+  it('disables caching at ttlMs 0', async () => {
+    vi.mocked(openid.discovery).mockResolvedValue(discovered('always'));
+    cache = createDiscoveryCache(quietLogger, 0);
 
-    await discoverConfiguration(config);
-    configureDiscoveryCache({ ttlMs: 60_000 });
-    await discoverConfiguration(config);
+    await cache.discover(config);
+    await cache.discover(config);
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
   });
 
   it.each([[NaN], [Infinity], [-Infinity], [-1]])(
-    'rejects ttlMs %p rather than quietly disabling the cache',
+    'checkTtl rejects %p rather than quietly disabling the cache',
     (ttlMs) => {
       // NaN is what Number(process.env.DISCOVERY_TTL) yields when the variable
       // is unset, and it would otherwise restore a discovery round-trip on every
       // token operation with nothing in the logs to say so.
-      expect(() => configureDiscoveryCache({ ttlMs })).toThrow(TypeError);
+      expect(() => checkTtl(ttlMs, 'ttlMs')).toThrow(TypeError);
     },
   );
 
-  it('leaves the existing setting intact when it rejects a value', async () => {
-    vi.mocked(openid.discovery).mockResolvedValue(discovered('x'));
-    configureDiscoveryCache({ ttlMs: 60_000 });
-
-    expect(() => configureDiscoveryCache({ ttlMs: NaN })).toThrow();
-
-    // Still caching on the previous setting, not half-applied.
-    await discoverConfiguration(config);
-    await discoverConfiguration(config);
-    expect(openid.discovery).toHaveBeenCalledTimes(1);
-  });
-
-  it('clearDiscoveryCache forces the next call to rediscover', async () => {
+  it('clear forces the next call to rediscover', async () => {
     vi.mocked(openid.discovery).mockResolvedValue(discovered('x'));
 
-    await discoverConfiguration(config);
-    clearDiscoveryCache();
-    await discoverConfiguration(config);
+    await cache.discover(config);
+    cache.clear();
+    await cache.discover(config);
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
   });
@@ -350,18 +333,19 @@ describe('configureDiscoveryCache', () => {
 
 describe('the refresh hot path', () => {
   it('stops re-discovering on every heartbeat', async () => {
-    // This is the reason the cache exists. Every heartbeat calls
-    // refreshAccessToken, which used to perform a full discovery round-trip
-    // before the token request — doubling latency, provider load, and the
-    // surface on which a refresh can fail.
+    // This is the reason the cache exists. Without it, every heartbeat's
+    // refresh would start with a full discovery round-trip before the token
+    // request — doubling latency, provider load, and the surface on which a
+    // refresh can fail.
     vi.mocked(openid.discovery).mockResolvedValue(discovered('idp'));
     vi.mocked(openid.refreshTokenGrant).mockResolvedValue({
       access_token: 'access',
       token_type: 'bearer',
     } as unknown as openid.TokenEndpointResponse);
 
+    const client = createOidcClient(config, { logger: quiet });
     for (let beat = 0; beat < 5; beat++) {
-      await refreshAccessToken(config, 'refresh-token');
+      await client.refresh('refresh-token');
     }
 
     expect(openid.refreshTokenGrant).toHaveBeenCalledTimes(5);
@@ -369,15 +353,15 @@ describe('the refresh hot path', () => {
   });
 
   it('still reaches the provider when discovery is disabled from cache', async () => {
-    configureDiscoveryCache({ ttlMs: 0 });
+    const client = createOidcClient(config, { logger: quiet, discoveryTtlMs: 0 });
     vi.mocked(openid.discovery).mockResolvedValue(discovered('idp'));
     vi.mocked(openid.refreshTokenGrant).mockResolvedValue({
       access_token: 'access',
       token_type: 'bearer',
     } as unknown as openid.TokenEndpointResponse);
 
-    await refreshAccessToken(config, 'refresh-token');
-    await refreshAccessToken(config, 'refresh-token');
+    await client.refresh('refresh-token');
+    await client.refresh('refresh-token');
 
     expect(openid.discovery).toHaveBeenCalledTimes(2);
   });

@@ -1,42 +1,11 @@
-import { decodeJwt, type JWTPayload } from 'jose';
+import type { JWTPayload } from 'jose';
 
-import { createLogger } from '../shared/logger.js';
-import type { TokenResponse } from '../shared/types.js';
-
-const logger = createLogger({ namespace: 'fides-auth:oauth' });
-
-/**
- * Result of extracting user information from an OIDC token response.
- */
+/** The user from ID token claims, as {@link userFromClaims} reads them. */
 export interface OidcUserInfo {
   sub: string;
   name: string;
   email: string;
   roles: string[];
-}
-
-/**
- * Extracts user information from an OIDC token response.
- * Decodes the ID token and extracts standard claims plus roles from a configurable claim.
- *
- * Decodes only: the signature, `iss`, `aud` and `exp` are not checked. Safe on tokens
- * straight from `exchangeAuthorizationCode`; verify any others first (e.g. jose `jwtVerify`).
- *
- * @param tokens - Token response from the OIDC provider
- * @param rolesClaim - Name of the claim containing user roles (default: 'roles')
- * @returns Extracted user information
- *
- * @deprecated Use `userFromClaims(await oidc.verifyIdToken(tokens.id_token))` from `@eventuras/fides-auth/oidc`, which verifies the token first.
- */
-export function extractUserFromTokens(
-  tokens: TokenResponse,
-  rolesClaim: string = 'roles',
-): OidcUserInfo {
-  if (!tokens.id_token) {
-    throw new Error('OIDC token response is missing id_token');
-  }
-
-  return userFromClaims(decodeJwt(tokens.id_token), rolesClaim);
 }
 
 /**
@@ -48,8 +17,6 @@ export function userFromClaims(idToken: JWTPayload, rolesClaim = 'roles'): OidcU
   const rawRoles = idToken[rolesClaim];
   const nonArrayRoles = typeof rawRoles === 'string' ? [rawRoles] : [];
   const roles = Array.isArray(rawRoles) ? rawRoles : nonArrayRoles;
-
-  logger.debug({ sub: idToken.sub, rolesClaim, rolesCount: roles.length }, 'Extracted user from ID token');
 
   return {
     sub: idToken.sub ?? '',

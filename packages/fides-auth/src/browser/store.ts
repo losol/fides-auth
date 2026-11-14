@@ -5,7 +5,7 @@
 // nothing else: no cookies, no tokens, no network beyond the session check.
 // Any UI layer can subscribe; @eventuras/fides-auth-react does so for React.
 
-import { createLogger, type FidesLoggerFactory } from '../shared/logger.js';
+import { consoleLoggerFactory, type FidesLoggerFactory } from '../shared/logger.js';
 import type { Session, SessionInfo } from '../shared/types.js';
 
 /** The user the session info endpoint reports. */
@@ -37,7 +37,7 @@ export interface AuthStoreConfig {
    * @default 'Admin'
    */
   adminRole?: string;
-  /** Creates the logger. Defaults to the factory `configureLogger` set. */
+  /** Creates the logger. Defaults to JSON lines on the console. */
   logger?: FidesLoggerFactory;
 }
 
@@ -98,7 +98,7 @@ export function createAuthStore(config: AuthStoreConfig = {}): AuthStore {
   const sessionEndpoint = config.sessionEndpoint ?? '/api/auth/session';
   const adminRole = config.adminRole ?? 'Admin';
   const check = config.checkAuthStatus ?? (() => fetchSessionInfo(sessionEndpoint));
-  const logger = (config.logger ?? { create: createLogger }).create({
+  const logger = (config.logger ?? consoleLoggerFactory).create({
     namespace: 'fides-auth:browser:store',
   });
 

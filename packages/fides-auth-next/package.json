@@ -32,10 +32,8 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "dependencies": {
-    "@eventuras/fides-auth": "workspace:*"
-  },
   "devDependencies": {
+    "@eventuras/fides-auth": "workspace:*",
     "@eventuras/typescript-config": "workspace:*",
     "@eventuras/vite-config": "workspace:*",
     "@types/react": "^19.3.0",
@@ -45,7 +43,11 @@
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
+    "@eventuras/fides-auth": "workspace:^",
     "next": "^16.0.0",
     "react": "^19.0.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

@@ -1,7 +1,7 @@
 /**
  * Tests for `createOidcClient`: each client has its own discovery cache, JWKS
  * cache and loggers, it does no I/O until a method needs the provider, and its
- * methods run the same protocol code as the free functions in /oauth.
+ * methods reach openid-client with the right arguments.
  */
 import { exportJWK, generateKeyPair, type JWK, SignJWT } from 'jose';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,7 +25,6 @@ import * as openid from 'openid-client';
 import type { FidesLoggerFactory } from '../shared/logger.js';
 import { createOidcClient } from './client.js';
 import type { OidcClientConfig } from './config.js';
-import { clearDiscoveryCache, discoverConfiguration } from './discovery.js';
 
 const issuer = 'https://auth.example.test';
 const jwksUri = `${issuer}/jwks`;
@@ -69,7 +68,6 @@ const tokens = { access_token: 'access', token_type: 'bearer' } as openid.TokenE
 
 beforeEach(() => {
   vi.clearAllMocks();
-  clearDiscoveryCache();
   vi.mocked(openid.discovery).mockResolvedValue(discovered());
   vi.mocked(openid.buildAuthorizationUrl).mockImplementation(
     (_config, parameters) => new URL(`${issuer}/authorize?${new URLSearchParams(parameters as Record<string, string>)}`),
@@ -100,17 +98,6 @@ describe('createOidcClient: state', () => {
     await createOidcClient(config).metadata();
     await createOidcClient(config).metadata();
 
-    expect(openid.discovery).toHaveBeenCalledTimes(2);
-  });
-
-  it('is independent of the module-level cache that the free functions use', async () => {
-    const client = createOidcClient(config);
-    await client.metadata();
-    await discoverConfiguration({ ...config, redirect_uri: 'https://app.example.test/callback' });
-    expect(openid.discovery).toHaveBeenCalledTimes(2);
-
-    clearDiscoveryCache();
-    await client.metadata();
     expect(openid.discovery).toHaveBeenCalledTimes(2);
   });
 
@@ -166,24 +153,6 @@ describe('createOidcClient: state', () => {
 
 describe('createOidcClient: redirect URI', () => {
   const { redirectUri: _unused, ...withoutRedirect } = config;
-
-  it('takes the older redirect_uri spelling', async () => {
-    const client = createOidcClient({
-      ...withoutRedirect,
-      redirect_uri: 'https://legacy.example.test/callback',
-    } as OidcClientConfig);
-    const request = await client.createAuthorizationRequest();
-
-    expect(request.parameters.redirect_uri).toBe('https://legacy.example.test/callback');
-  });
-
-  it('takes both spellings when they agree, and rejects them when they differ', async () => {
-    const same = createOidcClient({ ...config, redirect_uri: config.redirectUri });
-    await expect(same.createAuthorizationRequest()).resolves.toBeDefined();
-
-    const different = createOidcClient({ ...config, redirect_uri: 'https://other.example.test/cb' });
-    await expect(different.createAuthorizationRequest()).rejects.toThrow(TypeError);
-  });
 
   it('is needed only by the operations that use it', async () => {
     const client = createOidcClient(withoutRedirect as OidcClientConfig);

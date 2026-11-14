@@ -11,7 +11,7 @@ import {
   DEFAULT_ACTIVITY_EVENTS,
   type ActivityTracker,
 } from './activity-tracker.js';
-import { createLogger, type FidesLoggerFactory } from '../shared/logger.js';
+import { consoleLoggerFactory, type FidesLoggerFactory } from '../shared/logger.js';
 import {
   SESSION_EVENT,
   isSessionRejectedReason,
@@ -105,7 +105,7 @@ export interface HeartbeatConfig {
    */
   onEvent?: (event: SessionClientEvent) => void;
 
-  /** Creates the logger. Defaults to the factory `configureLogger` set. */
+  /** Creates the logger. Defaults to JSON lines on the console. */
   logger?: FidesLoggerFactory;
 }
 
@@ -166,7 +166,7 @@ export function createHeartbeat(config: HeartbeatConfig = {}): HeartbeatHandle {
   const minRefreshIntervalMs = config.minRefreshIntervalMs ?? DEFAULTS.minRefreshIntervalMs;
   const idleThresholdMs = config.idleThresholdMs ?? DEFAULTS.idleThresholdMs;
   const initialExpiresAt = toEpochMs(config.initialExpiresAt);
-  const logger = (config.logger ?? { create: createLogger }).create({
+  const logger = (config.logger ?? consoleLoggerFactory).create({
     namespace: 'fides-auth:browser:heartbeat',
   });
 

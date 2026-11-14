@@ -4,7 +4,7 @@
 // detects a session that has ended; it never refreshes one. The heartbeat is
 // the part that keeps an active user's session alive.
 
-import { createLogger, type FidesLoggerFactory } from '../shared/logger.js';
+import { consoleLoggerFactory, type FidesLoggerFactory } from '../shared/logger.js';
 import { SESSION_EVENT, type SessionClientEvent } from '../shared/session-events.js';
 import { isInvalidGrant, type AuthStore } from './store.js';
 
@@ -25,7 +25,7 @@ export interface SessionMonitorConfig {
    * of a session's story. The library ships no transport.
    */
   onEvent?: (event: SessionClientEvent) => void;
-  /** Creates the logger. Defaults to the factory `configureLogger` set. */
+  /** Creates the logger. Defaults to JSON lines on the console. */
   logger?: FidesLoggerFactory;
 }
 
@@ -46,7 +46,7 @@ export interface SessionMonitorConfig {
  */
 export function startSessionMonitor(store: AuthStore, config: SessionMonitorConfig = {}): () => void {
   const interval = config.interval ?? 30_000;
-  const logger = (config.logger ?? { create: createLogger }).create({
+  const logger = (config.logger ?? consoleLoggerFactory).create({
     namespace: 'fides-auth:browser:session-monitor',
   });
 

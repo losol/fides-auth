@@ -1,13 +1,13 @@
-/**
- * Fides Auth - OAuth/OIDC Authentication Library
- *
- * Generic authentication utilities with support for multiple providers.
- */
+// The root entry: the types the other entries share. It has no runtime code.
 
-export * from './shared/cookies.js';
-export * from './shared/logger.js';
-export * from './protocol/logging.js';
-export * from './shared/session-events.js';
-export * from './session/utils.js';
-export * from './shared/types.js';
-export type { ClientAuthConfig, OAuthConfig } from './protocol/config.js';
+export type { ClientAuthConfig, OidcClientConfig } from './protocol/config.js';
+export type { CookieOptions } from './shared/cookies.js';
+export type { FidesLogger, FidesLoggerFactory, FidesLoggerOptions } from './shared/logger.js';
+export type {
+  HeartbeatResponse,
+  IdpSession,
+  Session,
+  SessionInfo,
+  TokenResponse,
+  Tokens,
+} from './shared/types.js';

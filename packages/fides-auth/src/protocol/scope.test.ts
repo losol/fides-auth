@@ -1,6 +1,7 @@
 /**
- * Tests that an array `OAuthConfig.scope` reaches the wire as one space-separated string.
- * Authorize and PAR are covered in oauth.build-pkce-options.test.ts and oauth.par.test.ts.
+ * Tests that an array scope reaches the wire as one space-separated string.
+ * Authorize and PAR are covered in authorization-parameters.test.ts and
+ * authorization-url.par.test.ts.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,28 +14,28 @@ vi.mock('openid-client', () => ({
 
 import * as openid from 'openid-client';
 
+import type { FidesLogger } from '../shared/logger.js';
+import { createOidcClient } from './client.js';
 import { joinScope } from './scope.js';
-import { refreshAccessToken } from './refresh.js';
-import type { OAuthConfig } from './config.js';
-import { getOAuthConfigLogContext } from './logging.js';
-import { clearDiscoveryCache } from './discovery.js';
-import { buildSilentLoginUrl } from './silent-login.js';
 
-const discovered = {} as openid.Configuration;
+const quiet = { create: (): FidesLogger => ({ debug() {}, info() {}, warn() {}, error() {} }) };
+const discovered = { serverMetadata: () => ({}) } as unknown as openid.Configuration;
 
-function makeConfig(scope: string | string[]): OAuthConfig {
-  return {
-    issuer: 'https://auth.example.com',
-    clientId: 'test-client',
-    clientSecret: 'test-secret',
-    redirect_uri: 'https://app.example.com/callback',
-    scope,
-  };
+function clientWith(scope: string | string[]) {
+  return createOidcClient(
+    {
+      issuer: 'https://auth.example.com',
+      clientId: 'test-client',
+      clientSecret: 'test-secret',
+      redirectUri: 'https://app.example.com/callback',
+      scope,
+    },
+    { logger: quiet },
+  );
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  clearDiscoveryCache();
   vi.mocked(openid.discovery).mockResolvedValue(discovered);
   vi.mocked(openid.refreshTokenGrant).mockResolvedValue({
     access_token: 'access',
@@ -50,9 +51,9 @@ describe('joinScope', () => {
   });
 });
 
-describe('refreshAccessToken', () => {
+describe('OidcClient.refresh', () => {
   it('sends an array scope as a space-separated string', async () => {
-    await refreshAccessToken(makeConfig(['openid', 'offline_access']), 'refresh-token');
+    await clientWith(['openid', 'offline_access']).refresh('refresh-token');
 
     expect(openid.refreshTokenGrant).toHaveBeenCalledWith(discovered, 'refresh-token', {
       scope: 'openid offline_access',
@@ -60,7 +61,7 @@ describe('refreshAccessToken', () => {
   });
 
   it('sends a string scope unchanged', async () => {
-    await refreshAccessToken(makeConfig('openid offline_access'), 'refresh-token');
+    await clientWith('openid offline_access').refresh('refresh-token');
 
     expect(openid.refreshTokenGrant).toHaveBeenCalledWith(discovered, 'refresh-token', {
       scope: 'openid offline_access',
@@ -68,19 +69,14 @@ describe('refreshAccessToken', () => {
   });
 });
 
-describe('buildSilentLoginUrl', () => {
+describe('OidcClient.silentLoginUrl', () => {
   it('sends an array scope as a space-separated string', async () => {
-    await buildSilentLoginUrl(makeConfig(['openid', 'profile']));
+    const client = clientWith(['openid', 'profile']);
+    await client.silentLoginUrl(await client.createAuthorizationRequest());
 
     expect(openid.buildAuthorizationUrl).toHaveBeenCalledWith(
       discovered,
       expect.objectContaining({ scope: 'openid profile', prompt: 'none' }),
     );
-  });
-});
-
-describe('getOAuthConfigLogContext', () => {
-  it('logs an array scope as a space-separated string', () => {
-    expect(getOAuthConfigLogContext(makeConfig(['openid', 'profile'])).scope).toBe('openid profile');
   });
 });
