@@ -2,7 +2,7 @@ import * as openid from 'openid-client';
 
 import { createLogger } from '../shared/logger.js';
 import type { OAuthConfig } from './config.js';
-import { discoverConfiguration } from './discovery.js';
+import { moduleContext, type ProtocolContext } from './context.js';
 
 const logger = createLogger({ namespace: 'fides-auth:oauth' });
 
@@ -56,16 +56,24 @@ export async function buildOidcLogoutUrl(
   oauthConfig: OAuthConfig,
   options: OidcLogoutOptions | string,
 ): Promise<URL | null> {
-  const {
-    postLogoutRedirectUri,
-    idTokenHint,
-    state,
-    logoutHint,
-    includeClientId = true,
-  } = typeof options === 'string' ? { postLogoutRedirectUri: options } : options;
+  return logoutUrl(
+    moduleContext(oauthConfig, logger),
+    typeof options === 'string' ? { postLogoutRedirectUri: options } : options,
+  );
+}
+
+/**
+ * Builds an RP-initiated logout URL, or null when the provider has no end-session endpoint.
+ * The shared core of {@link buildOidcLogoutUrl} and `OidcClient.logoutUrl`.
+ */
+export async function logoutUrl(
+  { config: oauthConfig, configuration, logger }: ProtocolContext,
+  options: OidcLogoutOptions,
+): Promise<URL | null> {
+  const { postLogoutRedirectUri, idTokenHint, state, logoutHint, includeClientId = true } = options;
 
   try {
-    const config = await discoverConfiguration(oauthConfig);
+    const config = await configuration();
     const endSessionEndpoint = config.serverMetadata().end_session_endpoint;
 
     if (!endSessionEndpoint) {

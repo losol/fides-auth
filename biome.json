@@ -220,6 +220,30 @@
       }
     },
     {
+      "includes": ["packages/fides-auth/src/oidc.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["node:*"],
+                    "message": "Node built-ins don't run in browsers or edge runtimes."
+                  },
+                  {
+                    "group": ["./*", "./server/**", "./providers/**"],
+                    "message": "/oidc may import only shared, protocol and session, so it loads nothing from server (ADR 0001 §2)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/*.test.ts", "**/*.test.tsx"],
       "linter": {
         "rules": {

@@ -24,9 +24,34 @@ const DEFAULT_ALGORITHMS = [
 type RemoteJwks = ReturnType<typeof createRemoteJWKSet>;
 
 /** One getter per JWKS URI; jose refetches it on an unknown `kid`. */
-const jwksCache = new Map<string, RemoteJwks>();
+export interface JwksCache {
+  get(uri: string | URL): RemoteJwks;
+  clear(): void;
+}
 
-interface VerifyIdTokenBaseOptions {
+/** Creates an empty JWKS cache: the module keeps one for `verifyIdToken`, and each OIDC client has its own. */
+export function createJwksCache(): JwksCache {
+  const cache = new Map<string, RemoteJwks>();
+  return {
+    get(uri) {
+      const url = new URL(uri);
+      let jwks = cache.get(url.href);
+      if (!jwks) {
+        jwks = createRemoteJWKSet(url);
+        cache.set(url.href, jwks);
+      }
+      return jwks;
+    },
+    clear() {
+      cache.clear();
+    },
+  };
+}
+
+const jwksCache = createJwksCache();
+
+/** What an ID token is checked against. */
+export interface IdTokenExpectations {
   /** Expected `iss`. */
   issuer: string;
   /** Expected `aud`, usually the client ID. */
@@ -36,7 +61,7 @@ interface VerifyIdTokenBaseOptions {
 }
 
 /** Options for {@link verifyIdToken}. Pass `jwksUri` or `oauthConfig`. */
-export type VerifyIdTokenOptions = VerifyIdTokenBaseOptions &
+export type VerifyIdTokenOptions = IdTokenExpectations &
   (
     | {
         /** The provider's JWKS URL. */
@@ -53,16 +78,6 @@ export type VerifyIdTokenOptions = VerifyIdTokenBaseOptions &
 /** Drops every cached JWKS. Tests should call it between cases. */
 export function clearJwksCache(): void {
   jwksCache.clear();
-}
-
-function getJwks(uri: string | URL): RemoteJwks {
-  const url = new URL(uri);
-  let jwks = jwksCache.get(url.href);
-  if (!jwks) {
-    jwks = createRemoteJWKSet(url);
-    jwksCache.set(url.href, jwks);
-  }
-  return jwks;
 }
 
 async function resolveJwksUri(options: VerifyIdTokenOptions): Promise<string | URL> {
@@ -84,7 +99,15 @@ export async function verifyIdToken(
   idToken: string,
   options: VerifyIdTokenOptions,
 ): Promise<JWTPayload> {
-  const jwks = getJwks(await resolveJwksUri(options));
+  return verifyIdTokenWith(jwksCache.get(await resolveJwksUri(options)), idToken, options);
+}
+
+/** Verifies an ID token against `jwks`. The shared core of `verifyIdToken` and `OidcClient.verifyIdToken`. */
+export async function verifyIdTokenWith(
+  jwks: RemoteJwks,
+  idToken: string,
+  options: IdTokenExpectations,
+): Promise<JWTPayload> {
   const { payload } = await jwtVerify(idToken, jwks, {
     issuer: options.issuer,
     audience: options.audience,

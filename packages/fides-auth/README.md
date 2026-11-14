@@ -77,6 +77,7 @@ Each module is available as a separate entry point for tree-shaking:
 | ------------------------------------------ | ----------- | ----------------------------------------------------- |
 | `@eventuras/fides-auth`                    | Node.js     | Main entry — re-exports utils, session, types, logger |
 | `@eventuras/fides-auth/oauth`              | Node.js     | OAuth/OIDC flows with `openid-client`                 |
+| `@eventuras/fides-auth/oidc`               | Universal   | The OIDC client (`createOidcClient`) and pure helpers |
 | `@eventuras/fides-auth/pkce`               | Universal   | PKCE verifier/challenge and `state` (Web Crypto)      |
 | `@eventuras/fides-auth/id-token`           | Universal   | ID token verification against the provider JWKS       |
 | `@eventuras/fides-auth/oauth-browser`      | Browser     | **Deprecated** — OAuth/OIDC flows with Web Crypto API |
@@ -89,6 +90,51 @@ Each module is available as a separate entry point for tree-shaking:
 | `@eventuras/fides-auth/types`              | Universal   | TypeScript types (Session, Tokens, etc.)              |
 | `@eventuras/fides-auth/server`             | Node.js     | Request handlers (login, callback, logout, heartbeat) |
 | `@eventuras/fides-auth/providers/vipps`    | Node.js     | Vipps Login identity provider                         |
+
+### OIDC client (`/oidc`)
+
+`createOidcClient` holds one provider's config, its discovery and JWKS caches
+and its logger, so two clients share no state. Creating one does no I/O:
+discovery runs on first use. This is the API that 1.0 keeps; the free functions
+in `/oauth` are what it replaces.
+
+```typescript
+import { createOidcClient } from "@eventuras/fides-auth/oidc";
+
+const oidc = createOidcClient(
+  {
+    issuer: "https://auth.example.com",
+    clientId: "my-app",
+    clientSecret: process.env.OIDC_CLIENT_SECRET!,
+    redirectUri: "https://app.example.com/callback",
+    scope: "openid profile email offline_access",
+  },
+  { logger, discoveryTtlMs: 5 * 60_000 }, // both optional
+);
+
+// Login: keep `request` on the server until the callback.
+const request = await oidc.createAuthorizationRequest({ parameters: { ui_locales: "nb" } });
+const url = await oidc.authorizationUrl(request); // through PAR when usePar is set
+
+// Callback: checks state and PKCE against the request.
+const tokens = await oidc.exchangeCode(new URL(callbackUrl), request);
+const claims = await oidc.verifyIdToken(tokens.id_token!);
+
+await oidc.refresh(refreshToken);
+await oidc.clientCredentials({ scope: "api:read" });
+await oidc.logoutUrl({ postLogoutRedirectUri: "https://app.example.com/", idTokenHint });
+await oidc.silentLoginUrl(request, { loginHint }); // prompt=none
+await oidc.metadata();
+```
+
+- **`redirectUri`** is checked when an operation needs it, so a client used only
+  for client credentials can leave it out. `redirect_uri` is still accepted.
+- **`logger`** is a `FidesLoggerFactory`. Without one, the client logs through
+  whatever `configureLogger` set.
+- **Pure helpers** come from the same entry: `createPkcePair`, `createState`,
+  `defaultScope`, `joinScope`, `userFromClaims`, `checkSilentLoginResult`,
+  `requiresInteractiveLogin`, `getOAuthErrorLogContext` and
+  `classifyRefreshFailure`.
 
 ### OAuth — Node.js (`/oauth`)
 
