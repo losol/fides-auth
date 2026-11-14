@@ -1,7 +1,7 @@
-// heartbeat.ts
+// browser/heartbeat.ts
 //
 // Framework-agnostic, browser-side session keepalive engine. This is the logic
-// behind the React `useHeartbeat` hook, extracted so it has no React dependency:
+// behind the React `useHeartbeat` hook, kept here so it has no React dependency:
 // any adapter (React, React Router, plain JS) can start it and get a `stop()`
 // back. It uses browser globals (`fetch`, `document`, `window`) at runtime, but
 // importing this module performs no I/O and touches no globals.
@@ -11,12 +11,12 @@ import {
   DEFAULT_ACTIVITY_EVENTS,
   type ActivityTracker,
 } from './activity-tracker.js';
-import { createLogger } from './shared/logger.js';
+import { createLogger, type FidesLoggerFactory } from '../shared/logger.js';
 import {
   SESSION_EVENT,
   isSessionRejectedReason,
   type SessionClientEvent,
-} from './shared/session-events.js';
+} from '../shared/session-events.js';
 
 /**
  * Configuration for {@link createHeartbeat}.
@@ -105,11 +105,8 @@ export interface HeartbeatConfig {
    */
   onEvent?: (event: SessionClientEvent) => void;
 
-  /**
-   * Namespace for the logger.
-   * @default 'fides:heartbeat'
-   */
-  loggerNamespace?: string;
+  /** Creates the logger. Defaults to the factory `configureLogger` set. */
+  logger?: FidesLoggerFactory;
 }
 
 /** Handle returned by {@link createHeartbeat}. */
@@ -124,7 +121,6 @@ const DEFAULTS = {
   minSkewMs: 5_000,
   minRefreshIntervalMs: 5_000,
   idleThresholdMs: 30 * 60_000,
-  loggerNamespace: 'fides:heartbeat',
 } as const;
 
 // Fallback cadence when a refresh succeeds but the response carries no usable
@@ -170,11 +166,8 @@ export function createHeartbeat(config: HeartbeatConfig = {}): HeartbeatHandle {
   const minRefreshIntervalMs = config.minRefreshIntervalMs ?? DEFAULTS.minRefreshIntervalMs;
   const idleThresholdMs = config.idleThresholdMs ?? DEFAULTS.idleThresholdMs;
   const initialExpiresAt = toEpochMs(config.initialExpiresAt);
-  const loggerNamespace = config.loggerNamespace ?? DEFAULTS.loggerNamespace;
-
-  const logger = createLogger({
-    namespace: loggerNamespace,
-    context: { component: 'Heartbeat' },
+  const logger = (config.logger ?? { create: createLogger }).create({
+    namespace: 'fides-auth:browser:heartbeat',
   });
 
   const tracker: ActivityTracker = createActivityTracker();

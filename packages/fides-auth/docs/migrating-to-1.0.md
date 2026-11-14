@@ -217,8 +217,9 @@ which a Server Component can't do itself.
   `./oidc-callback`, `./oidc-logout` and `./heartbeat-handler`: import from
   the root.
 - **`./store`.** It re-exported `@eventuras/fides-auth-store` and
-  `@eventuras/fides-auth-react`, which the package no longer depends on. Import
-  from those.
+  `@eventuras/fides-auth-react`. Import the store from
+  `@eventuras/fides-auth/browser` and the hooks from `@eventuras/fides-auth-react`;
+  see the next section.
 - **The cookie helpers and constants**, such as `setAuthCookie`,
   `getSessionCookie` and `ACCESS_TOKEN_COOKIE_NAME`. The instance owns its
   cookies, and `cookieNames.session` names the session cookie.
@@ -233,3 +234,38 @@ which a Server Component can't do itself.
   `fallbackRedirectUri` goes, since `postLogoutRedirectUri` is the fallback.
   `includeClientId` goes, and `client_id` is always sent.
 - **The per-request refresh sharing.** The instance shares refreshes itself.
+
+### The browser side and React
+
+The session store, the session monitor, heartbeat and the activity tracker are
+in core's `@eventuras/fides-auth/browser`. `@eventuras/fides-auth-react` keeps
+the hooks, rebuilt on that store, and `@eventuras/fides-auth-store` ends at 0.x.
+
+| 0.x | 1.0 |
+|---|---|
+| `@eventuras/fides-auth-store` | `@eventuras/fides-auth/browser` |
+| `@eventuras/fides-auth/heartbeat`, `/activity-tracker` | `@eventuras/fides-auth/browser` |
+| `createAuthStore({ checkAuthStatus, config: { adminRole } })` | `createAuthStore({ adminRole })`, which asks `/api/auth/session` by default; `checkAuthStatus` and `sessionEndpoint` replace that |
+| `store.send({ type: 'authSuccess', user })` and the other events | `store.authSuccess(user)`, `authFailed(error?)`, `sessionExpired()`, `logout()`, `setError(error)`, `clearError()` |
+| `store.getSnapshot().context` | `store.getSnapshot()` |
+| `initializeAuth(store, check)`, `checkAuth(store, check)` | `initializeAuth(store)`, `checkAuth(store)` |
+| `startSessionMonitor(store, check, config)` | `startSessionMonitor(store, config)` |
+| `useSessionMonitor(store, check, config)` | `useSessionMonitor(store, config)` |
+| `loggerNamespace` on the store, the monitor and the heartbeat | `logger`, a `FidesLoggerFactory` |
+| `configureAuthLogger()` | pass `logger` where you want `@eventuras/logger` |
+
+**Changed**
+
+- **No XState.** The store is the library's own. `@xstate/store` and
+  `@xstate/store-react` are no longer needed, and the hooks read the store with
+  React's `useSyncExternalStore`.
+- **The check is the session info endpoint.** The store and the monitor ask
+  `handleSessionInfo` unless you give them another check. Its user is the
+  session's `user`, with `sub`, and `roles` may be absent.
+- **The monitor leaves a visitor alone.** It reports an expired session only
+  when the store held one, so it can run on every page.
+- **`useSessionMonitor` doesn't restart on every render.** It reads its
+  callbacks through a ref.
+- **`loginSuccess` and `updateLastChecked` go.** Use `authSuccess`; the store
+  sets `lastChecked` on every check.
+

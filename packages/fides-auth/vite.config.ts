@@ -3,9 +3,7 @@ import { defineVanillaLibConfig } from '@eventuras/vite-config/vanilla-lib';
 export default defineVanillaLibConfig({
   entry: {
     index: 'src/index.ts',
-    'activity-tracker': 'src/activity-tracker.ts',
     cookies: 'src/cookies.ts',
-    heartbeat: 'src/heartbeat.ts',
     logger: 'src/logger.ts',
     'session-events': 'src/session-events.ts',
     oauth: 'src/oauth.ts',
@@ -21,6 +19,7 @@ export default defineVanillaLibConfig({
     'rate-limit': 'src/rate-limit.ts',
     'server/cookie-store': 'src/server/cookie-store.ts',
     'server/index': 'src/server/index.ts',
+    browser: 'src/browser.ts',
     'providers/vipps/index': 'src/providers/vipps/index.ts',
   },
 });

@@ -1,42 +1,41 @@
 'use client';
 
-import { useEffect } from 'react';
 import {
-  startSessionMonitor,
+  type AuthStore,
   type SessionMonitorConfig,
-  type AuthStatus,
-  type createAuthStore,
-} from '@eventuras/fides-auth-store';
+  startSessionMonitor,
+} from '@eventuras/fides-auth/browser';
+import { useEffect, useRef } from 'react';
 
 /**
- * React hook for session monitoring with automatic cleanup
- *
- * @param store - The auth store to update
- * @param checkAuthStatus - Function to check authentication status
- * @param config - Optional configuration
+ * Runs the session monitor while the component is mounted. The callbacks are
+ * read through a ref, so passing new ones on each render doesn't restart it;
+ * a new store, interval or logger does.
  *
  * @example
- * ```typescript
- * import { useSessionMonitor } from '@eventuras/fides-auth-react';
- *
- * function App() {
- *   useSessionMonitor(authStore, checkAuthStatus, {
- *     interval: 30_000,
- *     onSessionExpired: () => {
- *       toast.warn('Your session has expired');
- *     }
+ * ```tsx
+ * function AuthProvider({ children }: { children: React.ReactNode }) {
+ *   useSessionMonitor(authStore, {
+ *     onSessionExpired: () => toast.warn('Your session has expired'),
  *   });
- *
- *   return <div>...</div>;
+ *   return children;
  * }
  * ```
  */
-export function useSessionMonitor(
-  store: ReturnType<typeof createAuthStore>,
-  checkAuthStatus: () => Promise<AuthStatus>,
-  config: SessionMonitorConfig = {}
-): void {
-  useEffect(() => {
-    return startSessionMonitor(store, checkAuthStatus, config);
-  }, [store, checkAuthStatus, config]);
+export function useSessionMonitor(store: AuthStore, config: SessionMonitorConfig = {}): void {
+  const { interval, logger } = config;
+  const callbacks = useRef(config);
+  callbacks.current = config;
+
+  useEffect(
+    () =>
+      startSessionMonitor(store, {
+        interval,
+        logger,
+        onSessionExpired: () => callbacks.current.onSessionExpired?.(),
+        onError: (error) => callbacks.current.onError?.(error),
+        onEvent: (event) => callbacks.current.onEvent?.(event),
+      }),
+    [store, interval, logger],
+  );
 }

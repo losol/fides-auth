@@ -6,12 +6,11 @@ bindings.
 
 ## Packages
 
-| Package                                                    | Description                                                 |
-| ---------------------------------------------------------- | ----------------------------------------------------------- |
-| [`@eventuras/fides-auth`](packages/fides-auth)             | Core OAuth/OIDC library (PKCE, sessions, logging)           |
-| [`@eventuras/fides-auth-store`](packages/fides-auth-store) | Framework-agnostic auth state store (XState Store)          |
-| [`@eventuras/fides-auth-react`](packages/fides-auth-react) | React hooks — store bindings, session monitoring, heartbeat |
-| [`@eventuras/fides-auth-next`](packages/fides-auth-next)   | Next.js bindings                                            |
+| Package                                                    | Description                                                         |
+| ---------------------------------------------------------- | ------------------------------------------------------------------- |
+| [`@eventuras/fides-auth`](packages/fides-auth)             | Core: the server side, the OIDC client and the browser session store |
+| [`@eventuras/fides-auth-next`](packages/fides-auth-next)   | Next.js bindings                                                    |
+| [`@eventuras/fides-auth-react`](packages/fides-auth-react) | React hooks for the session store, monitor and heartbeat            |
 
 See each package's README for install and usage.
 

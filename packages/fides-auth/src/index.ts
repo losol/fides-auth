@@ -4,7 +4,6 @@
  * Generic authentication utilities with support for multiple providers.
  */
 
-export * from './activity-tracker.js';
 export * from './shared/cookies.js';
 export * from './shared/logger.js';
 export * from './protocol/logging.js';

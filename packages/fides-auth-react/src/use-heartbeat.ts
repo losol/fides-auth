@@ -1,9 +1,8 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { createHeartbeat, type HeartbeatConfig } from '@eventuras/fides-auth/heartbeat';
+import { createHeartbeat, type HeartbeatConfig } from '@eventuras/fides-auth/browser';
 
-export type { HeartbeatConfig };
 
 /**
  * React wrapper around the framework-agnostic {@link createHeartbeat} engine.
@@ -12,8 +11,8 @@ export type { HeartbeatConfig };
  * through a ref so changing their identity between renders does not restart the
  * engine; the primitive options are the effect's dependencies.
  *
- * Intended to be paired with {@link useSessionMonitor}: the monitor *detects*
- * session loss; this hook *prevents* it for active users. See
+ * Pairs with `useSessionMonitor`: the monitor *detects* session loss; this hook
+ * *prevents* it for active users. See
  * {@link HeartbeatConfig} for the tuning knobs.
  *
  * @example
@@ -22,8 +21,8 @@ export type { HeartbeatConfig };
  * import { useHeartbeat, useSessionMonitor } from '@eventuras/fides-auth-react';
  *
  * function AuthProvider({ children }) {
- *   useSessionMonitor(authStore, checkAuthStatus);
- *   useHeartbeat({ onSessionExpired: () => authStore.send({ type: 'sessionExpired' }) });
+ *   useSessionMonitor(authStore);
+ *   useHeartbeat({ onSessionExpired: authStore.sessionExpired });
  *   return <>{children}</>;
  * }
  * ```
@@ -36,7 +35,7 @@ export function useHeartbeat(config: HeartbeatConfig = {}): void {
     minRefreshIntervalMs,
     idleThresholdMs,
     initialExpiresAt,
-    loggerNamespace,
+    logger,
   } = config;
 
   // Keep callbacks current without re-running the effect when their identities change.
@@ -51,7 +50,7 @@ export function useHeartbeat(config: HeartbeatConfig = {}): void {
       minRefreshIntervalMs,
       idleThresholdMs,
       initialExpiresAt,
-      loggerNamespace,
+      logger,
       onSessionExpired: () => callbacksRef.current.onSessionExpired?.(),
       onRefreshed: () => callbacksRef.current.onRefreshed?.(),
       onError: (error) => callbacksRef.current.onError?.(error),
@@ -65,6 +64,6 @@ export function useHeartbeat(config: HeartbeatConfig = {}): void {
     minRefreshIntervalMs,
     idleThresholdMs,
     initialExpiresAt,
-    loggerNamespace,
+    logger,
   ]);
 }

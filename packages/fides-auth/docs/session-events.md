@@ -149,8 +149,8 @@ SSO lifetime ends, which is normal.
 
 ## Browser events
 
-`createHeartbeat` and `startSessionMonitor` write to the browser console, which
-production never sees. Both take an `onEvent` callback carrying the same names
+`createHeartbeat` and `startSessionMonitor`, from `@eventuras/fides-auth/browser`,
+write to the browser console, which production never sees. Both take an `onEvent` callback carrying the same names
 and the same `reason` vocabulary:
 
 ```ts

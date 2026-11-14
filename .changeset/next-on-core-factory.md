@@ -22,7 +22,7 @@ Breaking:
   `validateReturnTo`, `mapSession` and the rest.
 - One entry. The subpaths `./auth`, `./cookie-store`, `./request`, `./store`, `./oidc-login`,
   `./oidc-callback`, `./oidc-logout` and `./heartbeat-handler` go, and so do the cookie helpers and
-  the core re-exports. `./store` re-exported `@eventuras/fides-auth-store` and
-  `@eventuras/fides-auth-react`; import from those.
+  the core re-exports. `./store` re-exported the store and the React hooks; import the store from
+  `@eventuras/fides-auth/browser` and the hooks from `@eventuras/fides-auth-react`.
 - No default rate limiter: `globalGETRateLimit`, `globalPOSTRateLimit` and `TokenBucket` go. The
   handlers rate-limit only through `rateLimit`.
