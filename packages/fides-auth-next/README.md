@@ -100,6 +100,9 @@ cookies, so they work in Server Actions and Route Handlers.
 
 ## Keeping the session fresh
 
+Nothing refreshes unless you ask, with `refreshSession` or `refreshInProxy`.
+Reads and `authorizedFetch` never do, so they are safe anywhere.
+
 A Server Component can't set cookies, so it can't save a refreshed session.
 Refresh in the proxy instead, before the page renders:
 
@@ -118,7 +121,7 @@ export const config = {
 ```
 
 `refreshInProxy` refreshes a session whose access token expires within 60
-seconds; `refreshWithinSeconds` changes that. It sets the new cookies on the
+seconds; `ifExpiresWithin` changes that. It sets the new cookies on the
 response and on the request it forwards, so the page renders with the
 refreshed session. A request without a session cookie passes straight through,
 and a failed refresh leaves the session as it is.
@@ -136,32 +139,37 @@ export function proxy(request: NextRequest) {
 }
 ```
 
-## Calling APIs
-
-`authorizedFetch` sends the access token to URLs under `allowedBase`, and on a
-401 refreshes the session and retries once:
+In a Server Action or Route Handler, refresh first if the access token is about
+to expire. Without `ifExpiresWithin`, `refreshSession` refreshes at once:
 
 ```typescript
-const api = { allowedBase: "https://api.example.com/v1/" };
+await auth.refreshSession({ ifExpiresWithin: 60 });
+```
 
-// Server Action or Route Handler
-const { data } = await auth.authorizedFetch("users/me", {
-  ...api,
-  parse: (response) => response.json(),
-});
+The result says whether it `refreshed`. On failure it gives a `reason`, and
+`cause: "invalid_grant"` means the user must log in again.
 
-// Server Component
+## Calling APIs
+
+`authorizedFetch` sends the access token to URLs under `allowedBase`. It never
+refreshes, so it works the same in a Server Component, a Server Action and a
+Route Handler:
+
+```typescript
 const { data } = await auth.authorizedFetch("users/me", {
-  ...api,
-  refresh: false,
+  allowedBase: "https://api.example.com/v1/",
   parse: (response) => response.json(),
 });
 ```
 
-In a Server Component, pass `refresh: false` with cookie sessions: the refresh
-would spend the refresh token and couldn't save the new one. A 401 then throws
-an `AuthorizedFetchError` with the reason `http_error`. With a `sessionStore`, a
-refresh doesn't write cookies, so it works there too.
+A 401 throws an `AuthorizedFetchError` with the reason `http_error`. Pages get
+fresh tokens from `refreshInProxy`; in a Server Action or Route Handler, call
+`refreshSession({ ifExpiresWithin: 60 })` before the request.
+
+The error says why, where it can. `accessTokenExpired` is true when the token
+had passed its expiry by the server's clock. `bearerError` is the API's own
+reason from its `WWW-Authenticate` header: `invalid_token` means a refresh may
+help, and `insufficient_scope` means it won't.
 
 ## Server sessions
 

@@ -1,11 +1,10 @@
 // server/authorized-fetch.ts
 //
-// fetch() with the session's access token, locked to one API base. The token
-// goes only to URLs under `allowedBase` and never follows a redirect. A 401 gets
-// one refresh and one retry. Lives in server/ because a refresh must be persisted.
+// fetch() with an access token, locked to one API base. The token goes only to
+// URLs under `allowedBase` and never follows a redirect. It never refreshes: a
+// caller that wants fresh tokens asks for them first, with refreshSession.
 
 import { createLogger } from '../shared/logger.js';
-import type { RefreshFailureCause, SessionRejectedReason } from '../shared/session-events.js';
 import type { Tokens } from '../shared/types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:authorized-fetch' });
@@ -22,9 +21,7 @@ export type AuthorizedFetchErrorReason =
   | 'network_error'
   /** No response within `timeoutMs`. */
   | 'timeout'
-  /** A 401, and the refresh failed. Not retried. */
-  | 'refresh_failed'
-  /** A non-2xx response. */
+  /** A non-2xx response, a 401 included. */
   | 'http_error'
   /** `parse` threw. */
   | 'parse_failed';
@@ -33,7 +30,8 @@ export interface AuthorizedFetchErrorDetails {
   status?: number;
   method?: string;
   url?: string;
-  refreshFailure?: { reason: SessionRejectedReason; cause?: RefreshFailureCause };
+  accessTokenExpired?: boolean;
+  bearerError?: string;
   response?: Response;
   cause?: unknown;
 }
@@ -41,18 +39,29 @@ export interface AuthorizedFetchErrorDetails {
 /** A failed {@link authorizedFetch}. Never carries the token or the query string. */
 export class AuthorizedFetchError extends Error {
   readonly reason: AuthorizedFetchErrorReason;
-  /** HTTP status, for `http_error` and `refresh_failed`. */
+  /** HTTP status, for `http_error`. */
   readonly status?: number;
   readonly method?: string;
   /** Origin and path only. */
   readonly url?: string;
-  /** Why the refresh failed. Only `cause: 'invalid_grant'` means the user must log in again. */
-  readonly refreshFailure?: { reason: SessionRejectedReason; cause?: RefreshFailureCause };
+  /**
+   * For `http_error`: whether the access token had passed its expiry by this
+   * server's clock when the request went out. Undefined when the provider gave
+   * no lifetime. With a 401, true means a refresh will probably help.
+   */
+  readonly accessTokenExpired?: boolean;
+  /**
+   * For `http_error`: the `error` of the API's `Bearer` challenge in
+   * `WWW-Authenticate` (RFC 6750 §3). `invalid_token` means the token is expired,
+   * revoked or malformed, so a refresh may help; `insufficient_scope` means it
+   * won't. Only a snake_case code is kept.
+   */
+  readonly bearerError?: string;
   /** The unread non-2xx response, for `http_error`. */
   declare readonly response?: Response;
 
   constructor(reason: AuthorizedFetchErrorReason, details: AuthorizedFetchErrorDetails = {}) {
-    const { status, method, url, refreshFailure, response, cause } = details;
+    const { status, method, url, accessTokenExpired, bearerError, response, cause } = details;
     const target = url ? ` for ${method ?? 'GET'} ${url}` : '';
     super(
       `authorizedFetch ${reason}${status ? ` (${status})` : ''}${target}`,
@@ -63,29 +72,20 @@ export class AuthorizedFetchError extends Error {
     this.status = status;
     this.method = method;
     this.url = url;
-    this.refreshFailure = refreshFailure;
+    this.accessTokenExpired = accessTokenExpired;
+    this.bearerError = bearerError;
     // Non-enumerable, so logging the error doesn't print the full URL.
     Object.defineProperty(this, 'response', { value: response, enumerable: false });
   }
 }
-
-/** What the refresh behind {@link authorizedFetch} returns: new tokens, or why there are none. */
-export type TokenRefreshResult =
-  | { ok: true; tokens: Tokens }
-  | { ok: false; reason: SessionRejectedReason; cause?: RefreshFailureCause };
 
 export interface AuthorizedFetchOptions<T = undefined> extends Omit<RequestInit, 'redirect'> {
   /** Absolute http(s) URL. The token goes only to its origin, under its path. */
   allowedBase: string | URL;
   /** Reads and validates a 2xx response. Its result is `data`; a throw is `parse_failed`. */
   parse?: (response: Response) => T | Promise<T>;
-  /** Per request, including a retry. @default 10000 */
+  /** @default 10000 */
   timeoutMs?: number;
-  /**
-   * Called once on a 401; it must also save the new tokens. Without it a 401 is
-   * an `http_error`. A retry resends `body`, so don't pass a stream.
-   */
-  refresh?: () => Promise<TokenRefreshResult>;
 }
 
 export interface AuthorizedFetchResult<T> {
@@ -93,14 +93,12 @@ export interface AuthorizedFetchResult<T> {
   response: Response;
   /** What `parse` returned. */
   data: T;
-  /** A 401 led to a refresh, and the retry used the new access token. */
-  refreshed: boolean;
 }
 
 /**
  * Calls an API with an access token.
  *
- * @throws {AuthorizedFetchError} on a disallowed URL, non-2xx, timeout, network error or failed refresh.
+ * @throws {AuthorizedFetchError} on a disallowed URL, a missing token, non-2xx, timeout or network error.
  * @throws {TypeError} when `allowedBase` is not an http(s) URL without credentials.
  */
 export async function authorizedFetch<T = undefined>(
@@ -108,33 +106,28 @@ export async function authorizedFetch<T = undefined>(
   url: string | URL,
   options: AuthorizedFetchOptions<T>,
 ): Promise<AuthorizedFetchResult<T>> {
-  const { allowedBase, parse, timeoutMs = DEFAULT_TIMEOUT_MS, refresh, ...init } = options;
+  const { allowedBase, parse, timeoutMs = DEFAULT_TIMEOUT_MS, ...init } = options;
   const target = resolveAllowedUrl(url, allowedBase);
   const request = { method: (init.method ?? 'GET').toUpperCase(), url: redactUrl(target) };
 
-  let current = tokens;
-  let attempt = await send(current, target, init, timeoutMs, request);
-  let refreshed = false;
-
-  if (attempt.response.status === 401 && refresh) {
-    await attempt.response.body?.cancel().catch(() => undefined);
-    attempt.unlink();
-    logger.debug(request, 'Got 401, refreshing the session once');
-    current = await refreshOnce(refresh, request);
-    refreshed = true;
-    attempt = await send(current, target, init, timeoutMs, request);
-  }
-
-  const { response, timeout, unlink } = attempt;
+  const sentAt = Date.now();
+  const { response, timeout, unlink } = await send(tokens, target, init, timeoutMs, request);
   if (!response.ok) {
-    throw new AuthorizedFetchError('http_error', { ...request, status: response.status, response });
+    const expiresAt = Date.parse(tokens?.accessTokenExpiresAt ?? '');
+    throw new AuthorizedFetchError('http_error', {
+      ...request,
+      status: response.status,
+      accessTokenExpired: Number.isNaN(expiresAt) ? undefined : expiresAt <= sentAt,
+      bearerError: bearerErrorOf(response.headers.get('www-authenticate')),
+      response,
+    });
   }
 
   try {
     const data = (parse ? await parse(response) : undefined) as T;
     // A body still to be read stays under the timeout and the caller's signal.
     if (!response.body || response.bodyUsed) unlink();
-    return { response, data, refreshed };
+    return { response, data };
   } catch (error) {
     unlink();
     if (init.signal?.aborted) throw error;
@@ -235,22 +228,17 @@ function linkSignals(
   return { signal: controller.signal, unlink };
 }
 
-async function refreshOnce(
-  refresh: NonNullable<AuthorizedFetchOptions['refresh']>,
-  request: { method: string; url: string },
-): Promise<Tokens> {
-  let result: TokenRefreshResult;
-  try {
-    result = await refresh();
-  } catch (error) {
-    throw new AuthorizedFetchError('refresh_failed', { ...request, status: 401, cause: error });
-  }
-
-  if (!result.ok) {
-    const refreshFailure = { reason: result.reason, cause: result.cause };
-    throw new AuthorizedFetchError('refresh_failed', { ...request, status: 401, refreshFailure });
-  }
-  return result.tokens;
+/**
+ * The `error` of the `Bearer` challenge in a `WWW-Authenticate` header, such as
+ * `invalid_token`. Registered codes are snake_case, and nothing else is kept, so
+ * an API can't put arbitrary text in the error.
+ */
+function bearerErrorOf(header: string | null): string | undefined {
+  const params = header ? /\bBearer\b(.*)$/is.exec(header)?.[1] : undefined;
+  if (!params) return undefined;
+  const match = /(?:^|[\s,])error\s*=\s*(?:"([^"]*)"|([^\s,"]+))/i.exec(params);
+  const code = match?.[1] ?? match?.[2];
+  return code && /^[a-z0-9_]{1,64}$/.test(code) ? code : undefined;
 }
 
 /** Origin and path: never credentials, query or fragment. */

@@ -54,8 +54,19 @@ function apiHandler(req: IncomingMessage, res: ServerResponse): void {
       if (req.headers.authorization === 'Bearer new-token') json(res, 200, { hello: 'again' });
       else json(res, 401, { error: 'invalid_token' });
       return;
-    case '/v1/always-401':
-      json(res, 401, { error: 'invalid_token' });
+    case '/v1/challenge-expired':
+      res
+        .writeHead(401, {
+          'WWW-Authenticate':
+            'Bearer realm="api", error="invalid_token", error_description="The access token expired"',
+        })
+        .end();
+      return;
+    case '/v1/challenge-scope':
+      res.writeHead(403, { 'WWW-Authenticate': 'Bearer error=insufficient_scope, scope="admin"' }).end();
+      return;
+    case '/v1/challenge-odd':
+      res.writeHead(401, { 'WWW-Authenticate': 'Bearer error="<b>invalid token</b>"' }).end();
       return;
     default:
       json(res, 200, { hello: 'world' });
@@ -82,7 +93,6 @@ const tokens = (accessToken = 'old-token'): Tokens => ({
   accessTokenExpiresAt: '2099-01-01T00:00:00.000Z',
 });
 
-const refreshed = () => ({ ok: true as const, tokens: tokens('new-token') });
 
 /** Awaits a rejection and returns it as an AuthorizedFetchError. */
 async function failure(promise: Promise<unknown>): Promise<AuthorizedFetchError> {
@@ -141,7 +151,6 @@ describe('authorizedFetch — allowedBase', () => {
     });
 
     expect(result.data).toEqual({ hello: 'world' });
-    expect(result.refreshed).toBe(false);
     expect(apiSeen).toEqual([{ path: '/v1/ok', authorization: 'Bearer old-token' }]);
   });
 
@@ -328,10 +337,6 @@ describe('authorizedFetch — caller signal without AbortSignal.any', () => {
     await authorizedFetch(tokens(), 'ok', options);
     expect(listeners(signal)).toHaveLength(0);
 
-    // Two requests: the 401 and the retry.
-    await authorizedFetch(tokens(), 'protected', { ...options, refresh: async () => refreshed() });
-    expect(listeners(signal)).toHaveLength(0);
-
     await failure(authorizedFetch(tokens(), 'redirect-in', options));
     expect(listeners(signal)).toHaveLength(0);
 
@@ -461,85 +466,54 @@ describe('authorizedFetch — errors and parse', () => {
   });
 });
 
-describe('authorizedFetch — refresh on 401', () => {
-  it('refreshes once and retries with the new token', async () => {
-    const refresh = vi.fn(async () => refreshed());
-
-    const result = await authorizedFetch(tokens(), 'protected', {
-      allowedBase: base,
-      refresh,
-      parse: (r) => r.json(),
-    });
-
-    expect(result.data).toEqual({ hello: 'again' });
-    expect(result.refreshed).toBe(true);
-    expect(refresh).toHaveBeenCalledTimes(1);
-    expect(apiSeen.map((s) => s.authorization)).toEqual(['Bearer old-token', 'Bearer new-token']);
-  });
-
-  it('does not retry when the refresh fails, and says why', async () => {
-    const error = await failure(
-      authorizedFetch(tokens(), 'protected', {
-        allowedBase: base,
-        refresh: async () => ({
-          ok: false,
-          reason: 'refresh_failed',
-          cause: 'invalid_grant',
-        }),
-      }),
-    );
-
-    expect(error.reason).toBe('refresh_failed');
-    expect(error.status).toBe(401);
-    expect(error.refreshFailure).toEqual({ reason: 'refresh_failed', cause: 'invalid_grant' });
-    expect(apiSeen).toHaveLength(1);
-  });
-
-  it('does not retry when the refresh throws', async () => {
-    const boom = new Error('store down');
-    const error = await failure(
-      authorizedFetch(tokens(), 'protected', {
-        allowedBase: base,
-        refresh: async () => {
-          throw boom;
-        },
-      }),
-    );
-
-    expect(error.reason).toBe('refresh_failed');
-    expect(error.cause).toBe(boom);
-    expect(apiSeen).toHaveLength(1);
-  });
-
-  it('refreshes only once: a second 401 is an http_error', async () => {
-    const refresh = vi.fn(async () => refreshed());
-
-    const error = await failure(
-      authorizedFetch(tokens(), 'always-401', { allowedBase: base, refresh }),
-    );
-
-    expect(error.reason).toBe('http_error');
-    expect(error.status).toBe(401);
-    expect(refresh).toHaveBeenCalledTimes(1);
-    expect(apiSeen).toHaveLength(2);
-  });
-
-  it('treats a 401 as an http_error without refresh', async () => {
+describe('authorizedFetch — 401', () => {
+  it('is an http_error, sent once: authorizedFetch never refreshes', async () => {
     const error = await failure(authorizedFetch(tokens(), 'protected', { allowedBase: base }));
 
     expect(error.reason).toBe('http_error');
+    expect(error.status).toBe(401);
     expect(apiSeen).toHaveLength(1);
+  });
+});
+
+describe('authorizedFetch — why a request was refused', () => {
+  it("passes on the API's Bearer error from WWW-Authenticate", async () => {
+    const expired = await failure(authorizedFetch(tokens(), 'challenge-expired', { allowedBase: base }));
+    expect(expired).toMatchObject({ status: 401, bearerError: 'invalid_token' });
+
+    const scope = await failure(authorizedFetch(tokens(), 'challenge-scope', { allowedBase: base }));
+    expect(scope).toMatchObject({ status: 403, bearerError: 'insufficient_scope' });
+  });
+
+  it('keeps only a snake_case code, and nothing without a challenge', async () => {
+    const odd = await failure(authorizedFetch(tokens(), 'challenge-odd', { allowedBase: base }));
+    expect(odd.bearerError).toBeUndefined();
+
+    const plain = await failure(authorizedFetch(tokens(), 'protected', { allowedBase: base }));
+    expect(plain.bearerError).toBeUndefined();
+  });
+
+  it('says whether the access token had expired by this clock', async () => {
+    const at = (accessTokenExpiresAt?: string): Tokens => ({ accessToken: 'old-token', accessTokenExpiresAt });
+
+    const expired = await failure(
+      authorizedFetch(at('2000-01-01T00:00:00.000Z'), 'protected', { allowedBase: base }),
+    );
+    expect(expired.accessTokenExpired).toBe(true);
+
+    const live = await failure(authorizedFetch(at('2099-01-01T00:00:00.000Z'), 'protected', { allowedBase: base }));
+    expect(live.accessTokenExpired).toBe(false);
+
+    const unknown = await failure(authorizedFetch(at(undefined), 'protected', { allowedBase: base }));
+    expect(unknown.accessTokenExpired).toBeUndefined();
   });
 });
 
 describe('authorizedFetch — logging', () => {
   it('never logs a token', async () => {
     await authorizedFetch(tokens(), `${other.url}/v1/ok?x=1`, { allowedBase: base }).catch(() => undefined);
-    await authorizedFetch(tokens(), 'protected', { allowedBase: base, refresh: async () => refreshed() });
-    await authorizedFetch(tokens(), 'always-401', {
-      allowedBase: base,
-      refresh: async () => ({ ok: false as const, reason: 'refresh_failed' as const }),
-    }).catch(() => undefined);
+    await authorizedFetch(tokens(), 'protected', { allowedBase: base }).catch(() => undefined);
+    await authorizedFetch(tokens('new-token'), 'protected', { allowedBase: base });
 
     const logged = inspect(logs, { depth: 10 });
     expect(logs.length).toBeGreaterThan(0);

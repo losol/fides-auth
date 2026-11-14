@@ -125,7 +125,7 @@ The library began as encrypted cookies and grew the BFF model afterwards. We ask
 - **A small public surface** (driver 7). Five entries instead of one per layer. See §1.
 - **One session model, whatever stores it** (findings 15 and 21). The record, its lifecycle and its rules are written once. Where the sealed record is kept is a detail behind a narrow seam. See §4, "The session model".
 - **One client package.** `fides-auth-client` replaces `fides-auth-store` and `fides-auth-react`. See §1.
-- **Nothing needs a heartbeat.** A check-session endpoint, refresh on demand and, in Next, a refresh in the proxy do its work. The heartbeat stays as an option. See §4, "Keeping a session fresh".
+- **Nothing needs a heartbeat.** A check-session endpoint, a refresh the caller asks for and, in Next, a refresh in the proxy do its work. The heartbeat stays as an option. See §4, "Keeping a session fresh".
 
 **Considered and not adopted:**
 
@@ -277,12 +277,12 @@ Everything that is the same for every request is set here. A handler call takes 
 | `handleSessionInfo(request, cookies)` | `Response` | the "check session" endpoint |
 | `readSession(cookies)` | `Session \| null` | |
 | `tryReadSession(cookies)` | the session, or `{ session: null, reason }` | |
-| `getTokens(cookies)` | `Tokens \| null` | The only way to the tokens. Refreshes on demand. |
-| `refreshSession(cookies)` | `RefreshSessionResult` | *(was `tryRefreshSessionInStore`)* The null-returning form goes (finding 19). |
+| `getTokens(cookies)` | `Tokens \| null` | The only way to the tokens. Never refreshes. |
+| `refreshSession(cookies, options?)` | `RefreshSessionResult` | *(was `tryRefreshSessionInStore`)* `options.ifExpiresWithin` refreshes only when the access token expires within that many seconds, and the result says whether it `refreshed`. The null-returning form goes (finding 19). |
 | `createSession(cookies, tokenResponse)` | `Session` | Starts a session with a new handle, for a login that doesn't go through the handlers. Runs `mapSession`. |
 | `updateSession(cookies, update)` | `Session \| null` | `update(session)` returns the changed session. Keeps the handle and `expiresAt`. For `user` and `data`; it can't touch the tokens. |
 | `clearSession(cookies, options?)` | `void` | `options.trigger` |
-| `authorizedFetch(cookies, url, options)` | `{ response, data, refreshed }` | Reads the tokens itself. Refreshes on demand, and once more on a 401. |
+| `authorizedFetch(cookies, url, options)` | `{ response, data }` | Reads the tokens itself. Never refreshes: a 401 is an `http_error`, whose `accessTokenExpired` and `bearerError` (from `WWW-Authenticate`) tell the caller whether a refresh may help. |
 | `cookieNames` | the resolved cookie names | for middleware |
 | `oidc` | the instance's `OidcClient` | for protocol calls the instance doesn't wrap |
 
@@ -312,7 +312,7 @@ There is one session model. It doesn't know where a session is kept.
 | Transition | Triggered by | Identity | `expiresAt` | Event |
 |---|---|---|---|---|
 | create | the callback handler, `createSession` | new `correlationId`; whatever the browser held before is discarded | set from `sessionDurationDays` | `session.created` |
-| refresh | `getTokens` and `authorizedFetch` on demand, `refreshInProxy`, the heartbeat handler, `refreshSession` | kept | kept | `session.refreshed` or `session.refresh_failed` |
+| refresh | `refreshSession`, `refreshInProxy`, the heartbeat handler | kept | kept | `session.refreshed` or `session.refresh_failed` |
 | update | `updateSession` | kept | kept | none |
 | end | the logout handler, `clearSession`, expiry, an unusable session, `deleteMatching` | gone | | `session.cleared` or `session.rejected` |
 
@@ -349,7 +349,7 @@ Both use the same cookie name. What the storages can't make equal is stated, not
 Nothing in 1.0 needs a heartbeat. Three things do its work:
 
 - **Check session.** `handleSessionInfo` answers whether there is a session, who the user is and when the access token expires (RFC 10017 §6.1.2.1). It only reads. It never refreshes, so a tab left open doesn't keep a session alive at the provider. The client package's session monitor polls it by default.
-- **Refresh on demand.** `getTokens` and `authorizedFetch` refresh a session whose access token has expired or is about to, when the result can be saved. Store storage can always save it. Cookie storage can save it wherever cookies can be set.
+- **Refresh when asked.** `refreshSession(cookies, { ifExpiresWithin: 60 })` refreshes a session whose access token is about to expire, and does nothing otherwise. The caller calls it where cookies can be written, such as a Server Action. Reads and `authorizedFetch` never refresh, so they are safe anywhere, a Next server component included.
 - **Refresh ahead, in Next.** A server component can't set cookies. `refreshInProxy(request)` runs in `proxy.ts` and refreshes a session that is about to expire before the page renders. It sets the new cookies on the response and on the forwarded request. A failed refresh leaves the session as it is: with cookie storage, ending it there could undo a refresh that another instance completed with the same refresh token.
 
 The heartbeat endpoint and its client stay, for apps that want refresh tied to user activity. No default uses them.
@@ -375,6 +375,8 @@ The heartbeat endpoint and its client stay, for apps that want refresh tied to u
 | returnTo | One `validateReturnTo: (returnTo) => string \| null`, set on the factory, for both login and callback. | It's a breaking signature change. |
 | HTTP behaviour | The table below. | Client code and the client package depend on it. |
 | Packaging | Core, `fides-auth-next` and `fides-auth-client` release 1.0 together. Core is a `peerDependency` (`^1.0.0`) of the other two, so an app has one copy. `engines` is Node 22 or later. | A peer range and an engine floor can only tighten at a major. |
+| Client store | `fides-auth-client` has its own store: `getSnapshot`, `subscribe`, and a method per action, such as `authSuccess(user)`, in place of `send({ type })`. `./react` reads it with React's `useSyncExternalStore`. `@xstate/store` and `@xstate/store-react` go. The store is a context with a handful of events and no state machine, so a library adds little, and `createAuthStore` returning the XState store makes XState's majors ours. | Only a major can take a dependency out of the public API. |
+| Refresh | Only when the caller asks: `refreshSession(cookies, { ifExpiresWithin })`, `refreshInProxy` in Next, and the heartbeat endpoint. Reads and `authorizedFetch` never refresh. | Implicit refresh must know whether its result can be saved, or it loses a rotated refresh token, and Next can't tell a server component from a Server Action. |
 
 What the handlers answer:
 
@@ -475,6 +477,8 @@ Set `sessionStore` when:
 | 18 | `createFidesAuth` throws when `clientAuth` is `'none'`. | The changeset |
 | 19 | Core becomes a peer dependency of `fides-auth-next` and `fides-auth-client`, and all three need Node 22. | Install core next to them |
 | 20 | `fides-auth-store` and `fides-auth-react` are replaced by `fides-auth-client`, with the hooks under `./react`. | Their last 0.x is deprecated on npm at 1.0 |
+| 21 | The client store has a method per action instead of `send({ type })`, and no XState dependency. | The migration doc |
+| 22 | `authorizedFetch` doesn't refresh on a 401, and loses its `refresh` option and the `refresh_failed` reason. Call `refreshSession({ ifExpiresWithin })` first. | The migration doc |
 
 
 ## Migration plan
@@ -516,9 +520,10 @@ The work, as PRs in beta. The numbers in brackets are rows in the breaking-chang
 3. **Next (10, 16).**
    - `fides-auth-next` is rebuilt on the core factory, with `sessionStore` and `refreshInProxy`. Its old subpaths, member names and default limiter go.
    - Then the free `/server` functions go, with `LegacySession`, `CookieStore.delete` and `StoredSession.sid`.
-4. **The client side (9, 20).**
+4. **The client side (9, 20, 21).**
    - `fides-auth-client`, with the store, the session monitor, heartbeat and the activity tracker, and the hooks under `./react`.
-   - `handleSessionInfo` becomes the monitor's default. `getTokens` and `authorizedFetch` refresh on demand.
+   - The store is the package's own, with no XState dependency.
+   - `handleSessionInfo` becomes the monitor's default.
    - Core's `/heartbeat` and `/activity-tracker` go.
    - `fides-auth-store` and `fides-auth-react` get no 1.0. Their last 0.x is deprecated on npm, and their publish workflows are removed.
 5. **Removal and packaging (1, 2, 3, 7, 10, 11, 12, 19).**
@@ -547,5 +552,5 @@ The second revision, which added the "from scratch" changes and findings 15 to 2
 1. **Absolute lifetime for cookie sessions.** Today an active cookie session never ends. 1.0 ends it `sessionDurationDays` after login, as server sessions already do. Should 1.0 also ship the sliding lifetime, so consumers who rely on today's behaviour can keep it? Lean: no. Ship absolute only, and add sliding in 1.x.
 2. **How little `/server` exports.** The free handler functions, the login transaction and the session layer are not public in 1.0. Is there a consumer that needs one of them and can't use the instance? Lean: none known, and exporting later is additive.
 3. **The size of a cookie session.** Three chunks match today's three cookies. More would fit larger tokens, but many proxies refuse a `Cookie` header much above 8 kB. Lean: three, and point larger sessions to a `SessionStore`.
-4. **Knowing that cookies can't be set.** Refresh on demand in cookie storage must not run where the result can't be saved, or a rotated refresh token is lost. How does the library know? Lean: an optional `readOnly` flag on `CookieStore`, which an adapter sets where its framework can't set cookies.
+4. **Knowing that cookies can't be set.** Decided: the library doesn't need to know. Refresh on demand would have had to, since a refresh that can't be saved loses a rotated refresh token, and Next offers no public way to tell a server component from a Server Action. So nothing refreshes unless the caller asks, with `refreshSession({ ifExpiresWithin })`, `refreshInProxy` or the heartbeat endpoint, and `authorizedFetch` no longer refreshes on a 401. See the contract table, "Refresh".
 5. **The Node floor.** Node 22 matches CI. Node 20.3 would be enough for the code. Lean: 22, since Node 20 is past its end of life.

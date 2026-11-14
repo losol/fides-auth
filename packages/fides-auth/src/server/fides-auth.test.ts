@@ -467,13 +467,66 @@ describe('session members', () => {
     expect((await auth.readSession(cookies))?.data).toEqual({ theme: 'dark' });
 
     const refreshed = await auth.refreshSession(cookies);
-    expect(refreshed).toMatchObject({ ok: true, rotatedRefreshToken: true, session: { data: { theme: 'dark' } } });
+    expect(refreshed).toMatchObject({
+      ok: true,
+      refreshed: true,
+      rotatedRefreshToken: true,
+      session: { data: { theme: 'dark' } },
+    });
 
     await auth.clearSession(cookies);
     expect(jar.size).toBe(0);
     expect(events.at(-1)).toMatchObject({ event: 'session.cleared', trigger: 'logout' });
     expect(await auth.updateSession(cookies, (session) => session)).toBeNull();
     expect(await auth.refreshSession(cookies)).toEqual({ ok: false, reason: 'no_session_cookie' });
+  });
+
+  describe('refreshSession with ifExpiresWithin', () => {
+    it('leaves a token that lasts longer alone', async () => {
+      const { auth, cookies } = setup();
+      await auth.createSession(cookies, tokens(1));
+      expect(await auth.refreshSession(cookies, { ifExpiresWithin: 60 })).toMatchObject({
+        ok: true,
+        refreshed: false,
+        rotatedRefreshToken: false,
+        session: { user: { name: 'Ada' } },
+      });
+      expect(oidc.refresh).not.toHaveBeenCalled();
+    });
+
+    it('refreshes a token that expires within the window', async () => {
+      const { auth, cookies } = setup();
+      await auth.createSession(cookies, tokens(1));
+      expect(await auth.refreshSession(cookies, { ifExpiresWithin: 600 })).toMatchObject({
+        ok: true,
+        refreshed: true,
+      });
+      expect(oidc.refresh).toHaveBeenCalledWith('refresh-1');
+      expect((await auth.getTokens(cookies))?.accessToken).toBe('access-2');
+    });
+
+    it('treats a token without a known lifetime as fresh', async () => {
+      const { auth, cookies } = setup();
+      await auth.createSession(cookies, tokens(1, { expires_in: undefined }));
+      expect(await auth.refreshSession(cookies, { ifExpiresWithin: 600 })).toMatchObject({
+        refreshed: false,
+      });
+      expect(oidc.refresh).not.toHaveBeenCalled();
+    });
+
+    it('says why when there is no session', async () => {
+      const { auth, cookies } = setup();
+      expect(await auth.refreshSession(cookies, { ifExpiresWithin: 60 })).toEqual({
+        ok: false,
+        reason: 'no_session_cookie',
+      });
+    });
+
+    it('needs a number of seconds, 0 or more', async () => {
+      const { auth, cookies } = setup();
+      await expect(auth.refreshSession(cookies, { ifExpiresWithin: -1 })).rejects.toThrow(TypeError);
+      await expect(auth.refreshSession(cookies, { ifExpiresWithin: Number.NaN })).rejects.toThrow(TypeError);
+    });
   });
 
   it('keeps the session in a store when given one', async () => {
@@ -496,43 +549,50 @@ describe('session members', () => {
 describe('authorizedFetch', () => {
   const api = 'https://api.test/';
 
-  it('sends the access token and refreshes once on a 401', async () => {
+  /** An API that accepts only `access-2`, and records the Authorization headers it got. */
+  function stubApi(): Array<string | null> {
+    const seen: Array<string | null> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: Request | string | URL, init?: RequestInit) => {
+        const authorization = new Headers(init?.headers).get('authorization');
+        seen.push(authorization);
+        return authorization === 'Bearer access-2'
+          ? Response.json({ ok: true })
+          : new Response(null, { status: 401 });
+      }),
+    );
+    return seen;
+  }
+
+  it('sends the access token and never refreshes: a 401 is an http_error', async () => {
     const { auth, cookies } = setup();
     await login(auth, cookies);
-    const seen: Array<string | null> = [];
-    const fetchMock = vi.fn(async (_input: Request | string | URL, init?: RequestInit) => {
-      const authorization = new Headers(init?.headers).get('authorization');
-      seen.push(authorization);
-      return new Response(authorization === 'Bearer access-1' ? null : '{"ok":true}', {
-        status: authorization === 'Bearer access-1' ? 401 : 200,
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    const seen = stubApi();
     try {
-      const result = await auth.authorizedFetch(cookies, `${api}items`, {
-        allowedBase: api,
-        parse: (response) => response.json() as Promise<{ ok: boolean }>,
-      });
-      expect(result.response.status).toBe(200);
-      expect(result.data).toEqual({ ok: true });
-      expect(result.refreshed).toBe(true);
-      expect(seen).toEqual(['Bearer access-1', 'Bearer access-2']);
-      // The refreshed tokens were saved for the next request.
-      expect((await auth.getTokens(cookies))?.accessToken).toBe('access-2');
+      await expect(
+        auth.authorizedFetch(cookies, `${api}items`, { allowedBase: api }),
+      ).rejects.toMatchObject({ reason: 'http_error', status: 401, accessTokenExpired: false });
+      expect(seen).toEqual(['Bearer access-1']);
+      expect(oidc.refresh).not.toHaveBeenCalled();
+      expect((await auth.getTokens(cookies))?.accessToken).toBe('access-1');
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it('skips the refresh with refresh: false', async () => {
+  it('uses the tokens refreshSession saved', async () => {
     const { auth, cookies } = setup();
     await login(auth, cookies);
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 401 })));
+    const seen = stubApi();
     try {
-      await expect(
-        auth.authorizedFetch(cookies, `${api}items`, { allowedBase: api, refresh: false }),
-      ).rejects.toMatchObject({ reason: 'http_error', status: 401 });
-      expect(oidc.refresh).not.toHaveBeenCalled();
+      await auth.refreshSession(cookies, { ifExpiresWithin: 600 });
+      const result = await auth.authorizedFetch(cookies, `${api}items`, {
+        allowedBase: api,
+        parse: (response) => response.json() as Promise<{ ok: boolean }>,
+      });
+      expect(result.data).toEqual({ ok: true });
+      expect(seen).toEqual(['Bearer access-2']);
     } finally {
       vi.unstubAllGlobals();
     }
