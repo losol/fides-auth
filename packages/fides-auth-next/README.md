@@ -178,7 +178,8 @@ help, and `insufficient_scope` means it won't.
 
 By default the session lives in the `__Host-session` cookie, in up to three
 chunks. Pass a `sessionStore` to keep it on the server. The browser then holds
-only a random handle, and logout deletes the record:
+only a random handle, and logout deletes the record.
+[Cookie or store](../fides-auth/README.md#cookie-or-store) compares the two.
 
 ```typescript
 // lib/auth.ts
