@@ -490,8 +490,8 @@ The first plan took four minors, 0.16 to 0.19. Each added part of the new shape 
 
 **1.0: the rest, in one major.**
 
-- **Prerelease.** After 0.16 ships, `main` enters the changesets prerelease mode (`changeset pre enter rc`). Each PR lands one part of the 1.0 shape with a `major` changeset, and `main` publishes `1.0.0-rc.N`. The known consumers move to an rc before `changeset pre exit` ends the mode. While it lasts, `main` publishes no 0.x; a 0.16 fix goes out from a branch off the 0.16 tag.
-- **No deprecation windows and no shims.** A PR replaces the old API and deletes it. `main` stays green, but the API can change between two rcs.
+- **Prerelease.** After 0.16 ships, `main` enters the changesets prerelease mode (`changeset pre enter beta`). Each PR lands one part of the 1.0 shape with a `major` changeset, and `main` publishes `1.0.0-beta.N` under the npm dist-tag `beta`. The known consumers run on a beta before `changeset pre exit` ends the mode, and the next release is `1.0.0`. There is no release candidate. While it lasts, `main` publishes no 0.x; a 0.16 fix goes out from a branch off the 0.16 tag.
+- **No deprecation windows and no shims.** A PR replaces the old API and deletes it. `main` stays green, but the API can change between two betas.
 - **Stored state is not migrated.** 1.0 doesn't read the 0.x cookies, the sealed shape without `v`, or `sid`.
   - It deletes the old cookies when it sees them (the cookie rule in §4).
   - A 0.x record in a `SessionStore` is `unreadable_session`, and the store's TTL removes it.
@@ -501,7 +501,7 @@ The first plan took four minors, 0.16 to 0.19. Each added part of the new shape 
   - Rolling back to 0.16 logs users out again.
 - **Behaviour changes are listed** in the changesets and the migration doc: the absolute session lifetime, the CSRF guard on heartbeat, Next without a default rate limiter, and `createFidesAuth` throwing on `clientAuth: 'none'`.
 
-The work, as PRs on the rc. The numbers in brackets are rows in the breaking-changes table.
+The work, as PRs in beta. The numbers in brackets are rows in the breaking-changes table.
 
 1. **The session model (5, 6, 8, 14, 17).**
    - The lifecycle over the storage seam, and the two storages behind it, with the shared test suite from §2.

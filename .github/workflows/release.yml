@@ -35,7 +35,14 @@ jobs:
       - name: Check for pending changesets
         id: changesets
         run: |
-          COUNT=$(find .changeset -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')
+          # Only changesets at the top of .changeset are pending: in prerelease
+          # mode, `changeset version` moves the ones it used into .changeset/pre/.
+          COUNT=$(find .changeset -maxdepth 1 -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')
+          # `changeset pre exit` needs a version PR, for the stable release, even
+          # when there is no new changeset.
+          if [ -f .changeset/pre.json ] && [ "$(jq -r .mode .changeset/pre.json)" = "exit" ]; then
+            COUNT=$((COUNT + 1))
+          fi
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
           echo "Found $COUNT pending changeset(s)"
 
