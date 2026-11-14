@@ -6,7 +6,7 @@ vi.mock('./session-refresh.js', () => ({ refreshSession: vi.fn() }));
 import { CookieTooLargeError } from '../shared/cookies.js';
 import { createEncryptedJWT } from '../session/utils.js';
 import { refreshSession } from './session-refresh.js';
-import type { Session } from '../shared/types.js';
+import type { LegacySession as Session } from '../shared/types.js';
 import type { CookieStore } from './cookie-store.js';
 import {
   persistSession,

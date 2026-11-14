@@ -25,7 +25,7 @@ import {
   type StoredSession,
 } from '@eventuras/fides-auth/server';
 import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
-import type { CreateSessionOptions, Session } from '@eventuras/fides-auth/types';
+import type { CreateSessionOptions, LegacySession as Session } from '@eventuras/fides-auth';
 import { cookies } from 'next/headers';
 import { cache } from 'react';
 

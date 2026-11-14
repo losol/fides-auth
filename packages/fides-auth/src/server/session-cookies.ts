@@ -13,7 +13,7 @@ import { createEncryptedJWT, decryptJWT } from '../session/utils.js';
 import { isSession, validateSessionJwt } from '../session/validation.js';
 import { createLogger } from '../shared/logger.js';
 import type { SessionRejectedReason } from '../shared/session-events.js';
-import { Session } from '../shared/types.js';
+import type { LegacySession as Session } from '../shared/types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:session-cookies' });
 

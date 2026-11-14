@@ -9,7 +9,7 @@ import { EncryptJWT, SignJWT } from 'jose';
 
 import { validateSessionJwt, isSession } from './validation.js';
 import { createEncryptedJWT, hexToUint8Array } from './utils.js';
-import type { Session } from '../shared/types.js';
+import type { LegacySession as Session } from '../shared/types.js';
 
 /** 32-byte AES-256 key */
 const SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';

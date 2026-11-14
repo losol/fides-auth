@@ -10,7 +10,7 @@
 // match a whole area with a prefix (`event=~"session\..*"`), past tense because
 // every event records something that already happened.
 //
-// The fields are deliberately low-cardinality except `sid` — see docs/session-events.md
+// The fields are deliberately low-cardinality except `correlationId` — see docs/session-events.md
 // for the dashboard/alerting contract.
 
 import type { FidesLogger } from './logger.js';
@@ -52,7 +52,9 @@ export type SessionRejectedReason =
   /** The refresh token was rejected by the provider. See {@link RefreshFailureCause}. */
   | 'refresh_failed'
   /** A handle was sent but the server store has no live record for it: revoked, expired or evicted. Server persistence only. */
-  | 'session_not_found';
+  | 'session_not_found'
+  /** The session's lifetime (`expiresAt`) has run out. Refreshes don't extend it. */
+  | 'session_expired';
 
 /**
  * Why a refresh attempt failed.
@@ -83,7 +85,7 @@ export type SessionClearedTrigger =
 export type SessionEvent =
   | {
     event: typeof SESSION_EVENT.CREATED;
-    sid?: string;
+    correlationId?: string;
     /** False here guarantees logouts at access-token TTL — the single most useful login-time signal. */
     hasRefreshToken: boolean;
     /** Scopes the provider actually granted, which is not necessarily what was requested. */
@@ -97,7 +99,7 @@ export type SessionEvent =
   }
   | {
     event: typeof SESSION_EVENT.REFRESHED;
-    sid?: string;
+    correlationId?: string;
     expiresIn?: number;
     /** True when the provider issued a new refresh token. Rotation turns a lost cookie write into a dead session. */
     rotatedRefreshToken: boolean;
@@ -106,14 +108,14 @@ export type SessionEvent =
   }
   | {
     event: typeof SESSION_EVENT.REJECTED;
-    sid?: string;
+    correlationId?: string;
     reason: SessionRejectedReason;
     /** Which component made the call, e.g. 'heartbeat'. */
     source?: string;
   }
   | {
     event: typeof SESSION_EVENT.REFRESH_FAILED;
-    sid?: string;
+    correlationId?: string;
     cause: RefreshFailureCause;
     /** HTTP status from the provider, when it answered at all. */
     status?: number;
@@ -123,7 +125,7 @@ export type SessionEvent =
   }
   | {
     event: typeof SESSION_EVENT.CLEARED;
-    sid?: string;
+    correlationId?: string;
     trigger: SessionClearedTrigger;
   };
 
@@ -141,6 +143,7 @@ const REJECTED_LEVEL: Record<SessionRejectedReason, Level> = {
   no_session_cookie: 'debug',
   stale_legacy_session: 'info',
   session_not_found: 'info',
+  session_expired: 'info',
   refresh_failed: 'info',
   unreadable_session: 'warn',
   no_refresh_token: 'warn',
@@ -183,7 +186,7 @@ export function sessionEventLevel(payload: SessionEvent): Level {
  */
 export function logSessionEvent(logger: FidesLogger, payload: SessionEvent): void {
   const level = sessionEventLevel(payload);
-  // Undefined fields are dropped so absent data doesn't render as `"sid":null`
+  // Undefined fields are dropped so absent data doesn't render as `"correlationId":null`
   // and pollute label sets in the log backend.
   const fields = Object.fromEntries(
     Object.entries(payload).filter(([, value]) => value !== undefined),
@@ -200,6 +203,7 @@ export const SESSION_REJECTED_REASONS = [
   'no_refresh_token',
   'refresh_failed',
   'session_not_found',
+  'session_expired',
 ] as const satisfies readonly SessionRejectedReason[];
 
 /** Narrows an untrusted value (a response body, a query param) to a known reason. */

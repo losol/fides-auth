@@ -8,7 +8,7 @@ vi.mock('../protocol/refresh.js', () => ({ refreshAccessToken: vi.fn() }));
 import { refreshSession } from './session-refresh.js';
 import { refreshAccessToken } from '../protocol/refresh.js';
 import type { OAuthConfig } from '../protocol/config.js';
-import type { Session } from '../shared/types.js';
+import type { LegacySession as Session } from '../shared/types.js';
 
 const mockedRefresh = vi.mocked(refreshAccessToken);
 

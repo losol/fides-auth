@@ -189,12 +189,6 @@ export function cookieStorage({ secure }: StorageOptions): SessionStorage {
   };
 }
 
-/**
- * What this storage writes: `StoredSession`, plus the correlation id, so a
- * record can be found from a log line, and the lookup fields.
- */
-type StoredRecord = StoredSession & LookupFields & { correlationId: string };
-
 /** A handle is 32 random bytes in hex. Anything else is another storage's cookie. */
 const HANDLE = /^[0-9a-f]{64}$/;
 
@@ -216,7 +210,7 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
     return { handle, key: await sha256(handle) };
   }
 
-  function record({ sealed, expiresAt, correlationId, lookup }: SaveRequest): StoredRecord {
+  function record({ sealed, expiresAt, correlationId, lookup }: SaveRequest): StoredSession {
     return { data: sealed, expiresAt, correlationId, ...lookup };
   }
 

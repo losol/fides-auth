@@ -2,7 +2,7 @@ import { decodeJwt, type JWTPayload } from 'jose';
 
 import { userFromClaims } from './user-claims.js';
 import { newSessionId } from '../shared/session-events.js';
-import type { Session, TokenResponse } from '../shared/types.js';
+import type { LegacySession as Session, TokenResponse } from '../shared/types.js';
 
 /**
  * Changes the session built from a token response, e.g. to add `data` or custom user

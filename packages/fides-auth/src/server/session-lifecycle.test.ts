@@ -147,7 +147,7 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
       record: { v: 1, session: created.session, tokens: expect.objectContaining({ accessToken: 'access-2' }) },
     });
     expect((await lifecycle.read(cookies)).record?.tokens.refreshToken).toBe('refresh-2');
-    expect(events.map((e) => [e.event, e.sid])).toEqual([
+    expect(events.map((e) => [e.event, e.correlationId])).toEqual([
       ['session.created', created.session.correlationId],
       ['session.refreshed', created.session.correlationId],
     ]);
@@ -246,7 +246,7 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
     expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'no_session_cookie' });
     expect(events.at(-1)).toEqual({
       event: 'session.cleared',
-      sid: created.session.correlationId,
+      correlationId: created.session.correlationId,
       trigger: 'logout',
     });
     expect(await lifecycle.update(cookies, (s) => s)).toBeNull();

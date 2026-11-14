@@ -8,37 +8,14 @@
 import { decodeJwt, type JWTPayload } from 'jose';
 
 import { newSessionId } from '../shared/session-events.js';
-import type { Tokens, TokenResponse } from '../shared/types.js';
+import type { Session, Tokens, TokenResponse } from '../shared/types.js';
 import { userFromClaims } from './user-claims.js';
 import { createEncryptedJWT, decryptJWT } from './utils.js';
-
-/** The IdP's own session, from the ID token. Back-channel logout matches on it. */
-export interface IdpSession {
-  iss: string;
-  sub: string;
-  /** The ID token's `sid` claim, when the provider sends one. */
-  sid?: string;
-}
-
-/** What the app sees of a session. It carries no tokens. */
-export interface SessionData<TData = Record<string, unknown>> {
-  /** The library's id for this session, carried across refreshes and logged on every event. */
-  correlationId: string;
-  /** ISO 8601. */
-  createdAt: string;
-  /** ISO 8601. Fixed at creation; nothing extends it. */
-  expiresAt: string;
-  /** From the ID token. Absent when the token response has none. */
-  user?: { sub: string; name?: string; email?: string; roles?: string[] };
-  scopes?: string[];
-  idp?: IdpSession;
-  data?: TData;
-}
 
 /** What is sealed: one string, the same in both storages. */
 export interface SessionRecord {
   v: 1;
-  session: SessionData;
+  session: Session;
   tokens: Tokens;
 }
 
@@ -50,8 +27,8 @@ export interface SessionRecord {
 export type MapRecordSession = (
   tokens: TokenResponse,
   claims: JWTPayload | undefined,
-  session: SessionData,
-) => SessionData | Promise<SessionData>;
+  session: Session,
+) => Session | Promise<Session>;
 
 /** Options for {@link createRecord}. */
 export interface CreateRecordOptions {
@@ -102,7 +79,7 @@ export function createRecord(tokens: TokenResponse, options: CreateRecordOptions
   const sub = claims && stringClaim(claims, 'sub');
   const iss = claims && stringClaim(claims, 'iss');
 
-  let user: SessionData['user'];
+  let user: Session['user'];
   if (claims && sub) {
     const { roles } = userFromClaims(claims, options.rolesClaim);
     user = { sub, roles };
@@ -112,7 +89,7 @@ export function createRecord(tokens: TokenResponse, options: CreateRecordOptions
     if (email) user.email = email;
   }
 
-  const session: SessionData = {
+  const session: Session = {
     correlationId: newSessionId(),
     createdAt: new Date(now).toISOString(),
     expiresAt: new Date(now + options.sessionDurationDays * DAY_MS).toISOString(),
@@ -138,7 +115,7 @@ export function createRecord(tokens: TokenResponse, options: CreateRecordOptions
  * a map or an update can change the user, scopes and data, never the
  * correlation id, the timestamps or the IdP session.
  */
-export function keepIdentity(original: SessionData, changed: SessionData): SessionData {
+export function keepIdentity(original: Session, changed: Session): Session {
   return {
     ...changed,
     correlationId: original.correlationId,
@@ -216,5 +193,5 @@ export async function openRecord(
     return null;
   }
   // Only the three fields: the seal adds `iat`, which isn't part of the record.
-  return { v: 1, session: session as unknown as SessionData, tokens: tokens as Tokens };
+  return { v: 1, session: session as unknown as Session, tokens: tokens as Tokens };
 }

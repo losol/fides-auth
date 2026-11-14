@@ -15,20 +15,18 @@ messages are for humans and may be reworded, names are the contract.
 
 | `event`                  | Level             | Always present       | May be absent                                   |
 | ------------------------ | ----------------- | -------------------- | ----------------------------------------------- |
-| `session.created`        | info              | `hasRefreshToken`    | `sid`, `scopes`, `expiresIn`, `cookieBytes`, `persistence` |
-| `session.refreshed`      | info              | `rotatedRefreshToken`| `sid`, `expiresIn`, `cookieBytes`, `persistence` |
-| `session.rejected`       | per `reason`      | `reason`             | `sid`, `source`                                  |
-| `session.refresh_failed` | per `cause`       | `cause`              | `sid`, `status`, `accessTokenExpiresAt`          |
-| `session.cleared`        | info              | `trigger`            | `sid`                                            |
+| `session.created`        | info              | `hasRefreshToken`    | `correlationId`, `scopes`, `expiresIn`, `cookieBytes`, `persistence` |
+| `session.refreshed`      | info              | `rotatedRefreshToken`| `correlationId`, `expiresIn`, `cookieBytes`, `persistence` |
+| `session.rejected`       | per `reason`      | `reason`             | `correlationId`, `source`                        |
+| `session.refresh_failed` | per `cause`       | `cause`              | `correlationId`, `status`, `accessTokenExpiresAt` |
+| `session.cleared`        | info              | `trigger`            | `correlationId`                                  |
 
 A "may be absent" field is *omitted* when unknown, never logged as `null` —
 `logSessionEvent` drops undefined values, so an absent field costs the log
 backend nothing. Write queries that tolerate absence.
 
-`sid` may be absent on every event: sessions created before `Session.sid` existed
-carry none, and a request rejected for `no_session_cookie` or
-`unreadable_session` never had a session to take one from. It fills in for
-everyone after one re-login.
+`correlationId` is absent when no session was read to take it from, as for a
+request rejected with `no_session_cookie` or `unreadable_session`.
 
 Import the names rather than typing them, so a rename is a compile error instead
 of a silently dead dashboard:
@@ -47,6 +45,7 @@ endpoint all report the same word for the same situation.
 | `no_session_cookie`    | debug | No cookie was sent. The ordinary anonymous case.                |
 | `stale_legacy_session` | info  | A pre-split single-cookie session, or split cookies under server persistence. Costs one re-login. |
 | `session_not_found`    | info  | A handle was sent but the server store has no live record: revoked, expired or evicted. Server persistence only. |
+| `session_expired`      | info  | The session's lifetime has run out. Refreshes don't extend it, so the user logs in again. |
 | `refresh_failed`       | info  | The provider rejected the refresh token. See `cause`.           |
 | `unreadable_session`   | warn  | A cookie arrived but would not decrypt. Corruption, or a rotated secret. |
 | `no_refresh_token`     | warn  | The session has no refresh token — usually `offline_access` was never granted. |
@@ -69,7 +68,7 @@ Only `invalid_grant` ends a session. The heartbeat endpoint answers `401` for it
 and `503` for the other two, so a provider outage no longer logs out users whose
 sessions were valid.
 
-## `sid` — the correlation id
+## `correlationId`
 
 Minted when the session is created, carried across refreshes, and attached to
 every event above. It is **not** derived from the refresh token: a hash of that
@@ -77,7 +76,9 @@ would change every time the provider rotates it — on every refresh for a defau
 Keycloak — and following one session through its whole life is the point.
 Rotation stays visible through `rotatedRefreshToken` instead.
 
-> **Cardinality.** `sid` is high-cardinality by design. Keep it a log *field*.
+It is not the provider's `sid` claim. The session keeps that one as `idp.sid`.
+
+> **Cardinality.** `correlationId` is high-cardinality by design. Keep it a log *field*.
 > Never promote it to a Loki label, a Prometheus dimension or a Datadog tag — one
 > series per session will melt the index. `event`, `reason`, `cause` and
 > `trigger` are the low-cardinality fields; group on those.
@@ -87,7 +88,7 @@ Rotation stays visible through `rotatedRefreshToken` instead.
 **Which path ended this session?**
 
 ```logql
-{app="web"} | json | sid = `a3f81c92`
+{app="web"} | json | correlationId = `a3f81c92`
 ```
 
 One query, whole lifetime: creation, every refresh, and whatever finally ended it.

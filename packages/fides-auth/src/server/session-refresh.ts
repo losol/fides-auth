@@ -2,7 +2,7 @@ import { createLogger } from '../shared/logger.js';
 import { refreshAccessToken } from '../protocol/refresh.js';
 import type { OAuthConfig } from '../protocol/config.js';
 import { getOAuthErrorLogContext } from '../protocol/logging.js';
-import { CreateSessionOptions, Session } from "../shared/types.js";
+import type { CreateSessionOptions, LegacySession as Session } from '../shared/types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:session-refresh' });
 

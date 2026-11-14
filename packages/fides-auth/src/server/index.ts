@@ -8,6 +8,17 @@ export type { CookieStore } from './cookie-store.js';
 export { CookieTooLargeError } from '../shared/cookies.js';
 
 export {
+  createFidesAuth,
+  type FidesAuth,
+  type FidesAuthConfig,
+  type FidesAuthorizedFetchOptions,
+  type FidesReadResult,
+  type FidesRefreshResult,
+  type MapSession,
+} from './fides-auth.js';
+export { SessionSecretError } from './session-persistence.js';
+
+export {
   createMemorySessionStore,
   type SessionStore,
   type StoredSession,

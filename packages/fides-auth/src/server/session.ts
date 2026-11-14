@@ -19,7 +19,7 @@ import {
   type SessionClearedTrigger,
   type SessionRejectedReason,
 } from '../shared/session-events.js';
-import type { CreateSessionOptions, Session } from '../shared/types.js';
+import type { CreateSessionOptions, LegacySession as Session } from '../shared/types.js';
 import type { CookieStore } from './cookie-store.js';
 import {
   clearSessionCookies,
@@ -80,7 +80,7 @@ export async function persistSession(
   if (options.event === SESSION_EVENT.CREATED) {
     logSessionEvent(logger, {
       event: SESSION_EVENT.CREATED,
-      sid: session.sid,
+      correlationId: session.sid,
       hasRefreshToken: !!session.tokens?.refreshToken,
       scopes: session.scopes,
       expiresIn: expiresInSeconds(session),
@@ -90,7 +90,7 @@ export async function persistSession(
   } else if (options.event === SESSION_EVENT.REFRESHED) {
     logSessionEvent(logger, {
       event: SESSION_EVENT.REFRESHED,
-      sid: session.sid,
+      correlationId: session.sid,
       expiresIn: expiresInSeconds(session),
       rotatedRefreshToken: options.rotatedRefreshToken ?? false,
       cookieBytes: written.cookieBytes,
@@ -246,7 +246,7 @@ async function refreshNow(
       // provider answered with something we could not build a session from.
       logSessionEvent(logger, {
         event: SESSION_EVENT.REFRESH_FAILED,
-        sid: current.sid,
+        correlationId: current.sid,
         cause: 'idp_error',
         accessTokenExpiresAt: current.tokens.accessTokenExpiresAt,
       });
@@ -274,7 +274,7 @@ async function refreshNow(
 
     logSessionEvent(logger, {
       event: SESSION_EVENT.REFRESH_FAILED,
-      sid: current.sid,
+      correlationId: current.sid,
       cause,
       status: getOAuthErrorLogContext(error).status,
       accessTokenExpiresAt: current.tokens.accessTokenExpiresAt,
@@ -348,7 +348,7 @@ export async function clearSession(
   if (options.trigger) {
     logSessionEvent(logger, {
       event: SESSION_EVENT.CLEARED,
-      sid: options.sid,
+      correlationId: options.sid,
       trigger: options.trigger,
     });
   }

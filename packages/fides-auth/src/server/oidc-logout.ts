@@ -8,34 +8,11 @@ import { createLogger } from '../shared/logger.js';
 import { buildOidcLogoutUrl } from '../protocol/logout-url.js';
 import type { OAuthConfig } from '../protocol/config.js';
 import type { CookieStore } from './cookie-store.js';
+import { isSameOriginRequest } from './csrf.js';
 import { clearSession, readIdToken, tryReadSession } from './session.js';
 import { persistenceFrom, type SessionPersistenceConfig } from './session-persistence.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:oidc-logout' });
-
-/**
- * Whether the request came from the application itself. POST alone is no defence:
- * a third-party page can auto-submit a form at this endpoint, and the response
- * clears the cookies whether or not the browser attached them.
- *
- * `Sec-Fetch-Site` is authoritative where the browser sends it. Otherwise fall back
- * to `Origin`. A request with neither is not a browser form post, so it is allowed.
- */
-function isSameOrigin(request: Request, applicationUrl?: string): boolean {
-  const site = request.headers.get('sec-fetch-site');
-  if (site) {
-    return site === 'same-origin' || site === 'none';
-  }
-
-  const origin = request.headers.get('origin');
-  if (!origin) return true;
-
-  try {
-    return new URL(origin).origin === new URL(applicationUrl ?? request.url).origin;
-  } catch {
-    return false;
-  }
-}
 
 /** {@link handleOidcLogout} config. Takes `secret`, `persistence`, or both. */
 export type OidcLogoutConfig = OidcLogoutBaseConfig & SessionPersistenceConfig;
@@ -113,7 +90,7 @@ export async function handleOidcLogout(
     });
   }
 
-  if (!isSameOrigin(request, applicationUrl)) {
+  if (!isSameOriginRequest(request, applicationUrl ?? request.url)) {
     logger.warn(
       { origin: request.headers.get('origin'), site: request.headers.get('sec-fetch-site') },
       'Cross-origin logout request rejected',

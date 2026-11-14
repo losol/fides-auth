@@ -508,12 +508,14 @@ The work, as PRs in beta. The numbers in brackets are rows in the breaking-chang
    - The `{ v: 1, session, tokens }` seal, and `__Host-session` with its chunks.
    - Deleting the old cookies.
    - `expiresAt`, `session.idp`, `correlationId` and the store lookup fields.
-   - `CookieStore` without `delete`.
+   - Storages that delete a cookie by setting it with `maxAge: 0`, so `CookieStore` can lose `delete`.
 2. **The factory (4, 13, 15, 18).**
    - `createFidesAuth` in core `/server`, with the config and members in §4, over the session model and the instance's `OidcClient`.
    - The CSRF guard, one `validateReturnTo`, and the throw on `clientAuth: 'none'`. `rateLimit` receives the `Request`.
-   - The free `/server` functions go.
-3. **Next (10, 16).** `fides-auth-next` is rebuilt on the core factory, with `sessionStore` and `refreshInProxy`. Its old subpaths, member names and default limiter go.
+   - `Session` becomes the new shape. The free `/server` functions stay beside the factory, since `fides-auth-next` is built on them, and keep the old shape as `LegacySession`.
+3. **Next (10, 16).**
+   - `fides-auth-next` is rebuilt on the core factory, with `sessionStore` and `refreshInProxy`. Its old subpaths, member names and default limiter go.
+   - Then the free `/server` functions go, with `LegacySession`, `CookieStore.delete` and `StoredSession.sid`.
 4. **The client side (9, 20).**
    - `fides-auth-client`, with the store, the session monitor, heartbeat and the activity tracker, and the hooks under `./react`.
    - `handleSessionInfo` becomes the monitor's default. `getTokens` and `authorizedFetch` refresh on demand.

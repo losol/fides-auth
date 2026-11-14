@@ -14,7 +14,7 @@ vi.mock('./session-refresh.js', () => ({ refreshSession: vi.fn() }));
 
 import { configureLogger } from '../shared/logger.js';
 import { refreshSession } from './session-refresh.js';
-import type { Session } from '../shared/types.js';
+import type { LegacySession as Session } from '../shared/types.js';
 import { AuthorizedFetchError, authorizedFetch } from './authorized-fetch.js';
 import type { CookieStore } from './cookie-store.js';
 import { persistSession, readSession, tryRefreshSessionInStore } from './session.js';

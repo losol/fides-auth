@@ -6,7 +6,7 @@ import {
   decodeIdTokenCookie,
 } from './session-cookies.js';
 import { createEncryptedJWT, decryptJWT } from '../session/utils.js';
-import { Session, Tokens } from '../shared/types.js';
+import type { LegacySession as Session, Tokens } from '../shared/types.js';
 
 // 32-byte (64 hex char) key for A256GCM.
 const SECRET = 'a'.repeat(64);

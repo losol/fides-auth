@@ -108,3 +108,39 @@ internal. For `hasScope(session, scope)`, check `session.scopes?.includes(scope)
 - **The root entry's functions.** The root becomes types-only in 1.0. Import
   functions from their own entries, such as `SESSION_EVENT` from
   `/session-events`.
+
+## 1.0: the server side
+
+**New**
+
+- **`createFidesAuth(config)` from `/server`.** One object holds the OIDC
+  client, the session storage and the guards. Its members take the `Request`
+  and a `CookieStore`:
+  - the handlers `handleOidcLogin`, `handleOidcCallback`, `handleOidcLogout`,
+    `handleHeartbeat` and `handleSessionInfo`
+  - the session members `readSession`, `tryReadSession`, `getTokens`,
+    `refreshSession`, `createSession`, `updateSession`, `clearSession` and
+    `authorizedFetch`
+- **One session cookie.** The session lives in `__Host-session` (`session` over
+  plain http), in at most three chunks. With a `sessionStore`, the cookie holds
+  only a handle.
+- **A same-origin check.** Logout and heartbeat answer only a `POST` from the
+  app's own pages.
+- **`handleSessionInfo`.** Answers `GET` with whether there is a session, and
+  whose. It never refreshes and never returns tokens.
+- **`SessionSecretError` from `/server`.**
+
+**Changed**
+
+- **`Session` is the new session shape.** It has `correlationId`, `createdAt`,
+  `expiresAt`, `user`, `scopes`, `idp` and `data`, and no tokens: get them with
+  `getTokens`. The old shape is `LegacySession` until the free `/server`
+  functions go.
+- **Session events carry `correlationId`, not `sid`.** Update log queries and
+  dashboards that filter on `sid`.
+- **A session ends after `sessionDurationDays`** (30 by default), whatever the
+  refreshes. A read after that answers `session_expired`.
+- **A custom `SessionStore` should save the new `StoredSession` fields:**
+  `correlationId`, `iss`, `subHash` and `idpSidHash`.
+- **Users log in again once.** 1.0 doesn't read 0.x sessions, and deletes their
+  cookies the next time it writes a session.

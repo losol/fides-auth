@@ -12,7 +12,7 @@ vi.mock('./session-refresh.js', () => ({ refreshSession: vi.fn() }));
 import type { CookieOptions } from '../shared/cookies.js';
 import { refreshSession } from './session-refresh.js';
 import { SESSION_EVENT } from '../shared/session-events.js';
-import type { Session } from '../shared/types.js';
+import type { LegacySession as Session } from '../shared/types.js';
 import { createEncryptedJWT, sha256 } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
 import {
@@ -488,7 +488,7 @@ describe('server persistence', () => {
       for (const event of events) {
         expect(event.persistence).toBe('server');
         expect(event.cookieBytes).toBeUndefined();
-        expect(event.sid).toBe('sid-1');
+        expect(event.correlationId).toBe('sid-1');
       }
     });
   });
