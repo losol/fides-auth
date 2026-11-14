@@ -1,6 +1,6 @@
 {
   "name": "@eventuras/fides-auth-react",
-  "version": "0.1.9",
+  "version": "1.0.0-beta.0",
   "description": "React hooks for @eventuras/fides-auth: the session store, session monitor and heartbeat",
   "keywords": [
     "authentication",

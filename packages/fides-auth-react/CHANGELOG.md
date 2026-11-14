@@ -1,5 +1,23 @@
 # @eventuras/fides-auth-react
 
+## 1.0.0-beta.0
+
+### Major Changes
+
+- 84d3b82: 1.0, on the store in core's `/browser`. The
+  [upgrade guide](https://github.com/losol/fides-auth/blob/main/packages/fides-auth/docs/migrating-to-1.0.md)
+  maps every 0.x API to what replaces it.
+  
+  - `createAuthStoreHooks(store)` gives `useAuthStore` and `useAuthActions`.
+    `useSessionMonitor(store, config)` and `useHeartbeat` run the monitor and the heartbeat.
+  - No XState, and no dependency on `@eventuras/fides-auth-store`, which ends at 0.x.
+  - `@eventuras/fides-auth` is a peer dependency. Needs Node 22.
+
+### Patch Changes
+
+- Updated dependencies [84d3b82]
+  - @eventuras/fides-auth@1.0.0-beta.0
+
 ## 0.1.9
 
 ### Patch Changes
