@@ -1,318 +1,225 @@
-# Migrating to 1.0
+# Upgrading to 1.0
 
-fides-auth reaches 1.0 in two steps, as
-[ADR 0001](https://github.com/losol/fides-auth/blob/main/docs/adr/0001-module-structure-and-bff.md) plans:
+This guide takes an app from any 0.x to 1.0. Each table maps what the app uses
+today to what replaces it.
 
-- **0.16** adds the OIDC client and deprecates what it replaces. Nothing changes
-  behaviour, so you can move at your own pace.
-- **1.0** replaces the server side and removes everything deprecated. It doesn't
-  read 0.x sessions, so your users log in again once when you upgrade.
+## Before you upgrade
 
-This doc has a section per step. Every `@deprecated` tag in the code names the
-replacement, and this doc collects them.
+- **Install core next to the framework package.** Core is a peer dependency of
+  `fides-auth-next` and `fides-auth-react`:
 
-## 0.16: the OIDC client
+  ```bash
+  pnpm add @eventuras/fides-auth @eventuras/fides-auth-next
+  ```
 
-**New**
+- **Node 22.** All three packages need it.
+- **Users log in again once.** 1.0 doesn't read 0.x sessions, and deletes their
+  cookies the next time it writes a session. With an active session at the
+  provider, that is usually a redirect without a password. A login in progress
+  during the deploy has to start again.
+- **Replace every instance at once.** 0.x and 1.0 can't read each other's
+  sessions, so a rolling deploy, or a rollback, can log a user out more than
+  once.
+- **A `SessionStore` keeps its 0.x records** until their TTL. 1.0 reads them as
+  `unreadable_session`.
+- **Log queries and dashboards that filter on `sid`** filter on `correlationId`
+  instead.
 
-- **`@eventuras/fides-auth/oidc`.** `createOidcClient(config, { logger, discoveryTtlMs })`
-  holds the config, the discovery and JWKS caches and the logger. Two clients
-  share no state, and creating one does no I/O.
-- **Types on the root entry.** `Session`, `Tokens`, `OAuthConfig`,
-  `ClientAuthConfig`, `TokenResponse`, `CookieOptions`, `FidesLogger`,
-  `FidesLoggerFactory` and `FidesLoggerOptions` come from
-  `@eventuras/fides-auth`.
-- **`redirectUri` in the config.** `redirect_uri` still works. Set one, or both
-  to the same value.
-- **`CookieTooLargeError` from `/server`.**
+## Server
 
-Nothing changes behaviour. The deprecated APIs keep working until 1.0.
+One instance replaces the free `/server` functions. Its members take the
+`Request` and a `CookieStore`, which needs only `get` and `set`:
 
-### From the protocol functions to the client
+```ts
+import { createFidesAuth } from "@eventuras/fides-auth/server";
 
-Create the client once, for example at module load, and reuse it:
+export const auth = createFidesAuth({
+  oauthConfig: { issuer, clientId, clientSecret, redirectUri, scope },
+  secret: process.env.SESSION_SECRET!,
+});
+```
+
+| 0.x | 1.0 |
+|---|---|
+| `handleOidcLogin`, `handleOidcCallback`, `handleOidcLogout`, `handleHeartbeat` with options per call | the same members on the instance. The options that don't vary per request move to `createFidesAuth`: `applicationUrl`, `mapSession`, `rolesClaim`, `validateReturnTo`, `defaultRedirectPath`, `postLogoutRedirectUri`, `sessionDurationDays` and `rateLimit` |
+| — | `handleSessionInfo`: whether there is a session, and whose. Never refreshes, never returns tokens |
+| `readSession(cookies, secret)`, `tryReadSession(cookies, secret)` | `readSession(cookies)`, `tryReadSession(cookies)` |
+| `refreshSessionInStore`, `tryRefreshSessionInStore`, `refreshSession(session, config)` | `refreshSession(cookies, { ifExpiresWithin? })` |
+| `persistSession(cookies, session, secret)` | `createSession(cookies, tokenResponse)` |
+| `clearSession(cookies, options)` | `clearSession(cookies, options)` |
+| `readIdToken(cookies, secret)`, `session.tokens` | `getTokens(cookies)` |
+| `authorizedFetch(session, url, options)` | `authorizedFetch(cookies, url, options)`, which never refreshes |
+| `serverPersistence({ store, secret })`, `cookiePersistence(secret)` | `sessionStore` in `createFidesAuth`, or nothing for cookies |
+| `buildSessionFromTokens`, `MapSession` from `/oauth` | `mapSession` and `rolesClaim` in `createFidesAuth`; `MapSession` from `/server` |
+| `validateReturnUrl` | `validateReturnTo` in `createFidesAuth`: `(returnTo) => string \| null` |
+| `/session-cookies`, `/session-refresh`, `/session-validation` | the instance reads, refreshes and seals the session itself |
+| the login transaction helpers (`createTransaction`, `validateCallback`, …) | internal. For a custom flow, use the OIDC client and keep its authorization request on the server |
+| `CookieStore.delete` | not needed: the library deletes a cookie by setting it empty with `maxAge: 0` |
+
+**The session.** `Session` has `correlationId`, `createdAt`, `expiresAt`,
+`user`, `scopes`, `idp` and `data`. `user.sub` is required and `user.name`
+optional. The tokens aren't on it: use `getTokens`. `LegacySession` and
+`CreateSessionOptions` are gone.
+
+**A custom `SessionStore`** saves the new `StoredSession` fields:
+`correlationId`, `iss`, `subHash` and `idpSidHash`. `sid` is gone.
+
+## Next.js
+
+`createFidesAuth` from `@eventuras/fides-auth-next` is the core instance bound
+to `cookies()`. It takes the same config, and its members drop the `cookies`
+argument. Import everything from the package root.
+
+| 0.x | 1.0 |
+|---|---|
+| `getCurrentSession()`, `tryGetCurrentSession()` | `readSession()`, `tryReadSession()`, cached per render |
+| `refreshCurrentSession()`, `tryRefreshCurrentSession()` | `refreshSession({ ifExpiresWithin? })`, which says why on failure |
+| — | `refreshInProxy(request, { ifExpiresWithin? })` in `proxy.ts`, to refresh before a page renders |
+| `createAndPersistSession(session)` | `createSession(tokenResponse)` |
+| `clearCurrentSession(options)` | `clearSession(options)` |
+| `authorizedFetch(session, url, options)` | `authorizedFetch(url, options)`. `refresh: false` goes, since it never refreshes |
+| `handleOidcLogin(request, { validateReturnTo, authorizationParameters })` | `handleOidcLogin(request, { authorizationParameters })` |
+| `handleOidcCallback(request, { applicationUrl, … })` | `handleOidcCallback(request)` |
+| `handleOidcLogout(request, { postLogoutRedirectUri, state, logoutHint, … })` | `handleOidcLogout(request, { state, logoutHint })` |
+| `allowedMethods`, `fallbackRedirectUri`, `includeClientId` on logout | gone: logout answers only `POST`, `postLogoutRedirectUri` is the fallback, and `client_id` is always sent |
+| the subpaths `./auth`, `./cookie-store`, `./request`, `./oidc-login`, `./oidc-callback`, `./oidc-logout`, `./heartbeat-handler` | the package root |
+| `./store` | the store from `@eventuras/fides-auth/browser`, the hooks from `@eventuras/fides-auth-react` |
+| `setAuthCookie`, `getSessionCookie`, `ACCESS_TOKEN_COOKIE_NAME` and the other cookie helpers | `auth.cookieNames.session` |
+| `globalGETRateLimit`, `globalPOSTRateLimit`, `TokenBucket` | `rateLimit` in `createFidesAuth`. There is no default limiter |
+| the re-exports of core's `/oauth`, `/logger`, `/utils`, … | import from core's own entries |
+
+New on the instance: `handleSessionInfo`, `getTokens`, `updateSession`,
+`cookieNames` and `oidc`.
+
+## OIDC client
+
+Create the client once and reuse it. It holds the config, the discovery and
+JWKS caches and the logger, and creating it does no I/O:
 
 ```ts
 import { createOidcClient } from "@eventuras/fides-auth/oidc";
 
-const oidc = createOidcClient(oauthConfig, { logger });
+const oidc = createOidcClient(oauthConfig, { logger, discoveryTtlMs });
 ```
 
-| 0.15 | 0.16 |
+| 0.x | 1.0 |
 |---|---|
-| `buildPKCEOptions(config, options)` | `oidc.createAuthorizationRequest(options)`. The fields are camelCase: `codeVerifier`, `codeChallenge`, `state`, `parameters`. |
-| `discoverAndBuildAuthorizationUrl(config, pkce)` | `oidc.authorizationUrl(request)`. It uses PAR when `usePar` is set. |
-| `buildAuthorizationUrl(configuration, pkce)`, `buildAuthorizationUrlWithPAR(configuration, pkce)` | `oidc.authorizationUrl(request)` |
+| `OAuthConfig` with `redirect_uri` | `OidcClientConfig` with `redirectUri` |
+| `buildPKCEOptions(config, options)` | `oidc.createAuthorizationRequest(options)`. The fields are `codeVerifier`, `codeChallenge`, `state` and `parameters` |
+| `buildAuthorizationUrl`, `buildAuthorizationUrlWithPAR`, `discoverAndBuildAuthorizationUrl` | `oidc.authorizationUrl(request)`, through PAR when `usePar` is set |
+| `buildSilentLoginUrl(config, options)` | `oidc.silentLoginUrl(request, options)`, with a request from `createAuthorizationRequest` |
 | `exchangeAuthorizationCode(config, callbackUrl, codeVerifier, state)` | `oidc.exchangeCode(callbackUrl, { codeVerifier, state })` |
 | `refreshAccessToken(config, refreshToken)` | `oidc.refresh(refreshToken)` |
-| `clientCredentialsGrant({ tokenEndpoint, clientId, ... })` | `oidc.clientCredentials({ scope })`. Without discovery, set `serverMetadata: { issuer, token_endpoint }` in the client's config. |
-| `buildOidcLogoutUrl(config, options)` | `oidc.logoutUrl(options)`. The string shorthand for `postLogoutRedirectUri` goes. |
-| `verifyIdToken(idToken, { issuer, audience, oauthConfig })` from `/id-token` | `oidc.verifyIdToken(idToken)`. The issuer comes from the metadata, and the audience is the client ID. |
-| `extractUserFromTokens(tokens)` | `userFromClaims(await oidc.verifyIdToken(tokens.id_token))`. It verifies the token first. |
+| `clientCredentialsGrant({ tokenEndpoint, clientId, … })` | `oidc.clientCredentials({ scope })`. Without discovery, set `serverMetadata: { issuer, token_endpoint }` |
+| `buildOidcLogoutUrl(config, options)` | `oidc.logoutUrl(options)`. No string shorthand |
+| `verifyIdToken(idToken, { issuer, audience, … })` | `oidc.verifyIdToken(idToken)`: the issuer from the metadata, the client ID as audience |
+| `extractUserFromTokens(tokens)` | `userFromClaims(await oidc.verifyIdToken(tokens.id_token))` |
 | `discoverConfiguration(config).serverMetadata()` | `oidc.metadata()` |
-| `buildSilentLoginUrl(config, options)` | `oidc.silentLoginUrl(request, options)`, with a request from `createAuthorizationRequest`. The URL now carries `state` and PKCE, so the callback can check them. |
+| `configureDiscoveryCache({ ttlMs })` | `discoveryTtlMs` on the client |
+| `clearDiscoveryCache()`, `clearJwksCache()` | create a new client |
+| `configureLogger(factory)` | `logger` on each part; see [Logging](#logging) |
 
-### Global settings
-
-| 0.15 | 0.16 |
-|---|---|
-| `configureLogger(factory)` | `createOidcClient(config, { logger: factory })`. Until 1.0, a client without `logger` uses the factory set here. |
-| `configureDiscoveryCache({ ttlMs })` | `createOidcClient(config, { discoveryTtlMs })` |
-| `clearDiscoveryCache()`, `clearJwksCache()` | Create a new client. Each client has its own caches, so tests need no resets. |
-
-### Imports that move
-
-| 0.15 | 0.16 |
-|---|---|
-| `createPkcePair`, `createState`, `PkcePair` from `/pkce` | `@eventuras/fides-auth/oidc` |
-| `defaultScope`, `joinScope` from `/oauth` | `@eventuras/fides-auth/oidc` |
-| `checkSilentLoginResult`, `requiresInteractiveLogin`, `SilentLoginResult` from `/silent-login` | `@eventuras/fides-auth/oidc` |
-| `getOAuthErrorLogContext`, `classifyRefreshFailure` from `/oauth-logging` | `@eventuras/fides-auth/oidc` |
-| `AuthorizationRequestOptions`, `OidcLogoutOptions`, `OidcUserInfo` from `/oauth` | `@eventuras/fides-auth/oidc` |
-| `Session`, `Tokens` from `/types` | `@eventuras/fides-auth` |
-| `FidesLogger`, `FidesLoggerFactory`, `FidesLoggerOptions` from `/logger` | `@eventuras/fides-auth` |
-| `CookieOptions` from `/cookies` | `@eventuras/fides-auth` |
-| `OAuthConfig`, `ClientAuthConfig` from `/oauth` | `@eventuras/fides-auth` |
-| `TokenEndpointResponse` from `/oauth` | `TokenResponse` from `@eventuras/fides-auth`. The two have the same shape. |
-| `CookieTooLargeError` from `/cookies` | `@eventuras/fides-auth/server` |
-
-### Deprecated with no replacement
-
-These go in 1.0:
-
-- **`/rate-limit` and `TokenBucket`.** Pass a `rateLimit` callback to the
-  handlers instead.
-- **The `/cookies` constants and helpers.** From 1.0, read the cookie names
-  from the `createFidesAuth` instance.
-- **`createLogger` from `/logger`.** Log through your own logger.
-- **`resolveClientAuth`.** The client sets up client authentication from its
-  config.
-- **`getOAuthConfigLogContext`, `SilentLoginErrors` and `CreateSessionOptions`.**
-- **`/utils`.** For the crypto helpers, use Web Crypto directly:
-
-| `/utils` | Web Crypto |
-|---|---|
-| `toHex(bytes)` | `Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")` |
-| `sha256(data)`, `sha512(data)` | `toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data))))` |
-| `generateToken(n)` | `toHex(crypto.getRandomValues(new Uint8Array(n)))` |
-| `encrypt(text, key)`, `decrypt(data, key)` | `crypto.subtle.encrypt` and `decrypt` with `{ name: "AES-GCM", iv }` and a 12-byte random IV. The old format is `iv:tag:ciphertext` in hex, with the 16-byte tag split off the end of the ciphertext. |
-| `hexToUint8Array(hex)` | `Uint8Array.from(hex.match(/../g) ?? [], (h) => Number.parseInt(h, 16))` |
-
-`createEncryptedJWT`, `decryptJWT`, `accessTokenExpires` and `hasScope` become
-internal. For `hasScope(session, scope)`, check `session.scopes?.includes(scope)`.
-
-### Not deprecated
-
-- **`buildSessionFromTokens`, `validateReturnUrl` and `MapSession` in `/oauth`,
-  and the free `/server` functions.** In 1.0, `createFidesAuth` replaces them.
-- **The root entry's functions.** The root becomes types-only in 1.0. Import
-  functions from their own entries, such as `SESSION_EVENT` from
-  `/session-events`.
-
-## 1.0: the server side, and what 0.16 deprecated
-
-**New**
-
-- **`createFidesAuth(config)` from `/server`.** One object holds the OIDC
-  client, the session storage and the guards. Its members take the `Request`
-  and a `CookieStore`:
-  - the handlers `handleOidcLogin`, `handleOidcCallback`, `handleOidcLogout`,
-    `handleHeartbeat` and `handleSessionInfo`
-  - the session members `readSession`, `tryReadSession`, `getTokens`,
-    `refreshSession`, `createSession`, `updateSession`, `clearSession` and
-    `authorizedFetch`
-- **One session cookie.** The session lives in `__Host-session` (`session` over
-  plain http), in at most three chunks. With a `sessionStore`, the cookie holds
-  only a handle.
-- **A same-origin check.** Logout and heartbeat answer only a `POST` from the
-  app's own pages.
-- **`handleSessionInfo`.** Answers `GET` with whether there is a session, and
-  whose. It never refreshes and never returns tokens.
-- **`SessionSecretError` from `/server`.**
-
-**Changed**
-
-- **`Session` is the new session shape.** It has `correlationId`, `createdAt`,
-  `expiresAt`, `user`, `scopes`, `idp` and `data`, and no tokens: get them with
-  `getTokens`.
-- **Session events carry `correlationId`, not `sid`.** Update log queries and
-  dashboards that filter on `sid`.
-- **A session ends after `sessionDurationDays`** (30 by default), whatever the
-  refreshes. A read after that answers `session_expired`.
-- **A custom `SessionStore` should save the new `StoredSession` fields:**
-  `correlationId`, `iss`, `subHash` and `idpSidHash`. `sid` goes: the
-  correlation id is `correlationId`.
-- **`CookieStore` has only `get` and `set`.** The library deletes a cookie by
-  setting it empty with `maxAge: 0`, so an adapter needs no `delete`.
-- **Nothing refreshes unless you ask.** `authorizedFetch` no longer refreshes
-  on a 401: it throws an `http_error`, and the `refresh` option and the
-  `refresh_failed` reason go. Call `refreshSession({ ifExpiresWithin: 60 })`
-  first, where cookies can be written. It refreshes only when the access token
-  expires within that many seconds, and its result says whether it
-  `refreshed`. After a 401, the error's `accessTokenExpired` and `bearerError`
-  say whether a refresh is likely to help.
-- **Users log in again once.** 1.0 doesn't read 0.x sessions, and deletes their
-  cookies the next time it writes a session.
-
-**Gone**
-
-- **The free `/server` functions.** The instance's members replace them:
-
-  | 0.x | 1.0 |
-  |---|---|
-  | `handleOidcLogin`, `handleOidcCallback`, `handleOidcLogout`, `handleHeartbeat` | the same members on the instance, with the options in `createFidesAuth` |
-  | `readSession(cookies, secret)`, `tryReadSession(cookies, secret)` | `readSession(cookies)`, `tryReadSession(cookies)` |
-  | `refreshSessionInStore`, `tryRefreshSessionInStore` | `refreshSession(cookies, { ifExpiresWithin? })` |
-  | `persistSession(cookies, session, secret)` | `createSession(cookies, tokenResponse)` |
-  | `clearSession(cookies, options)` | `clearSession(cookies, options)` |
-  | `readIdToken(cookies, secret)` | `getTokens(cookies)`, then `idToken` |
-  | `authorizedFetch(session, url, options)` | `authorizedFetch(cookies, url, options)`, which doesn't refresh |
-  | `serverPersistence({ store, secret })`, `cookiePersistence(secret)` | `sessionStore` in `createFidesAuth`, or nothing |
-
-- **The login transaction helpers**: `createTransaction`, `persistTransaction`,
-  `readTransaction`, `clearTransaction`, `validateCallback`,
-  `transactionCookieOptions` and `CallbackValidationError`. The login and
-  callback handlers use them; for a custom flow, use the OIDC client from
-  `/oidc` and keep the authorization request on your server.
-- **`/session-cookies`, `/session-refresh` and `/session-validation`**, with
-  `validateSessionJwt`, `refreshSession(session, config)` and the cookie codec.
-  The instance reads, refreshes and seals the session itself.
-- **`buildSessionFromTokens` and `MapSession` in `/oauth`.** Pass `mapSession`
-  and `rolesClaim` to `createFidesAuth`, and import `MapSession` from `/server`.
-- **`LegacySession` and `CreateSessionOptions`.**
-- **The rejected reason `stale_legacy_session`.** 1.0 doesn't read 0.x
-  cookies, so a browser that still has them reads as `no_session_cookie`, or as
-  `unreadable_session` over plain http, where the new cookie is also called
-  `session`.
-
-### What 0.16 deprecated
-
-All of it goes in 1.0. The [0.16 tables](#016-the-oidc-client) say what
-replaces each export.
-
-- **The entries** `/oauth`, `/pkce`, `/id-token`, `/oidc-discovery`,
-  `/oauth-logging`, `/silent-login`, `/types`, `/logger`, `/cookies`, `/utils`,
-  `/rate-limit` and `/oauth-browser`. Core has six entries: the root, `/oidc`,
-  `/server`, `/browser`, `/session-events` and `/providers/vipps`.
-- **The free protocol functions.** Create a client with `createOidcClient` and
-  call its methods.
-- **The global settings**: `configureLogger`, `configureDiscoveryCache`,
-  `clearDiscoveryCache` and `clearJwksCache`. Pass `logger` to each part that
-  logs: `createFidesAuth`, `createOidcClient`, `createAuthStore`,
-  `startSessionMonitor`, `createHeartbeat` and `VippsLoginClient`. A part
-  without one writes JSON lines to the console.
-- **`redirect_uri`.** Set `redirectUri`. `OAuthConfig` goes with it: the config
-  type is `OidcClientConfig`, from the root or `/oidc`.
-- **The root entry's functions and constants.** The root exports only types:
-  `Session`, `Tokens`, `TokenResponse`, `SessionInfo`, `HeartbeatResponse`,
-  `IdpSession`, `CookieOptions`, `OidcClientConfig`, `ClientAuthConfig`,
-  `FidesLogger`, `FidesLoggerFactory` and `FidesLoggerOptions`.
-- **`logSessionEvent`, `sessionEventLevel`, `newSessionId` and
-  `SESSION_REJECTED_REASONS`.** `/session-events` keeps `SESSION_EVENT`,
-  `isSessionRejectedReason` and the event types. To log an event yourself, see
-  [Consuming the vocabulary](./session-events.md#consuming-the-vocabulary), and
-  to get the library's own, pass `onSessionEvent` to `createFidesAuth`.
-
-**Changed**
-
-- **`VippsLoginClient` is built on the OIDC client**, with its method names:
-
-  | 0.x | 1.0 |
-  |---|---|
-  | `buildPKCEOptions(options)` | `createAuthorizationRequest(options)` |
-  | `buildAuthorizationUrl(pkce)` | `authorizationUrl(request)` |
-  | `exchangeCodeForTokens(callbackUrl, codeVerifier, state)` | `exchangeCode(callbackUrl, { codeVerifier, state })` |
-  | `refreshTokens(refreshToken)` | `refresh(refreshToken)` |
-  | `getUserInfo(accessToken)` | `getUserInfo(accessToken)` |
-
-  `vipps.oidc` is the client underneath, and a second constructor argument
-  takes `logger` and `discoveryTtlMs`.
-- **Core is a peer dependency** of `fides-auth-next` and `fides-auth-react`.
-  Install it next to them, for example
-  `pnpm add @eventuras/fides-auth @eventuras/fides-auth-next`. All three need
-  Node 22.
-
-### fides-auth-next
-
-`createFidesAuth` from `@eventuras/fides-auth-next` is the core instance bound to
-`cookies()`. It takes the same config as core's. The options that the handlers
-took per call move to it: `applicationUrl`, `mapSession`, `rolesClaim`,
-`validateReturnTo`, `defaultRedirectPath`, `postLogoutRedirectUri`,
-`sessionDurationDays` and `rateLimit`.
+**Vipps.** `VippsLoginClient` is built on the OIDC client. A second constructor
+argument takes `logger` and `discoveryTtlMs`, and `vipps.oidc` is the client
+underneath.
 
 | 0.x | 1.0 |
 |---|---|
-| `getCurrentSession()` | `readSession()` |
-| `tryGetCurrentSession()` | `tryReadSession()` |
-| `refreshCurrentSession()`, `tryRefreshCurrentSession()` | `refreshSession({ ifExpiresWithin? })`, which says why on failure |
-| `createAndPersistSession(session)` | `createSession(tokenResponse)` |
-| `clearCurrentSession(options)` | `clearSession(options)` |
-| `authorizedFetch(session, url, options)` | `authorizedFetch(url, options)`: it reads the tokens itself and never refreshes, so `refresh: false` goes |
-| `handleOidcLogin(request, { validateReturnTo, authorizationParameters })` | `handleOidcLogin(request, { authorizationParameters })` |
-| `handleOidcCallback(request, { applicationUrl, ... })` | `handleOidcCallback(request)` |
-| `handleOidcLogout(request, { postLogoutRedirectUri, state, logoutHint, ... })` | `handleOidcLogout(request, { state, logoutHint })` |
-| `handleHeartbeat(request)` | `handleHeartbeat(request)` |
+| `buildPKCEOptions(options)` | `createAuthorizationRequest(options)` |
+| `buildAuthorizationUrl(pkce)` | `authorizationUrl(request)` |
+| `exchangeCodeForTokens(callbackUrl, codeVerifier, state)` | `exchangeCode(callbackUrl, { codeVerifier, state })` |
+| `refreshTokens(refreshToken)` | `refresh(refreshToken)` |
 
-New on the instance: `handleSessionInfo`, `getTokens`, `updateSession`,
-`cookieNames`, `oidc` and `refreshInProxy(request)`. `refreshInProxy` goes in
-`proxy.ts`. It refreshes a session about to expire before the page renders,
-which a Server Component can't do itself.
-
-**Gone**
-
-- **The subpaths.** `./auth`, `./cookie-store`, `./request`, `./oidc-login`,
-  `./oidc-callback`, `./oidc-logout` and `./heartbeat-handler`: import from
-  the root.
-- **`./store`.** It re-exported `@eventuras/fides-auth-store` and
-  `@eventuras/fides-auth-react`. Import the store from
-  `@eventuras/fides-auth/browser` and the hooks from `@eventuras/fides-auth-react`;
-  see the next section.
-- **The cookie helpers and constants**, such as `setAuthCookie`,
-  `getSessionCookie` and `ACCESS_TOKEN_COOKIE_NAME`. The instance owns its
-  cookies, and `cookieNames.session` names the session cookie.
-- **The default rate limiter**: `globalGETRateLimit`, `globalPOSTRateLimit` and
-  `TokenBucket`. The handlers rate-limit only through `rateLimit`.
-- **The core re-exports** from `/oauth`, `/logger`, `/session-events`,
-  `/session-refresh`, `/session-validation`, `/silent-login`, `/utils` and
-  `/types`. Import what remains from `@eventuras/fides-auth`. The root re-exports the types
-  an app needs for the instance: `Session`, `Tokens`, `FidesAuthConfig`,
-  `SessionStore` and others.
-- **Logout options.** `allowedMethods` goes, since logout answers only `POST`.
-  `fallbackRedirectUri` goes, since `postLogoutRedirectUri` is the fallback.
-  `includeClientId` goes, and `client_id` is always sent.
-- **The per-request refresh sharing.** The instance shares refreshes itself.
-
-### The browser side and React
-
-The session store, the session monitor, heartbeat and the activity tracker are
-in core's `@eventuras/fides-auth/browser`. `@eventuras/fides-auth-react` keeps
-the hooks, rebuilt on that store, and `@eventuras/fides-auth-store` ends at 0.x.
+## Browser and React
 
 | 0.x | 1.0 |
 |---|---|
-| `@eventuras/fides-auth-store` | `@eventuras/fides-auth/browser` |
-| `@eventuras/fides-auth/heartbeat`, `/activity-tracker` | `@eventuras/fides-auth/browser` |
-| `createAuthStore({ checkAuthStatus, config: { adminRole } })` | `createAuthStore({ adminRole })`, which asks `/api/auth/session` by default; `checkAuthStatus` and `sessionEndpoint` replace that |
+| `@eventuras/fides-auth-store`, `@eventuras/fides-auth/heartbeat`, `/activity-tracker` | `@eventuras/fides-auth/browser` |
+| `createAuthStore({ checkAuthStatus, config: { adminRole } })` | `createAuthStore({ adminRole })`. It asks `/api/auth/session` (`handleSessionInfo`); `sessionEndpoint` or `checkAuthStatus` change that |
 | `store.send({ type: 'authSuccess', user })` and the other events | `store.authSuccess(user)`, `authFailed(error?)`, `sessionExpired()`, `logout()`, `setError(error)`, `clearError()` |
+| `loginSuccess`, `updateLastChecked` | `authSuccess`. The store sets `lastChecked` on every check |
 | `store.getSnapshot().context` | `store.getSnapshot()` |
 | `initializeAuth(store, check)`, `checkAuth(store, check)` | `initializeAuth(store)`, `checkAuth(store)` |
 | `startSessionMonitor(store, check, config)` | `startSessionMonitor(store, config)` |
 | `useSessionMonitor(store, check, config)` | `useSessionMonitor(store, config)` |
-| `loggerNamespace` on the store, the monitor and the heartbeat | `logger`, a `FidesLoggerFactory` |
-| `configureAuthLogger()` | pass `logger` where you want `@eventuras/logger` |
+| `loggerNamespace`, `configureAuthLogger()` | `logger` on the store, the monitor and the heartbeat |
+| `AuthStoreSelector`, `HeartbeatConfig` from `fides-auth-react` | the types from `@eventuras/fides-auth/browser` |
+| `@xstate/store`, `@xstate/store-react` | not needed |
 
-**Changed**
+The monitor reports an expired session only when the store held one, so it can
+run on every page. `useSessionMonitor` and `useHeartbeat` read their callbacks
+through a ref, so new ones on each render don't restart them.
 
-- **No XState.** The store is the library's own. `@xstate/store` and
-  `@xstate/store-react` are no longer needed, and the hooks read the store with
-  React's `useSyncExternalStore`.
-- **The check is the session info endpoint.** The store and the monitor ask
-  `handleSessionInfo` unless you give them another check. Its user is the
-  session's `user`, with `sub`, and `roles` may be absent.
-- **The monitor leaves a visitor alone.** It reports an expired session only
-  when the store held one, so it can run on every page.
-- **`useSessionMonitor` doesn't restart on every render.** It reads its
-  callbacks through a ref.
-- **`loginSuccess` and `updateLastChecked` go.** Use `authSuccess`; the store
-  sets `lastChecked` on every check.
+## Imports
 
+The root exports only types: `Session`, `Tokens`, `TokenResponse`,
+`SessionInfo`, `HeartbeatResponse`, `IdpSession`, `CookieOptions`,
+`OidcClientConfig`, `ClientAuthConfig`, `FidesLogger`, `FidesLoggerFactory`
+and `FidesLoggerOptions`.
+
+| 0.x | 1.0 |
+|---|---|
+| `/oauth`, `/pkce`, `/id-token`, `/oidc-discovery`, `/oauth-logging`, `/silent-login` | `/oidc` |
+| `/types`, `/logger`, and `CookieOptions` from `/cookies` | the root |
+| `TokenEndpointResponse` from `/oauth` | `TokenResponse` from the root |
+| `CookieTooLargeError` from `/cookies` | `/server` |
+| `/session-events` | `/session-events`, with `SESSION_EVENT`, `isSessionRejectedReason` and the event types |
+| functions and constants from the root | their own entries, or gone (below) |
+
+## Gone without a replacement
+
+- **`/utils`.** Use Web Crypto directly:
+
+  | `/utils` | Web Crypto |
+  |---|---|
+  | `toHex(bytes)` | `Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")` |
+  | `sha256(data)`, `sha512(data)` | `toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(data))))` |
+  | `generateToken(n)` | `toHex(crypto.getRandomValues(new Uint8Array(n)))` |
+  | `hexToUint8Array(hex)` | `Uint8Array.from(hex.match(/../g) ?? [], (h) => Number.parseInt(h, 16))` |
+  | `encrypt(text, key)`, `decrypt(data, key)` | `crypto.subtle.encrypt` and `decrypt` with `{ name: "AES-GCM", iv }` and a 12-byte random IV. The old format is `iv:tag:ciphertext` in hex, with the 16-byte tag split off the end of the ciphertext |
+  | `hasScope(session, scope)` | `session.scopes?.includes(scope)` |
+
+- **`/rate-limit` and `TokenBucket`.** Pass `rateLimit` to `createFidesAuth`,
+  with the limiter of your choice.
+- **`/oauth-browser`.** Use the server flow.
+- **The cookie constants and helpers from `/cookies`**, such as
+  `SESSION_COOKIE_NAME` and `defaultSessionCookieOptions`. Read the session
+  cookie's name from `auth.cookieNames`.
+- **`createLogger`, `configureLogger`.** See [Logging](#logging).
+- **`logSessionEvent`, `sessionEventLevel`, `newSessionId` and
+  `SESSION_REJECTED_REASONS`.** Pass `onSessionEvent` to `createFidesAuth` to
+  get the library's events, or log your own as
+  [Session events](./session-events.md#consuming-the-vocabulary) shows.
+- **`resolveClientAuth`, `getOAuthConfigLogContext`, `SilentLoginErrors`,
+  `createEncryptedJWT`, `decryptJWT` and `accessTokenExpires`.**
+- **The rejected reason `stale_legacy_session`.** A browser with 0.x cookies
+  reads as `no_session_cookie`, or as `unreadable_session` over plain http.
+
+## Logging
+
+There is no global logger. Pass a `FidesLoggerFactory` as `logger` to each part
+that logs: `createFidesAuth`, `createOidcClient`, `VippsLoginClient`,
+`createAuthStore`, `startSessionMonitor` and `createHeartbeat`. A part without
+one writes JSON lines to the console.
+
+## Behaviour that changes
+
+- **A session ends `sessionDurationDays` after login** (30 by default), however
+  often it is refreshed. A read after that answers `session_expired`.
+- **Nothing refreshes unless you ask.** `authorizedFetch` throws an
+  `http_error` on a 401. Its `refresh` option, the `refresh_failed` reason, and
+  `refreshed` and `refreshFailure` in its result are gone. Call `refreshSession({ ifExpiresWithin: 60 })` where cookies
+  can be written, `refreshInProxy` in Next's `proxy.ts`, or let the heartbeat
+  do it. After a 401, the error's `accessTokenExpired` and `bearerError` say
+  whether a refresh is likely to help.
+- **Logout and heartbeat answer only a same-origin `POST`.** Anything else gets
+  403, or 405 for another method.
+- **Next has no default rate limiter.** The handlers rate-limit only through
+  `rateLimit`.
+- **`createFidesAuth` throws on `clientAuth: 'none'`.** The server side of an
+  app is a confidential client.
+- **One session cookie.** The session lives in `__Host-session`, in at most
+  three chunks, or `session` over plain http. With a `sessionStore`, it holds
+  only a handle. The cookies are `Secure` unless `redirectUri` is plain http.
+- **The browser store asks the session info endpoint** by default, and its user
+  is the session's `user`, where `roles` may be absent.
