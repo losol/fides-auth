@@ -1,4 +1,4 @@
-// The `/oidc` entry: the OIDC client and the protocol's pure helpers (ADR 0001 §3).
+// The `/oidc` entry: the OIDC client and the protocol's pure helpers.
 // It loads nothing from server/; a lint rule keeps it that way.
 
 export {

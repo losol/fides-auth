@@ -1,5 +1,5 @@
 // Imports each package.json entry from dist/ in its own Node process and records
-// which third-party packages it loads (ADR 0001 §2, "Dependency weight"). Bundlers
+// which third-party packages it loads. Bundlers
 // drop unused code, but Node servers, edge isolates and test runners load the whole
 // module graph, so this is what an entry costs there. Needs a build first; turbo
 // runs one before `test`.
@@ -19,8 +19,7 @@ const pkg = JSON.parse(readFileSync(new URL('package.json', packageDir), 'utf8')
 
 /**
  * Third-party packages each entry loads today, transitive ones included. Lower
- * a row when a change makes an entry lighter; ADR 0001 has `.` and
- * `/session-events` load none by 1.0. A row that grows needs a reason.
+ * a row when a change makes an entry lighter. A row that grows needs a reason.
  */
 const expected: Record<string, string[]> = {
   '.': ['jose', 'oauth4webapi', 'openid-client'],
