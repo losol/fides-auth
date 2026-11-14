@@ -1,9 +1,9 @@
 import * as openid from 'openid-client';
 
-import { createLogger } from '../shared/logger.js';
+import { createLogger, type FidesLogger } from '../shared/logger.js';
 import type { PKCEOptions } from './authorization-parameters.js';
 import type { OAuthConfig } from './config.js';
-import { discoverConfiguration } from './discovery.js';
+import { moduleContext, type ProtocolContext } from './context.js';
 
 const logger = createLogger({ namespace: 'fides-auth:oauth' });
 
@@ -18,8 +18,16 @@ export async function buildAuthorizationUrl(
   config: openid.Configuration,
   pkceOptions: PKCEOptions
 ): Promise<URL> {
+  return urlFor(config, pkceOptions.parameters, logger);
+}
+
+async function urlFor(
+  config: openid.Configuration,
+  parameters: Record<string, string>,
+  logger: FidesLogger,
+): Promise<URL> {
   try {
-    const authUrl = openid.buildAuthorizationUrl(config, pkceOptions.parameters);
+    const authUrl = openid.buildAuthorizationUrl(config, parameters);
     logger.info('Authorization URL built successfully');
     return authUrl;
   } catch (error) {
@@ -43,11 +51,16 @@ export async function buildAuthorizationUrlWithPAR(
   config: openid.Configuration,
   pkceOptions: PKCEOptions
 ): Promise<URL> {
+  return parUrlFor(config, pkceOptions.parameters, logger);
+}
+
+async function parUrlFor(
+  config: openid.Configuration,
+  parameters: Record<string, string>,
+  logger: FidesLogger,
+): Promise<URL> {
   try {
-    const authUrl = await openid.buildAuthorizationUrlWithPAR(
-      config,
-      pkceOptions.parameters,
-    );
+    const authUrl = await openid.buildAuthorizationUrlWithPAR(config, parameters);
     logger.info('PAR authorization URL built successfully');
     return authUrl;
   } catch (error) {
@@ -75,10 +88,21 @@ export async function discoverAndBuildAuthorizationUrl(
   oauthConfig: OAuthConfig,
   pkceOptions: PKCEOptions
 ): Promise<URL> {
+  return authorizationUrl(moduleContext(oauthConfig, logger), pkceOptions.parameters);
+}
+
+/**
+ * Builds the authorization URL for `parameters`, through PAR when `usePar` is set.
+ * The shared core of {@link discoverAndBuildAuthorizationUrl} and `OidcClient.authorizationUrl`.
+ */
+export async function authorizationUrl(
+  { config: oauthConfig, configuration, logger }: ProtocolContext,
+  parameters: Record<string, string>,
+): Promise<URL> {
   logger.debug({ issuer: oauthConfig.issuer }, 'Discovering OpenID configuration');
 
   try {
-    const config = await discoverConfiguration(oauthConfig);
+    const config = await configuration();
 
     const parEndpoint = config.serverMetadata().pushed_authorization_request_endpoint;
 
@@ -88,7 +112,7 @@ export async function discoverAndBuildAuthorizationUrl(
           'PAR requested (usePar=true) but provider does not advertise pushed_authorization_request_endpoint',
         );
       }
-      return buildAuthorizationUrlWithPAR(config, pkceOptions);
+      return parUrlFor(config, parameters, logger);
     }
 
     if (parEndpoint) {
@@ -98,7 +122,7 @@ export async function discoverAndBuildAuthorizationUrl(
       );
     }
 
-    return buildAuthorizationUrl(config, pkceOptions);
+    return urlFor(config, parameters, logger);
   } catch (error) {
     logger.error({ error, issuer: oauthConfig.issuer }, 'Failed to discover config or build URL');
     throw error;

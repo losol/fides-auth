@@ -15,10 +15,8 @@
 
 import * as openid from 'openid-client';
 
-import { createLogger } from '../shared/logger.js';
-import type { ClientAuthConfig, OAuthConfig } from './config.js';
-
-const logger = createLogger({ namespace: 'fides-auth:oidc-discovery' });
+import { createLogger, type FidesLogger } from '../shared/logger.js';
+import type { ClientAuthConfig, OAuthConfig, OidcClientConfig } from './config.js';
 
 /**
  * Default lifetime of a cached configuration.
@@ -47,9 +45,6 @@ interface CacheEntry {
   inputs: readonly unknown[];
 }
 
-const cache = new Map<string, CacheEntry>();
-let ttlMs = DEFAULT_TTL_MS;
-
 /** Options for {@link configureDiscoveryCache}. */
 export interface DiscoveryCacheOptions {
   /**
@@ -73,14 +68,9 @@ export interface DiscoveryCacheOptions {
  */
 export function configureDiscoveryCache(options: DiscoveryCacheOptions): void {
   if (options.ttlMs !== undefined) {
-    if (!Number.isFinite(options.ttlMs) || options.ttlMs < 0) {
-      throw new TypeError(
-        `configureDiscoveryCache: ttlMs must be a finite number >= 0, got ${options.ttlMs}`,
-      );
-    }
-    ttlMs = options.ttlMs;
+    moduleCache.ttlMs = checkTtl(options.ttlMs, 'configureDiscoveryCache: ttlMs');
   }
-  cache.clear();
+  moduleCache.clear();
 }
 
 /**
@@ -91,7 +81,7 @@ export function configureDiscoveryCache(options: DiscoveryCacheOptions): void {
  * since the cache is module state.
  */
 export function clearDiscoveryCache(): void {
-  cache.clear();
+  moduleCache.clear();
 }
 
 /**
@@ -136,13 +126,13 @@ export function resolveClientAuth(config: ClientAuthConfig): {
  * checked separately. JSON-encoded rather than concatenated so no separator can
  * be forged by a value that happens to contain it.
  */
-function cacheKey(config: OAuthConfig): string {
+function cacheKey(config: OidcClientConfig): string {
   const method = config.clientAuth ?? 'client_secret_post';
   return JSON.stringify([config.issuer, config.clientId, method]);
 }
 
 /** The values an entry must have been built from, compared by identity. */
-function cacheInputs(config: OAuthConfig): readonly unknown[] {
+function cacheInputs(config: OidcClientConfig): readonly unknown[] {
   const metadata = config.serverMetadata;
   switch (config.clientAuth) {
     case 'none':
@@ -169,7 +159,7 @@ function requestsOpenId(scope: string | string[] | undefined): boolean {
 }
 
 /** Async so a bad config rejects like a failed discovery and is never cached. */
-async function buildConfiguration(config: OAuthConfig): Promise<openid.Configuration> {
+async function buildConfiguration(config: OidcClientConfig): Promise<openid.Configuration> {
   const { clientSecret, clientAuthentication } = resolveClientAuth(config);
   const metadata = config.serverMetadata;
 
@@ -192,6 +182,82 @@ async function buildConfiguration(config: OAuthConfig): Promise<openid.Configura
   return new openid.Configuration(metadata, config.clientId, clientSecret, clientAuthentication);
 }
 
+/** A discovery cache: the module keeps one for the free functions, and each OIDC client has its own. */
+export interface DiscoveryCache {
+  /** How long an entry stays reusable, in milliseconds. `0` disables caching. */
+  ttlMs: number;
+  /** The configuration for `config`, from the cache or a new discovery. */
+  discover(config: OidcClientConfig): Promise<openid.Configuration>;
+  /** Drops every entry. */
+  clear(): void;
+}
+
+/**
+ * Checks a TTL before it is used, so a bad value fails loudly.
+ *
+ * @throws TypeError naming `label` if `ttlMs` is not a finite, non-negative number.
+ */
+export function checkTtl(ttlMs: number, label: string): number {
+  if (!Number.isFinite(ttlMs) || ttlMs < 0) {
+    throw new TypeError(`${label} must be a finite number >= 0, got ${ttlMs}`);
+  }
+  return ttlMs;
+}
+
+/** Creates an empty discovery cache that logs through `logger`. */
+export function createDiscoveryCache(logger: FidesLogger, ttlMs = DEFAULT_TTL_MS): DiscoveryCache {
+  const cache = new Map<string, CacheEntry>();
+  let ttl = ttlMs;
+
+  return {
+    get ttlMs() {
+      return ttl;
+    },
+    set ttlMs(value) {
+      ttl = value;
+    },
+
+    discover(config) {
+      const key = cacheKey(config);
+      const inputs = cacheInputs(config);
+      const now = Date.now();
+      const cached = cache.get(key);
+
+      if (cached && cached.expiresAt > now && sameInputs(cached.inputs, inputs)) {
+        return cached.configuration;
+      }
+
+      logger.debug(
+        { issuer: config.issuer },
+        config.serverMetadata
+          ? 'Building configuration from server metadata'
+          : 'Discovering OpenID configuration',
+      );
+
+      const configuration = buildConfiguration(config);
+
+      if (ttl > 0) {
+        cache.set(key, { configuration, expiresAt: now + ttl, inputs });
+
+        // Never cache a failure: a provider that was briefly unreachable must be
+        // retried on the next call, not remembered as broken for the whole TTL.
+        // Guarded so a slow failure cannot evict a newer entry that replaced it.
+        configuration.catch(() => {
+          if (cache.get(key)?.configuration === configuration) cache.delete(key);
+        });
+      }
+
+      return configuration;
+    },
+
+    clear() {
+      cache.clear();
+    },
+  };
+}
+
+const moduleCache = createDiscoveryCache(createLogger({ namespace: 'fides-auth:oidc-discovery' }));
+
 /**
  * Discovers the provider's OpenID configuration, or builds it from
  * `config.serverMetadata`, reusing a recent result.
@@ -202,34 +268,5 @@ async function buildConfiguration(config: OAuthConfig): Promise<openid.Configura
 export async function discoverConfiguration(
   config: OAuthConfig,
 ): Promise<openid.Configuration> {
-  const key = cacheKey(config);
-  const inputs = cacheInputs(config);
-  const now = Date.now();
-  const cached = cache.get(key);
-
-  if (cached && cached.expiresAt > now && sameInputs(cached.inputs, inputs)) {
-    return cached.configuration;
-  }
-
-  logger.debug(
-    { issuer: config.issuer },
-    config.serverMetadata
-      ? 'Building configuration from server metadata'
-      : 'Discovering OpenID configuration',
-  );
-
-  const configuration = buildConfiguration(config);
-
-  if (ttlMs > 0) {
-    cache.set(key, { configuration, expiresAt: now + ttlMs, inputs });
-
-    // Never cache a failure: a provider that was briefly unreachable must be
-    // retried on the next call, not remembered as broken for the whole TTL.
-    // Guarded so a slow failure cannot evict a newer entry that replaced it.
-    configuration.catch(() => {
-      if (cache.get(key)?.configuration === configuration) cache.delete(key);
-    });
-  }
-
-  return configuration;
+  return moduleCache.discover(config);
 }

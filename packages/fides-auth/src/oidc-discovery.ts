@@ -1,2 +1,8 @@
 // The `/oidc-discovery` entry. The code lives in protocol/discovery.ts.
-export * from './protocol/discovery.js';
+export {
+  clearDiscoveryCache,
+  configureDiscoveryCache,
+  discoverConfiguration,
+  resolveClientAuth,
+  type DiscoveryCacheOptions,
+} from './protocol/discovery.js';

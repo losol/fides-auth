@@ -33,6 +33,7 @@ const expected: Record<string, string[]> = {
   './session-cookies': ['jose'],
   './session-events': [],
   './oauth': ['jose', 'oauth4webapi', 'openid-client'],
+  './oidc': ['jose', 'oauth4webapi', 'openid-client'],
   './oidc-discovery': ['jose', 'oauth4webapi', 'openid-client'],
   './id-token': ['jose', 'oauth4webapi', 'openid-client'],
   './oauth-logging': [],

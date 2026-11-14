@@ -1,4 +1,4 @@
-// Config types shared by the OAuth modules. Keep this a leaf: no imports from this package.
+// Config types for the protocol layer, and the redirect URI helper. Keep this a leaf: no imports from this package.
 
 import type * as openid from 'openid-client';
 
@@ -22,11 +22,17 @@ export type ClientAuthConfig =
       privateKey: openid.CryptoKey | openid.PrivateKey;
     };
 
-/** Configuration for server-side OAuth / OIDC flows. */
-export type OAuthConfig = ClientAuthConfig & {
+/**
+ * Configuration for `createOidcClient`. `redirectUri` is checked when an
+ * operation needs it, so a client used only for client credentials needs none.
+ */
+export type OidcClientConfig = ClientAuthConfig & {
   issuer: string;
   clientId: string;
-  redirect_uri: string;
+  /** The callback URL registered with the provider. */
+  redirectUri?: string;
+  /** The older spelling of `redirectUri`. Set one, or both to the same value. */
+  redirect_uri?: string;
   /** Space-separated string or an array of scopes. */
   scope: string | string[];
   /**
@@ -50,6 +56,27 @@ export type OAuthConfig = ClientAuthConfig & {
    */
   serverMetadata?: openid.ServerMetadata;
 };
+
+/**
+ * Configuration for server-side OAuth / OIDC flows. Takes `redirectUri` too,
+ * but `redirect_uri` stays required, so code that reads it still compiles.
+ */
+export type OAuthConfig = OidcClientConfig & { redirect_uri: string };
+
+/**
+ * The redirect URI from either spelling.
+ *
+ * @throws TypeError if neither is set, or if both are set to different values.
+ */
+export function redirectUriOf(config: OidcClientConfig): string {
+  const { redirectUri, redirect_uri } = config;
+  if (redirectUri !== undefined && redirect_uri !== undefined && redirectUri !== redirect_uri) {
+    throw new TypeError('redirectUri and redirect_uri differ; set one of them');
+  }
+  const uri = redirectUri ?? redirect_uri;
+  if (!uri) throw new TypeError('This operation needs redirectUri in the OIDC config');
+  return uri;
+}
 
 /**
  * Configuration for OAuth client credentials flow (machine-to-machine authentication).

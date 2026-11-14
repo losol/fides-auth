@@ -12,6 +12,7 @@ export default defineVanillaLibConfig({
     'session-cookies': 'src/session-cookies.ts',
     'session-events': 'src/session-events.ts',
     oauth: 'src/oauth.ts',
+    oidc: 'src/oidc.ts',
     'oidc-discovery': 'src/oidc-discovery.ts',
     'id-token': 'src/id-token.ts',
     pkce: 'src/pkce.ts',

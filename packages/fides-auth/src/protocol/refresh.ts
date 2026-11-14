@@ -2,9 +2,9 @@ import * as openid from 'openid-client';
 
 import { createLogger } from '../shared/logger.js';
 import type { OAuthConfig } from './config.js';
+import { moduleContext, type ProtocolContext } from './context.js';
 import { getOAuthErrorLogContext } from './logging.js';
 import { joinScope } from './scope.js';
-import { discoverConfiguration } from './discovery.js';
 
 const logger = createLogger({ namespace: 'fides-auth:oauth' });
 
@@ -19,10 +19,20 @@ export async function refreshAccessToken(
   oAuthConfig: OAuthConfig,
   refreshToken: string,
 ): Promise<openid.TokenEndpointResponse> {
+  return refresh(moduleContext(oAuthConfig, logger), refreshToken);
+}
+
+/**
+ * Runs a refresh token grant. The shared core of {@link refreshAccessToken} and `OidcClient.refresh`.
+ */
+export async function refresh(
+  { config: oAuthConfig, configuration, logger }: ProtocolContext,
+  refreshToken: string,
+): Promise<openid.TokenEndpointResponse> {
   logger.debug({ issuer: oAuthConfig.issuer }, 'Starting token refresh');
 
   try {
-    const config = await discoverConfiguration(oAuthConfig);
+    const config = await configuration();
 
     const tokens = await openid.refreshTokenGrant(
       config,

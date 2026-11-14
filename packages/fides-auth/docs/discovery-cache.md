@@ -55,3 +55,18 @@ holds its own, and a deploy starts empty.
 If you write tests that mock discovery, call `clearDiscoveryCache()` between
 cases. The cache is module state and will otherwise serve one test's provider
 metadata to the next.
+
+## On an OIDC client
+
+A client from `createOidcClient` (`/oidc`) has its own cache, so it is neither
+shared with other clients nor touched by `configureDiscoveryCache` or
+`clearDiscoveryCache`. Set its TTL when you create it:
+
+```ts
+import { createOidcClient } from "@eventuras/fides-auth/oidc";
+
+const oidc = createOidcClient(oauthConfig, { discoveryTtlMs: 60_000 }); // 0 discovers on every call
+```
+
+To drop its cache, create a new client. Tests that create a client per case need
+no cache resets.

@@ -38,8 +38,11 @@ export function extractUserFromTokens(
   return userFromClaims(decodeJwt(tokens.id_token), rolesClaim);
 }
 
-/** Maps decoded ID token claims to {@link OidcUserInfo}. Internal: `/oauth` doesn't export it. */
-export function userFromClaims(idToken: JWTPayload, rolesClaim: string): OidcUserInfo {
+/**
+ * Maps ID token claims to {@link OidcUserInfo}, with roles from `rolesClaim`.
+ * Verify the claims first, e.g. with `OidcClient.verifyIdToken`. `/oidc` exports it.
+ */
+export function userFromClaims(idToken: JWTPayload, rolesClaim = 'roles'): OidcUserInfo {
   // Normalize roles: some providers send a single string instead of an array
   const rawRoles = idToken[rolesClaim];
   const nonArrayRoles = typeof rawRoles === 'string' ? [rawRoles] : [];
