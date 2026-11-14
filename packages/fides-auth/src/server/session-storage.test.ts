@@ -33,9 +33,6 @@ function cookieJar(initial: Record<string, string> = {}) {
       if (options?.maxAge === 0) jar.delete(name);
       else jar.set(name, value);
     },
-    delete: () => {
-      throw new Error('the storages delete with set and maxAge 0');
-    },
   };
   return { cookies, jar, writes };
 }

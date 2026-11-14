@@ -10,7 +10,7 @@ import { createLogger } from '../shared/logger.js';
 import type { PKCEOptions } from '../protocol/authorization-parameters.js';
 import { createEncryptedJWT, decryptJWT, hexToUint8Array } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
-import { assertSessionSecret, type SessionSecret } from './session-persistence.js';
+import { assertSessionSecret, type SessionSecret } from './session-secret.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:login-transaction' });
 
@@ -148,12 +148,8 @@ export async function clearTransaction(
 ): Promise<void> {
   const match = findSlot(await readSlots(cookies, await transactionKey(secret), secure), state);
   if (!match) return;
-  if (secure) {
-    // A plain delete is not Secure, and the browser ignores it for a __Host- cookie.
-    await cookies.set(match.name, '', { ...defaultOAuthCookieOptions, secure, maxAge: 0 });
-  } else {
-    await cookies.delete(match.name);
-  }
+  // With the attributes it was set with: a delete that isn't Secure is ignored for a __Host- cookie.
+  await cookies.set(match.name, '', { ...defaultOAuthCookieOptions, secure, maxAge: 0 });
 }
 
 /** What the handlers use: Secure and `__Host-` unless the callback is plain http. */

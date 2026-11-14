@@ -38,33 +38,6 @@ export interface Session<TData = Record<string, unknown>> {
   data?: TData;
 }
 
-/**
- * A session in the shape the free `/server` functions read and write, with the
- * tokens inside it.
- *
- * @deprecated Use {@link Session} with `createFidesAuth` from `@eventuras/fides-auth/server`.
- */
-export interface LegacySession<TData = Record<string, unknown>> {
-  /**
-   * Correlation id for this session, minted at creation and carried across
-   * refreshes. Absent on sessions created before this field existed.
-   */
-  sid?: string;
-  tokens?: Tokens;
-  /** From the ID token claims. Absent when the token response has no `id_token`. */
-  user?: {
-    /** `sub` claim. Absent on sessions created before this field existed. */
-    sub?: string;
-    name: string;
-    email?: string;
-    roles?: string[];
-  };
-  /** OAuth scopes granted to this session (e.g. ["openid", "profile", "email"]). */
-  scopes?: string[];
-  /** Application-specific data stored alongside the session. */
-  data?: TData;
-}
-
 /** What the session info endpoint answers. Never tokens. */
 export interface SessionInfo {
   authenticated: boolean;
@@ -78,12 +51,6 @@ export interface SessionInfo {
 export interface HeartbeatResponse {
   /** ISO 8601, or null when the provider gave no lifetime. */
   accessTokenExpiresAt: string | null;
-}
-
-/** Options for creating or refreshing a session. */
-export interface CreateSessionOptions {
-  /** Session duration in days (default depends on implementation). */
-  sessionDurationDays?: number;
 }
 
 type JsonPrimitive = string | number | boolean | null;

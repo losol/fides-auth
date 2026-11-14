@@ -1,17 +1,17 @@
 // server/cookie-store.ts
 //
-// The cookie-store contract the framework-agnostic server handlers depend on.
-// A tiny interface — just read/write/delete a cookie by name — that each
-// framework adapter (Next.js, React Router, …) implements over its own cookie
-// store. Methods may be sync or async; the handlers `await` them either way.
+// The cookie contract the server side depends on: read and write a cookie by
+// name. Each framework binding implements it over its own cookie API. Methods
+// may be sync or async; the library awaits them either way.
 
 import type { CookieOptions } from '../shared/cookies.js';
 
 export interface CookieStore {
   /** Returns the cookie's value, or null/undefined when it is not set. */
   get(name: string): string | null | undefined | Promise<string | null | undefined>;
-  /** Sets a cookie. Adapters apply their own defaults for any omitted options. */
+  /**
+   * Sets a cookie. The library deletes one by setting it empty with `maxAge: 0`
+   * and the attributes it was set with, so a `__Host-` cookie is deleted too.
+   */
   set(name: string, value: string, options?: CookieOptions): void | Promise<void>;
-  /** Deletes a cookie by name. */
-  delete(name: string): void | Promise<void>;
 }

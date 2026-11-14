@@ -17,11 +17,11 @@ import {
   validateCallback,
   type LoginTransaction,
 } from './login-transaction.js';
-import { tryReadSession } from './session.js';
+import { openRecord } from '../session/record.js';
 
 const secret = 'a'.repeat(64);
 
-/** Records options and, like a browser, ignores a plain (non-Secure) delete of a __Host- cookie. */
+/** A cookie jar that records the options each cookie was last set with. */
 function memoryStore(initial?: Record<string, string>) {
   const jar = new Map<string, string>(Object.entries(initial ?? {}));
   const options = new Map<string, CookieOptions | undefined>();
@@ -31,9 +31,6 @@ function memoryStore(initial?: Record<string, string>) {
       if (opts?.maxAge === 0) jar.delete(name);
       else jar.set(name, value);
       options.set(name, opts);
-    },
-    delete: (name) => {
-      if (!name.startsWith('__Host-')) jar.delete(name);
     },
   };
   return { store, jar, options };
@@ -135,11 +132,7 @@ describe('login transaction cookie', () => {
     const [value] = [...jar.values()];
 
     await expect(decryptJWT(value!, secret)).rejects.toThrow();
-    const { store: forged } = memoryStore({ session: value! });
-    expect(await tryReadSession(forged, secret)).toEqual({
-      session: null,
-      reason: 'unreadable_session',
-    });
+    expect(await openRecord(value!, secret)).toBeNull();
   });
 
   it('keeps parallel logins apart', async () => {
@@ -203,7 +196,6 @@ describe('login transaction cookie', () => {
     const request = (): CookieStore => ({
       get: () => null,
       set: (name, value) => { browser.set(name, value); },
-      delete: (name) => { browser.delete(name); },
     });
     random.mockReturnValueOnce(0.1).mockReturnValueOnce(0.9);
 

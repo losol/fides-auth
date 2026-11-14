@@ -30,13 +30,6 @@ export { refreshAccessToken } from './protocol/refresh.js';
 export { clientCredentialsGrant } from './protocol/client-credentials.js';
 export { buildOidcLogoutUrl } from './protocol/logout-url.js';
 export { extractUserFromTokens } from './session/user-claims.js';
-
-// Not deprecated, since nothing replaces them yet.
-export {
-  buildSessionFromTokens,
-  type BuildSessionOptions,
-  type MapSession,
-} from './session/build.js';
 export { validateReturnUrl } from './server/return-to.js';
 
 /** @deprecated Import from `@eventuras/fides-auth/oidc`. `/oauth` goes in 1.0. */

@@ -15,7 +15,7 @@ import type { TokenResponse } from '../shared/types.js';
 import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import type { CookieStore } from './cookie-store.js';
 import { createFidesAuth, type FidesAuthConfig } from './fides-auth.js';
-import { SessionSecretError } from './session-persistence.js';
+import { SessionSecretError } from './session-secret.js';
 import { createMemorySessionStore } from './session-store.js';
 
 const secret = 'a'.repeat(64);
@@ -31,9 +31,6 @@ function cookieJar(): { cookies: CookieStore; jar: Map<string, string> } {
       set: (name, value, options) => {
         if (options?.maxAge === 0) jar.delete(name);
         else jar.set(name, value);
-      },
-      delete: (name) => {
-        jar.delete(name);
       },
     },
   };

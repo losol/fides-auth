@@ -134,16 +134,49 @@ internal. For `hasScope(session, scope)`, check `session.scopes?.includes(scope)
 
 - **`Session` is the new session shape.** It has `correlationId`, `createdAt`,
   `expiresAt`, `user`, `scopes`, `idp` and `data`, and no tokens: get them with
-  `getTokens`. The old shape is `LegacySession` until the free `/server`
-  functions go.
+  `getTokens`.
 - **Session events carry `correlationId`, not `sid`.** Update log queries and
   dashboards that filter on `sid`.
 - **A session ends after `sessionDurationDays`** (30 by default), whatever the
   refreshes. A read after that answers `session_expired`.
 - **A custom `SessionStore` should save the new `StoredSession` fields:**
-  `correlationId`, `iss`, `subHash` and `idpSidHash`.
+  `correlationId`, `iss`, `subHash` and `idpSidHash`. `sid` goes: the
+  correlation id is `correlationId`.
+- **`CookieStore` has only `get` and `set`.** The library deletes a cookie by
+  setting it empty with `maxAge: 0`, so an adapter needs no `delete`.
 - **Users log in again once.** 1.0 doesn't read 0.x sessions, and deletes their
   cookies the next time it writes a session.
+
+**Gone**
+
+- **The free `/server` functions.** The instance's members replace them:
+
+  | 0.x | 1.0 |
+  |---|---|
+  | `handleOidcLogin`, `handleOidcCallback`, `handleOidcLogout`, `handleHeartbeat` | the same members on the instance, with the options in `createFidesAuth` |
+  | `readSession(cookies, secret)`, `tryReadSession(cookies, secret)` | `readSession(cookies)`, `tryReadSession(cookies)` |
+  | `refreshSessionInStore`, `tryRefreshSessionInStore` | `refreshSession(cookies)` |
+  | `persistSession(cookies, session, secret)` | `createSession(cookies, tokenResponse)` |
+  | `clearSession(cookies, options)` | `clearSession(cookies, options)` |
+  | `readIdToken(cookies, secret)` | `getTokens(cookies)`, then `idToken` |
+  | `authorizedFetch(session, url, options)` | `authorizedFetch(cookies, url, options)` |
+  | `serverPersistence({ store, secret })`, `cookiePersistence(secret)` | `sessionStore` in `createFidesAuth`, or nothing |
+
+- **The login transaction helpers**: `createTransaction`, `persistTransaction`,
+  `readTransaction`, `clearTransaction`, `validateCallback`,
+  `transactionCookieOptions` and `CallbackValidationError`. The login and
+  callback handlers use them; for a custom flow, use the OIDC client from
+  `/oidc` and keep the authorization request on your server.
+- **`/session-cookies`, `/session-refresh` and `/session-validation`**, with
+  `validateSessionJwt`, `refreshSession(session, config)` and the cookie codec.
+  The instance reads, refreshes and seals the session itself.
+- **`buildSessionFromTokens` and `MapSession` in `/oauth`.** Pass `mapSession`
+  and `rolesClaim` to `createFidesAuth`, and import `MapSession` from `/server`.
+- **`LegacySession` and `CreateSessionOptions`.**
+- **The rejected reason `stale_legacy_session`.** 1.0 doesn't read 0.x
+  cookies, so a browser that still has them reads as `no_session_cookie`, or as
+  `unreadable_session` over plain http, where the new cookie is also called
+  `session`.
 
 ### fides-auth-next
 
@@ -186,7 +219,7 @@ which a Server Component can't do itself.
   `TokenBucket`. The handlers rate-limit only through `rateLimit`.
 - **The core re-exports** from `/oauth`, `/logger`, `/session-events`,
   `/session-refresh`, `/session-validation`, `/silent-login`, `/utils` and
-  `/types`. Import from `@eventuras/fides-auth`. The root re-exports the types
+  `/types`. Import what remains from `@eventuras/fides-auth`. The root re-exports the types
   an app needs for the instance: `Session`, `Tokens`, `FidesAuthConfig`,
   `SessionStore` and others.
 - **Logout options.** `allowedMethods` goes, since logout answers only `POST`.

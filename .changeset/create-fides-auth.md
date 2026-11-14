@@ -14,12 +14,11 @@ cookie. Logout and heartbeat answer only a same-origin `POST`. `SessionSecretErr
 Breaking:
 
 - `Session` is the new session shape: `correlationId`, `createdAt`, `expiresAt`, `user`, `scopes`,
-  `idp` and `data`. Tokens are not on it; `getTokens` returns them. The old shape is
-  `LegacySession`, which the free `/server` functions still use.
+  `idp` and `data`. Tokens are not on it; `getTokens` returns them.
 - Session events carry `correlationId` instead of `sid`. Log queries that filter on `sid` need the
   new name.
 - `SessionRejectedReason` adds `session_expired`.
 - `StoredSession` adds `correlationId` and the lookup fields `iss`, `subHash` and `idpSidHash`. A
-  custom `SessionStore` should save them. `sid` is deprecated.
+  custom `SessionStore` should save them. `sid` goes.
 - `createFidesAuth` doesn't read 0.x sessions, so users log in again once. It deletes their cookies
   the next time it writes a session.

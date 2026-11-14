@@ -16,31 +16,35 @@ support for that direction.
 ## The short version
 
 ```typescript
-import { handleOidcLogout } from "@eventuras/fides-auth/server";
+import { createFidesAuth } from "@eventuras/fides-auth/server";
 
-return handleOidcLogout(request, {
+const auth = createFidesAuth({
   oauthConfig,
-  cookies,
   secret: process.env.SESSION_SECRET!,
-  postLogoutRedirectUri: "https://app.example.com/",
+  postLogoutRedirectUri: "https://app.example.com/", // defaults to the app's origin
 });
+
+// The logout route
+return auth.handleOidcLogout(request, cookies);
 ```
 
-That reads the session's ID token, clears the local cookies, and redirects to the
-provider's end-session endpoint. Next.js apps get it from `createFidesAuth` in
-`@eventuras/fides-auth-next`, with the config and secret bound.
+That reads the session's ID token, ends the session, and redirects to the
+provider's end-session endpoint. Next.js apps get the same member from
+`createFidesAuth` in `@eventuras/fides-auth-next`, without the `cookies`
+argument. Pass `{ state, logoutHint }` as the third argument when you need them.
 
 ## Building the URL yourself
 
 ```typescript
-import { buildOidcLogoutUrl } from "@eventuras/fides-auth/oauth";
-
-const logoutUrl = await buildOidcLogoutUrl(oauthConfig, {
+const logoutUrl = await auth.oidc.logoutUrl({
   postLogoutRedirectUri: "https://app.example.com/",
-  idTokenHint: session?.tokens?.idToken,
+  idTokenHint: (await auth.getTokens(cookies))?.idToken,
   state: "correlation-123",
 });
 ```
+
+`auth.oidc` is the instance's client; a client from `createOidcClient` in `/oidc`
+has the same `logoutUrl`.
 
 | Option                 | Sent as                    | Notes                                                       |
 | ---------------------- | -------------------------- | ----------------------------------------------------------- |
@@ -50,10 +54,9 @@ const logoutUrl = await buildOidcLogoutUrl(oauthConfig, {
 | `logoutHint`           | `logout_hint`              | Meaning is provider-specific                                |
 | `includeClientId`      | `client_id`                | Default `true`                                              |
 
-Unsupplied parameters are omitted. A string second argument is shorthand for
-`postLogoutRedirectUri`.
+Unsupplied parameters are omitted.
 
-`buildOidcLogoutUrl` returns `null` when the provider advertises no
+`logoutUrl` returns `null` when the provider advertises no
 `end_session_endpoint`, when discovery fails, or when the endpoint is not https —
 the URL carries a raw ID token, so it never travels in the clear. Callers fall back to
 a local-only logout.
@@ -66,10 +69,9 @@ The spec recommends it, and in practice it is what makes logout work smoothly:
 - Providers that can skip the "are you sure you want to sign out?" interstitial
   generally do so only when the hint is present.
 
-`session.tokens.idToken` holds the raw token. `buildSessionFromTokens` populates it,
-and `refreshSession` replaces it whenever a refresh response carries a new `id_token`
-— otherwise the hint would go stale and eventually fall outside the window in which
-the provider still recognises it.
+The session's tokens hold the raw ID token from login, and a refresh replaces it
+whenever the response carries a new `id_token`. Otherwise the hint would go stale,
+and eventually fall outside the window in which the provider still recognises it.
 
 ## Why `client_id` is still sent
 
@@ -90,19 +92,12 @@ combination.
 
 ## Where the ID token is stored
 
-Sessions are split across three cookies: the access token in `session_at`, the ID
-token in `session_it`, everything else in `session`. Each large JWT gets its own
-per-cookie byte budget — an encoded ID token is typically 0.5–1.5 kB, and cookies at
-or above 4096 bytes are silently dropped by the browser, so sharing a cookie between
-two JWTs would eventually surface as a failed *login*.
-
-The ID token is also read independently of session validity. `readSession` returns
-null once the access token has expired, but the hint is needed precisely then: an
-idle user coming back to a stale tab and clicking log out still has a live session at
-the provider. `readIdToken` reads the `session_it` cookie directly, and
-`handleOidcLogout` falls back to it when the session itself won't read. Under
-[server persistence](./server-sessions.md) the hint comes from the stored
-record, which outlives the access token the same way.
+The ID token is sealed into the session record with the other tokens: in the
+session cookie, or in the store record with a
+[`sessionStore`](./server-sessions.md). A session reads until `expiresAt`,
+whether or not its access token has expired. So the hint is there when an idle
+user comes back to a stale tab and logs out, which is when it is needed most:
+the provider session is still live.
 
 ## Correlating the response with `state`
 
@@ -112,19 +107,20 @@ way back is the caller's job.
 
 ## CSRF
 
-`handleOidcLogout` accepts `POST` only and answers `405` to anything else. That alone
-is not protection — a third-party page can auto-submit a form at the endpoint, and the
-response clears the cookies whether or not the browser attached them — so the handler
-also requires the request to come from the application itself:
+`handleOidcLogout` accepts `POST` only and answers `405` to anything else. That
+alone is not protection: a third-party page can auto-submit a form at the
+endpoint, and the browser attaches the session cookie. So the handler also
+requires the request to come from the application itself:
 
 - `Sec-Fetch-Site` must be `same-origin` or `none` where the browser sends it.
-- Otherwise `Origin`, when present, must match `applicationUrl` (falling back to the
-  request's own origin). Set `applicationUrl` behind a proxy, where the request URL
-  carries the internal origin.
+- Otherwise `Origin`, when present, must match `applicationUrl`, which defaults
+  to the redirect URI's origin. Set it behind a proxy, if the redirect URI's
+  origin isn't the one the browser sees.
 - A request with neither header is not a browser form post and is allowed through.
 
-Cross-origin requests get `403`. Cross-*subdomain* logout is rejected too; if you need
-it, call `buildOidcLogoutUrl` from your own handler with whatever origin check fits.
+Cross-origin requests get `403`. Cross-*subdomain* logout is rejected too; if you
+need it, call `auth.oidc.logoutUrl` from your own handler with whatever origin
+check fits.
 
 Use a form or a fetch rather than a plain link:
 
@@ -132,11 +128,9 @@ Use a form or a fetch rather than a plain link:
 <form method="post" action="/api/auth/logout"><button>Log out</button></form>
 ```
 
-Pass `allowedMethods: ["GET", "POST"]` to opt into link-based logout — note this
-drops the method check, leaving only the origin check.
-
 ## Non-Next.js frameworks
 
-`handleOidcLogout` takes a standard `Request` and a `CookieStore` — an object with
-`get`, `set` and `delete`. Any framework that can expose its cookie jar behind those
-three methods can use it, the same way `handleOidcLogin` and `handleOidcCallback` do.
+The instance's members take a standard `Request` and a `CookieStore`, an object
+with `get` and `set`. Any framework that can expose its cookies behind those two
+methods can use `handleOidcLogout`, the same way it uses the login and callback
+handlers.

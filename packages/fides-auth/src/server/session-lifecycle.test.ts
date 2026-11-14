@@ -11,7 +11,7 @@ import type { TokenResponse } from '../shared/types.js';
 import { sealRecord } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
 import { createSessionLifecycle, type SessionLifecycleOptions } from './session-lifecycle.js';
-import { SessionSecretError } from './session-persistence.js';
+import { SessionSecretError } from './session-secret.js';
 import { cookieStorage, type SessionStorage, storeStorage } from './session-storage.js';
 import { createMemorySessionStore, type SessionStore } from './session-store.js';
 
@@ -28,9 +28,6 @@ function cookieJar(): { cookies: CookieStore; jar: Map<string, string> } {
       set: (name, value, options) => {
         if (options?.maxAge === 0) jar.delete(name);
         else jar.set(name, value);
-      },
-      delete: () => {
-        throw new Error('the storages delete with set and maxAge 0');
       },
     },
   };

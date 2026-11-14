@@ -6,8 +6,7 @@
 
 import { createLogger } from '../shared/logger.js';
 import type { RefreshFailureCause, SessionRejectedReason } from '../shared/session-events.js';
-import type { LegacySession as Session } from '../shared/types.js';
-import type { RefreshSessionResult } from './session.js';
+import type { Tokens } from '../shared/types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:server:authorized-fetch' });
 
@@ -70,6 +69,11 @@ export class AuthorizedFetchError extends Error {
   }
 }
 
+/** What the refresh behind {@link authorizedFetch} returns: new tokens, or why there are none. */
+export type TokenRefreshResult =
+  | { ok: true; tokens: Tokens }
+  | { ok: false; reason: SessionRejectedReason; cause?: RefreshFailureCause };
+
 export interface AuthorizedFetchOptions<T = undefined> extends Omit<RequestInit, 'redirect'> {
   /** Absolute http(s) URL. The token goes only to its origin, under its path. */
   allowedBase: string | URL;
@@ -78,10 +82,10 @@ export interface AuthorizedFetchOptions<T = undefined> extends Omit<RequestInit,
   /** Per request, including a retry. @default 10000 */
   timeoutMs?: number;
   /**
-   * Called once on a 401, e.g. `() => tryRefreshSessionInStore(store, config, persistence)`.
-   * Without it a 401 is an `http_error`. A retry resends `body`, so don't pass a stream.
+   * Called once on a 401; it must also save the new tokens. Without it a 401 is
+   * an `http_error`. A retry resends `body`, so don't pass a stream.
    */
-  refresh?: () => Promise<RefreshSessionResult | Session | null>;
+  refresh?: () => Promise<TokenRefreshResult>;
 }
 
 export interface AuthorizedFetchResult<T> {
@@ -89,20 +93,18 @@ export interface AuthorizedFetchResult<T> {
   response: Response;
   /** What `parse` returned. */
   data: T;
-  /** The session that made the call: the refreshed one if `refreshed`. Use it from now on. */
-  session: Session;
-  /** A 401 led to a refresh. Persist `session` unless `refresh` already did. */
+  /** A 401 led to a refresh, and the retry used the new access token. */
   refreshed: boolean;
 }
 
 /**
- * Calls an API with the session's access token.
+ * Calls an API with an access token.
  *
  * @throws {AuthorizedFetchError} on a disallowed URL, non-2xx, timeout, network error or failed refresh.
  * @throws {TypeError} when `allowedBase` is not an http(s) URL without credentials.
  */
 export async function authorizedFetch<T = undefined>(
-  session: Session,
+  tokens: Tokens | null | undefined,
   url: string | URL,
   options: AuthorizedFetchOptions<T>,
 ): Promise<AuthorizedFetchResult<T>> {
@@ -110,7 +112,7 @@ export async function authorizedFetch<T = undefined>(
   const target = resolveAllowedUrl(url, allowedBase);
   const request = { method: (init.method ?? 'GET').toUpperCase(), url: redactUrl(target) };
 
-  let current = session;
+  let current = tokens;
   let attempt = await send(current, target, init, timeoutMs, request);
   let refreshed = false;
 
@@ -132,7 +134,7 @@ export async function authorizedFetch<T = undefined>(
     const data = (parse ? await parse(response) : undefined) as T;
     // A body still to be read stays under the timeout and the caller's signal.
     if (!response.body || response.bodyUsed) unlink();
-    return { response, data, session: current, refreshed };
+    return { response, data, refreshed };
   } catch (error) {
     unlink();
     if (init.signal?.aborted) throw error;
@@ -182,13 +184,13 @@ interface Attempt {
 }
 
 async function send(
-  session: Session,
+  tokens: Tokens | null | undefined,
   target: URL,
   init: RequestInit,
   timeoutMs: number,
   request: { method: string; url: string },
 ): Promise<Attempt> {
-  const token = session.tokens?.accessToken;
+  const token = tokens?.accessToken;
   if (!token) throw new AuthorizedFetchError('no_access_token', request);
 
   const headers = new Headers(init.headers);
@@ -236,10 +238,10 @@ function linkSignals(
 async function refreshOnce(
   refresh: NonNullable<AuthorizedFetchOptions['refresh']>,
   request: { method: string; url: string },
-): Promise<Session> {
-  let result: RefreshSessionResult;
+): Promise<Tokens> {
+  let result: TokenRefreshResult;
   try {
-    result = toRefreshResult(await refresh());
+    result = await refresh();
   } catch (error) {
     throw new AuthorizedFetchError('refresh_failed', { ...request, status: 401, cause: error });
   }
@@ -248,14 +250,7 @@ async function refreshOnce(
     const refreshFailure = { reason: result.reason, cause: result.cause };
     throw new AuthorizedFetchError('refresh_failed', { ...request, status: 401, refreshFailure });
   }
-  return result.session;
-}
-
-/** Accepts both `tryRefreshSessionInStore` and `refreshSessionInStore` results. */
-function toRefreshResult(value: RefreshSessionResult | Session | null): RefreshSessionResult {
-  if (!value) return { ok: false, reason: 'refresh_failed' };
-  if ('ok' in value) return value;
-  return { ok: true, session: value, rotatedRefreshToken: false };
+  return result.tokens;
 }
 
 /** Origin and path: never credentials, query or fragment. */

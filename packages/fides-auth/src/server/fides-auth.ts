@@ -16,7 +16,6 @@ import {
 } from '../shared/session-events.js';
 import type {
   HeartbeatResponse,
-  LegacySession,
   Session,
   SessionInfo,
   Tokens,
@@ -26,8 +25,9 @@ import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { redirectUriOf, type OidcClientConfig } from '../protocol/config.js';
 import type { MapRecordSession } from '../session/record.js';
 import {
-  authorizedFetch as fetchWithSession,
+  authorizedFetch as fetchWithTokens,
   type AuthorizedFetchOptions,
+  type TokenRefreshResult,
 } from './authorized-fetch.js';
 import type { CookieStore } from './cookie-store.js';
 import { isSameOriginRequest } from './csrf.js';
@@ -42,10 +42,9 @@ import {
 } from './login-transaction.js';
 import { validateReturnUrl } from './return-to.js';
 import { createSessionLifecycle } from './session-lifecycle.js';
-import { assertSessionSecret, type SessionSecret } from './session-persistence.js';
+import { assertSessionSecret, type SessionSecret } from './session-secret.js';
 import { cookieStorage, sessionCookieName, storeStorage } from './session-storage.js';
 import type { SessionStore } from './session-store.js';
-import type { RefreshSessionResult as LegacyRefreshResult } from './session.js';
 
 /**
  * Changes the session built at login, e.g. to add `data` or look the user up.
@@ -504,20 +503,18 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     clearSession: (cookies, { trigger = 'logout' } = {}) => settings().lifecycle.end(cookies, { trigger }),
 
     async authorizedFetch(cookies, url, { refresh, ...options }) {
-      const tokens = (await settings().lifecycle.read(cookies)).record?.tokens;
-      // The token holder authorizedFetch expects; it reads only `tokens`.
-      const holder: LegacySession = { tokens };
-      const refreshTokens = async (): Promise<LegacyRefreshResult> => {
-        const refreshed = await settings().lifecycle.refresh(cookies);
+      const { lifecycle } = settings();
+      const tokens = (await lifecycle.read(cookies)).record?.tokens;
+      const refreshTokens = async (): Promise<TokenRefreshResult> => {
+        const refreshed = await lifecycle.refresh(cookies);
         return refreshed.ok
-          ? { ok: true, session: { tokens: refreshed.record.tokens }, rotatedRefreshToken: refreshed.rotatedRefreshToken }
+          ? { ok: true, tokens: refreshed.record.tokens }
           : { ok: false, reason: refreshed.reason, cause: refreshed.cause };
       };
-      const result = await fetchWithSession(holder, url, {
+      return fetchWithTokens(tokens, url, {
         ...options,
         refresh: refresh === false ? undefined : refreshTokens,
       });
-      return { response: result.response, data: result.data, refreshed: result.refreshed };
     },
 
     get cookieNames() {

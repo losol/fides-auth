@@ -13,9 +13,6 @@ export async function nextCookieStore(): Promise<CookieStore> {
     set: (name, value, options) => {
       store.set(name, value, options);
     },
-    delete: (name) => {
-      store.delete(name);
-    },
   };
   return cookieStore;
 }

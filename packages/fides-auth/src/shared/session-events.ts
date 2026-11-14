@@ -45,8 +45,6 @@ export type SessionRejectedReason =
   | 'no_session_cookie'
   /** A session cookie was sent but did not decrypt or validate — corruption, or a rotated secret. */
   | 'unreadable_session'
-  /** A pre-split single-cookie session. Dropped rather than migrated; costs one re-login. */
-  | 'stale_legacy_session'
   /** The session decoded but carries no refresh token — usually `offline_access` was never granted. */
   | 'no_refresh_token'
   /** The refresh token was rejected by the provider. See {@link RefreshFailureCause}. */
@@ -71,7 +69,7 @@ export type RefreshFailureCause =
   /** The provider was reached but answered with an error or something unparseable. Retryable. */
   | 'idp_error';
 
-/** Where a session lives between requests. See `server/session-persistence.ts`. */
+/** Where a session lives between requests. See `server/session-storage.ts`. */
 export type SessionPersistenceMode = 'cookie' | 'server';
 
 /** What caused the session cookies to be deleted. */
@@ -141,7 +139,6 @@ type Level = 'debug' | 'info' | 'warn' | 'error';
  */
 const REJECTED_LEVEL: Record<SessionRejectedReason, Level> = {
   no_session_cookie: 'debug',
-  stale_legacy_session: 'info',
   session_not_found: 'info',
   session_expired: 'info',
   refresh_failed: 'info',
@@ -199,7 +196,6 @@ export function logSessionEvent(logger: FidesLogger, payload: SessionEvent): voi
 export const SESSION_REJECTED_REASONS = [
   'no_session_cookie',
   'unreadable_session',
-  'stale_legacy_session',
   'no_refresh_token',
   'refresh_failed',
   'session_not_found',
