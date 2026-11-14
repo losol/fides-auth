@@ -14,6 +14,8 @@ const logger = createLogger({ namespace: 'fides-auth:oauth' });
  * @param oAuthConfig - OAuth configuration for the identity provider
  * @param refreshToken - The refresh token to exchange
  * @returns Token endpoint response containing new access and refresh tokens
+ *
+ * @deprecated Use `oidc.refresh(refreshToken)` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`).
  */
 export async function refreshAccessToken(
   oAuthConfig: OAuthConfig,

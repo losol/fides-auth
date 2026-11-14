@@ -17,6 +17,7 @@ import { discoverConfiguration } from './discovery.js';
 
 const logger = createLogger({ namespace: 'fides-auth:silent-login' });
 
+/** @deprecated Use `SilentLoginUrlOptions` with `oidc.silentLoginUrl`. */
 export interface SilentLoginOptions {
   /** Optional hint about the user's identity (e.g., email or user ID) */
   loginHint?: string;
@@ -57,6 +58,8 @@ export interface SilentLoginResult {
  *
  * // Use this URL in an iframe or hidden window
  * ```
+ *
+ * @deprecated Use `oidc.silentLoginUrl(request, options)` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`). It takes a request from `createAuthorizationRequest`, so the callback can check state and PKCE.
  */
 export async function buildSilentLoginUrl(
   config: OAuthConfig,

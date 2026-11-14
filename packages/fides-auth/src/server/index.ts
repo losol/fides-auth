@@ -5,6 +5,7 @@
 // cookie store.
 
 export type { CookieStore } from './cookie-store.js';
+export { CookieTooLargeError } from '../shared/cookies.js';
 
 export {
   createMemorySessionStore,

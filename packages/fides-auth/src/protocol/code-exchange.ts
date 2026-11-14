@@ -14,6 +14,8 @@ const logger = createLogger({ namespace: 'fides-auth:oauth' });
  * @param codeVerifier - The PKCE code verifier stored during login initiation
  * @param expectedState - The state parameter stored during login initiation
  * @returns Token response from the OIDC provider
+ *
+ * @deprecated Use `oidc.exchangeCode(callbackUrl, { codeVerifier, state })` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`).
  */
 export async function exchangeAuthorizationCode(
   oauthConfig: OAuthConfig,

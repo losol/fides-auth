@@ -81,6 +81,8 @@ export function redirectUriOf(config: OidcClientConfig): string {
 /**
  * Configuration for OAuth client credentials flow (machine-to-machine authentication).
  * Takes any {@link ClientAuthConfig} except `none`: the grant needs client authentication.
+ *
+ * @deprecated Configure a client with `createOidcClient` (`@eventuras/fides-auth/oidc`) and call `oidc.clientCredentials()`.
  */
 export type ClientCredentialsConfig = Exclude<ClientAuthConfig, { clientAuth: 'none' }> & {
   /** OAuth token endpoint URL. Must be https. */

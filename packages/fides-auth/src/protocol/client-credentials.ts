@@ -28,6 +28,8 @@ const logger = createLogger({ namespace: 'fides-auth:oauth' });
  *   scope: 'api:read api:write',
  * });
  * ```
+ *
+ * @deprecated Use `oidc.clientCredentials({ scope })` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`). Without discovery, set `serverMetadata: { issuer, token_endpoint }` in its config.
  */
 export async function clientCredentialsGrant(
   config: ClientCredentialsConfig,

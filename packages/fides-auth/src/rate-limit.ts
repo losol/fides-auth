@@ -14,6 +14,8 @@
  *   throw new Error('Rate limit exceeded');
  * }
  * ```
+ *
+ * @deprecated `/rate-limit` goes in 1.0. Pass a `rateLimit` callback to the handlers instead.
  */
 export class TokenBucket<_Key> {
   public max: number;
