@@ -1,202 +1,206 @@
 /**
- * The session helpers and route handlers, bound to one secret and OAuth config.
- * No module state: the config lives in the returned object, so a module that
- * Next loads more than once behaves the same.
+ * createFidesAuth for Next.js. The core instance takes a CookieStore on every
+ * call; this one gets it from `cookies()` in next/headers, caches session reads
+ * per render, and adds refreshInProxy for `proxy.ts`.
  */
 
+import type { CookieOptions, Session, TokenResponse, Tokens } from '@eventuras/fides-auth';
+import type { OidcClient } from '@eventuras/fides-auth/oidc';
 import {
-  authorizedFetch,
-  AuthorizedFetchError,
-  clearSession,
-  persistSession,
-  refreshSessionInStore,
-  serverPersistence,
-  tryReadSession,
-  tryRefreshSessionInStore,
-  type AuthorizedFetchErrorReason,
-  type AuthorizedFetchOptions,
-  type AuthorizedFetchResult,
-  type ClearSessionOptions,
-  type ReadSessionResult,
-  type RefreshSessionResult,
-  type SessionPersistence,
-  type SessionSecret,
-  type SessionStore,
-  type StoredSession,
+  createFidesAuth as createCoreFidesAuth,
+  type CookieStore,
+  type FidesAuthConfig,
+  type FidesAuthorizedFetchOptions,
+  type FidesReadResult,
+  type FidesRefreshResult,
 } from '@eventuras/fides-auth/server';
-import type { OAuthConfig } from '@eventuras/fides-auth/oauth';
-import type { CreateSessionOptions, LegacySession as Session } from '@eventuras/fides-auth';
-import { cookies } from 'next/headers';
+import type { SessionClearedTrigger } from '@eventuras/fides-auth/session-events';
+import { type NextRequest, NextResponse } from 'next/server';
 import { cache } from 'react';
 
 import { nextCookieStore } from './cookie-store.js';
-import { handleHeartbeat } from './heartbeat-handler.js';
-import { handleOidcCallback, type OidcCallbackConfig } from './oidc-callback.js';
-import { handleOidcLogin, type OidcLoginConfig } from './oidc-login.js';
-import { handleOidcLogout, type OidcLogoutConfig } from './oidc-logout.js';
 
-// So consumers can name the helpers' types without reaching past this package.
-export type { ClearSessionOptions, ReadSessionResult, RefreshSessionResult, SessionSecret };
-export type { SessionStore, StoredSession };
-export type { AuthorizedFetchErrorReason, AuthorizedFetchOptions, AuthorizedFetchResult };
-export { AuthorizedFetchError };
-
-export interface FidesAuthConfig {
-  /** Session encryption secret, e.g. 64 hex chars. Also seals the login transaction. */
-  secret: SessionSecret;
-
-  /** OAuth/OIDC configuration. */
-  oauthConfig: OAuthConfig;
-
+/** Options for {@link FidesAuth.refreshInProxy}. */
+export interface RefreshInProxyOptions {
   /**
-   * Keeps sessions in this store, encrypted under `secret`; the cookie holds only a handle.
-   * Omit to keep them in encrypted cookies.
+   * Refresh when the access token expires within this many seconds.
+   * @default 60
    */
-  sessionStore?: SessionStore;
+  refreshWithinSeconds?: number;
 }
 
-/** A handler's config minus what the factory binds. */
-type Bound<T> = Omit<T, 'oauthConfig' | 'secret' | 'persistence'>;
-
-export type BoundAuthorizedFetchOptions<T = undefined> = Omit<
-  AuthorizedFetchOptions<T>,
-  'refresh'
-> & {
-  /**
-   * `false` skips the refresh, so a 401 is an `http_error`. Use it in a Server Component:
-   * Next won't let it write cookies, and a refresh that can't be saved spends the refresh token.
-   */
-  refresh?: false;
-};
-
+/** The core instance's members, bound to the request's cookies. */
 export interface FidesAuth {
-  /** The current session, or null. Cached per render; the access token may have expired. */
-  getCurrentSession(): Promise<Session<any> | null>;
+  /** `GET`, with an optional `?returnTo=`. Redirects to the provider. */
+  handleOidcLogin(
+    request: Request,
+    options?: { authorizationParameters?: Record<string, string> },
+  ): Promise<Response>;
+  /** The provider's redirect back. Starts the session and redirects to the return path. */
+  handleOidcCallback(request: Request): Promise<Response>;
+  /** `POST`. Ends the session and redirects to the provider's end-session endpoint. */
+  handleOidcLogout(
+    request: Request,
+    options?: { state?: string; logoutHint?: string },
+  ): Promise<Response>;
+  /** `POST`. Refreshes the session. 401 means it is over; 503 means the provider couldn't be reached. */
+  handleHeartbeat(request: Request): Promise<Response>;
+  /** `GET`. Whether there is a session, and whose. Never refreshes, never returns tokens. */
+  handleSessionInfo(request: Request): Promise<Response>;
 
-  /** The current session, or why there is none. Shares the cache with `getCurrentSession`. */
-  tryGetCurrentSession(): Promise<ReadSessionResult>;
-
-  /** Refreshes the session and saves it. Null on any failure. */
-  refreshCurrentSession(options?: CreateSessionOptions): Promise<Session | null>;
-
-  /** Refreshes the session and, on failure, says why. Prefer it over `refreshCurrentSession`. */
-  tryRefreshCurrentSession(options?: CreateSessionOptions): Promise<RefreshSessionResult>;
-
-  /** Persists a new session. Returns the session cookie's value: the encrypted session, or the handle. */
-  createAndPersistSession(session: Session): Promise<string>;
-
-  /** Deletes the session cookies and, with a `sessionStore`, the record. `trigger` defaults to `logout`. */
-  clearCurrentSession(options?: ClearSessionOptions): Promise<void>;
-
+  /** The session, or null. Cached per render. */
+  readSession(): Promise<Session | null>;
+  /** The session, or why there is none. Cached per render, together with `readSession`. */
+  tryReadSession(): Promise<FidesReadResult>;
+  /** The session's tokens, or null without a session. The access token may have expired. */
+  getTokens(): Promise<Tokens | null>;
   /**
-   * `authorizedFetch` that, on a 401, refreshes the session and retries once.
-   * Parallel calls in one request share one refresh. The refresh writes cookies, so it works
-   * only in Server Actions and Route Handlers; pass `refresh: false` in a Server Component.
+   * Refreshes the tokens. With cookie sessions this writes cookies, so it works
+   * only in Server Actions, Route Handlers and the proxy.
+   */
+  refreshSession(): Promise<FidesRefreshResult>;
+  /** Starts a session from a token response, for a login that doesn't go through the handlers. */
+  createSession(tokens: TokenResponse): Promise<Session>;
+  /** Changes the user or data. Null when there is no session. */
+  updateSession(update: (session: Session) => Session | Promise<Session>): Promise<Session | null>;
+  /** Ends the session. With a store, the record is deleted too. `trigger` defaults to `'logout'`. */
+  clearSession(options?: { trigger?: SessionClearedTrigger }): Promise<void>;
+  /**
+   * Calls an API with the session's access token, refreshing once on a 401.
+   * With cookie sessions, pass `refresh: false` in a Server Component: it can't
+   * save the new tokens, and the refresh would spend the refresh token.
    */
   authorizedFetch<T = undefined>(
-    session: Session,
     url: string | URL,
-    options: BoundAuthorizedFetchOptions<T>,
-  ): Promise<AuthorizedFetchResult<T>>;
+    options: FidesAuthorizedFetchOptions<T>,
+  ): Promise<{ response: Response; data: T; refreshed: boolean }>;
+  /**
+   * For `proxy.ts`. Refreshes a session whose access token expires within
+   * `refreshWithinSeconds`, before the page renders, since a Server Component
+   * can't save a refresh. Sets the new cookies on the response and on the
+   * request it forwards, so the page reads the refreshed session.
+   *
+   * A failed refresh leaves the session as it is. The next API call or
+   * heartbeat shows a session that is over; ending it here could undo a refresh
+   * that another instance completed with the same refresh token.
+   */
+  refreshInProxy(request: NextRequest, options?: RefreshInProxyOptions): Promise<NextResponse>;
 
-  handleOidcLogin(request: Request, options?: Bound<OidcLoginConfig>): Promise<Response>;
-  handleOidcCallback(request: Request, options: Bound<OidcCallbackConfig>): Promise<Response>;
-  handleOidcLogout(request: Request, options: Bound<OidcLogoutConfig>): Promise<Response>;
-  handleHeartbeat(request: Request): Promise<Response>;
+  /** The session cookie's name, for a proxy that checks whether one is present. */
+  readonly cookieNames: { session: string };
+  /** The instance's OIDC client, for protocol calls it doesn't wrap. */
+  readonly oidc: OidcClient;
+}
+
+/** A cookie written while the proxy handled a request. A null value deletes it. */
+interface CookieWrite {
+  value: string | null;
+  options?: CookieOptions;
 }
 
 /**
- * Creates the app's auth helpers. Call it once and import the result.
+ * A CookieStore over the proxied request's cookies, which records the writes
+ * so they can go both to the browser and to the forwarded request.
+ */
+function proxyCookieStore(request: NextRequest): {
+  cookies: CookieStore;
+  writes: Map<string, CookieWrite>;
+} {
+  const writes = new Map<string, CookieWrite>();
+  const cookies: CookieStore = {
+    // A cookie written earlier in this request reads back, as it would in the browser.
+    get: (name) => {
+      const written = writes.get(name);
+      if (written) return written.options?.maxAge === 0 ? null : written.value;
+      return request.cookies.get(name)?.value ?? null;
+    },
+    set: (name, value, options) => {
+      writes.set(name, { value, options });
+    },
+    delete: (name) => {
+      writes.set(name, { value: null });
+    },
+  };
+  return { cookies, writes };
+}
+
+/** Continues the request, carrying the cookie writes to the page and to the browser. */
+function forward(request: NextRequest, writes: Map<string, CookieWrite>): NextResponse {
+  if (writes.size === 0) return NextResponse.next();
+
+  for (const [name, { value, options }] of writes) {
+    if (value === null || options?.maxAge === 0) request.cookies.delete(name);
+    else request.cookies.set(name, value);
+  }
+  const response = NextResponse.next({ request: { headers: request.headers } });
+  for (const [name, { value, options }] of writes) {
+    if (value === null) response.cookies.delete(name);
+    else response.cookies.set(name, value, options);
+  }
+  return response;
+}
+
+/**
+ * Creates the app's auth instance. Call it once, in a module of its own, and
+ * import the result. It reads nothing from the environment: pass the secret and
+ * the provider config in.
  *
  * @example
  * ```ts
  * // lib/auth.ts
- * export const auth = createFidesAuth({ secret: process.env.SESSION_SECRET!, oauthConfig });
+ * export const auth = createFidesAuth({ oauthConfig, secret: process.env.SESSION_SECRET! });
  *
  * // app/api/auth/login/route.ts
  * export const GET = (request: Request) => auth.handleOidcLogin(request);
  *
- * // A server component
- * const session = await auth.getCurrentSession();
+ * // A Server Component
+ * const session = await auth.readSession();
  * ```
  */
-export function createFidesAuth({ secret, oauthConfig, sessionStore }: FidesAuthConfig): FidesAuth {
-  // One per instance, so refreshes of one session are shared across requests. Built on first use.
-  let persistence: SessionPersistence | undefined;
-  const serverSessions = (): SessionPersistence | undefined => {
-    if (sessionStore) persistence ??= serverPersistence({ store: sessionStore, secret });
-    return persistence;
-  };
-  /** Where sessions live: the store, or else the cookies under `secret`. */
-  const storage = (): SessionSecret | SessionPersistence => serverSessions() ?? secret;
+export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
+  const core = createCoreFidesAuth(config);
 
-  const tryGetCurrentSession = cache(
-    async (): Promise<ReadSessionResult> => tryReadSession(await nextCookieStore(), storage()),
+  const tryReadSession = cache(
+    async (): Promise<FidesReadResult> => core.tryReadSession(await nextCookieStore()),
   );
-  const getCurrentSession = cache(async () => (await tryGetCurrentSession()).session);
-
-  // Keyed by the request's cookies, so parallel 401s don't each spend the refresh token.
-  // Needed with a store too, which joins only refreshes that overlap.
-  const refreshes = new WeakMap<object, Promise<RefreshSessionResult>>();
-  const refreshOncePerRequest = async (): Promise<RefreshSessionResult> => {
-    const requestCookies = await cookies();
-    let refresh = refreshes.get(requestCookies);
-    if (!refresh) {
-      refresh = nextCookieStore().then((store) =>
-        tryRefreshSessionInStore(store, oauthConfig, storage()),
-      );
-      refreshes.set(requestCookies, refresh);
-    }
-    return refresh;
-  };
 
   return {
-    getCurrentSession,
-    tryGetCurrentSession,
+    handleOidcLogin: async (request, options) =>
+      core.handleOidcLogin(request, await nextCookieStore(), options),
+    handleOidcCallback: async (request) => core.handleOidcCallback(request, await nextCookieStore()),
+    handleOidcLogout: async (request, options) =>
+      core.handleOidcLogout(request, await nextCookieStore(), options),
+    handleHeartbeat: async (request) => core.handleHeartbeat(request, await nextCookieStore()),
+    handleSessionInfo: async (request) => core.handleSessionInfo(request, await nextCookieStore()),
 
-    refreshCurrentSession: async (options = {}) =>
-      refreshSessionInStore(await nextCookieStore(), oauthConfig, storage(), options),
+    readSession: cache(async () => (await tryReadSession()).session),
+    tryReadSession,
+    getTokens: async () => core.getTokens(await nextCookieStore()),
+    refreshSession: async () => core.refreshSession(await nextCookieStore()),
+    createSession: async (tokens) => core.createSession(await nextCookieStore(), tokens),
+    updateSession: async (update) => core.updateSession(await nextCookieStore(), update),
+    clearSession: async (options) => core.clearSession(await nextCookieStore(), options),
+    authorizedFetch: async (url, options) =>
+      core.authorizedFetch(await nextCookieStore(), url, options),
 
-    tryRefreshCurrentSession: async (options = {}) =>
-      tryRefreshSessionInStore(await nextCookieStore(), oauthConfig, storage(), options),
+    async refreshInProxy(request, { refreshWithinSeconds = 60 } = {}) {
+      // Without a session cookie there is nothing to refresh, and nothing to decrypt.
+      if (!request.cookies.has(core.cookieNames.session)) return NextResponse.next();
 
-    createAndPersistSession: async (session) =>
-      persistSession(await nextCookieStore(), session, storage()),
+      const { cookies, writes } = proxyCookieStore(request);
+      const tokens = await core.getTokens(cookies);
+      const expiresAt = Date.parse(tokens?.accessTokenExpiresAt ?? '');
+      // Without a refresh token, or an expiry to judge by, there is nothing to do.
+      if (!tokens?.refreshToken || Number.isNaN(expiresAt)) return NextResponse.next();
+      if (expiresAt - Date.now() > refreshWithinSeconds * 1000) return NextResponse.next();
 
-    clearCurrentSession: async (options = {}) => {
-      // The sid comes from the per-render cache, so correlating the logout costs nothing.
-      const sid = options.sid ?? (await tryGetCurrentSession()).session?.sid;
-      await clearSession(await nextCookieStore(), {
-        trigger: options.trigger ?? 'logout',
-        sid,
-        persistence: serverSessions(),
-      });
+      await core.refreshSession(cookies);
+      return forward(request, writes);
     },
 
-    authorizedFetch: (session, url, options) =>
-      authorizedFetch(session, url, {
-        ...options,
-        refresh: options.refresh === false ? undefined : refreshOncePerRequest,
-      }),
-
-    // Login only seals the transaction cookie, so it takes the secret alone.
-    handleOidcLogin: (request, options = {}) =>
-      handleOidcLogin(request, { ...options, oauthConfig, secret }),
-    handleOidcCallback: (request, options) =>
-      handleOidcCallback(request, {
-        ...options,
-        oauthConfig,
-        secret,
-        persistence: serverSessions(),
-      }),
-    handleOidcLogout: (request, options) =>
-      handleOidcLogout(request, {
-        ...options,
-        oauthConfig,
-        secret,
-        persistence: serverSessions(),
-      }),
-    handleHeartbeat: (request) =>
-      handleHeartbeat(request, { oauthConfig, secret, persistence: serverSessions() }),
+    get cookieNames() {
+      return core.cookieNames;
+    },
+    oidc: core.oidc,
   };
 }

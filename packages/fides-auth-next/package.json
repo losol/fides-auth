@@ -17,38 +17,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./auth": {
-      "types": "./dist/auth.d.ts",
-      "import": "./dist/auth.js"
-    },
-    "./cookie-store": {
-      "types": "./dist/cookie-store.d.ts",
-      "import": "./dist/cookie-store.js"
-    },
-    "./request": {
-      "types": "./dist/request.d.ts",
-      "import": "./dist/request.js"
-    },
-    "./store": {
-      "types": "./dist/store/index.d.ts",
-      "import": "./dist/store/index.js"
-    },
-    "./oidc-callback": {
-      "types": "./dist/oidc-callback.d.ts",
-      "import": "./dist/oidc-callback.js"
-    },
-    "./oidc-login": {
-      "types": "./dist/oidc-login.d.ts",
-      "import": "./dist/oidc-login.js"
-    },
-    "./oidc-logout": {
-      "types": "./dist/oidc-logout.d.ts",
-      "import": "./dist/oidc-logout.js"
-    },
-    "./heartbeat-handler": {
-      "types": "./dist/heartbeat-handler.d.ts",
-      "import": "./dist/heartbeat-handler.js"
     }
   },
   "main": "./dist/index.js",
@@ -65,16 +33,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@eventuras/fides-auth": "workspace:*",
-    "@eventuras/fides-auth-react": "workspace:*",
-    "@eventuras/fides-auth-store": "workspace:*"
+    "@eventuras/fides-auth": "workspace:*"
   },
   "devDependencies": {
     "@eventuras/typescript-config": "workspace:*",
     "@eventuras/vite-config": "workspace:*",
-    "@testing-library/jest-dom": "7.0.1",
     "@types/react": "^19.3.0",
-    "jsdom": "30.1.3",
     "react": "^19.3.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",

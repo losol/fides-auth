@@ -109,7 +109,14 @@ export type FidesRefreshResult =
   | { ok: false; reason: SessionRejectedReason; cause?: RefreshFailureCause };
 
 /** Options for {@link FidesAuth.authorizedFetch}. The instance refreshes on a 401 itself. */
-export type FidesAuthorizedFetchOptions<T> = Omit<AuthorizedFetchOptions<T>, 'refresh'>;
+export type FidesAuthorizedFetchOptions<T> = Omit<AuthorizedFetchOptions<T>, 'refresh'> & {
+  /**
+   * `false` skips the refresh, so a 401 is an `http_error`. Pass it where the
+   * cookies can't be written, such as a Next.js Server Component: a refresh
+   * there spends the refresh token and can't save the new one.
+   */
+  refresh?: false;
+};
 
 export interface FidesAuth {
   /** `GET`, with an optional `?returnTo=`. Redirects to the provider. */
@@ -146,7 +153,7 @@ export interface FidesAuth {
     cookies: CookieStore,
     update: (session: Session) => Session | Promise<Session>,
   ): Promise<Session | null>;
-  /** Ends the session. With a store, the record is deleted too. */
+  /** Ends the session. With a store, the record is deleted too. `trigger` defaults to `'logout'`. */
   clearSession(cookies: CookieStore, options?: { trigger?: SessionClearedTrigger }): Promise<void>;
   /** Calls an API with the session's access token, refreshing once on a 401. */
   authorizedFetch<T = undefined>(
@@ -190,9 +197,12 @@ const tooManyRequests = () => new Response('Too many requests', { status: 429 })
 const forbidden = () => new Response('Forbidden', { status: 403 });
 
 /**
- * Creates the server side of fides-auth. It does no I/O until a member needs it.
+ * Creates the server side of fides-auth. It does no I/O until a member needs it,
+ * and reads the redirect URI only then: an app creates the instance when a module
+ * loads, and a build can load that module without the runtime environment.
  *
- * @throws TypeError if `clientAuth` is `'none'`, or the config has no redirect URI.
+ * @throws TypeError if `clientAuth` is `'none'`. A member throws TypeError if the
+ * config has no redirect URI.
  */
 export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
   const { oauthConfig, secret, sessionStore, rateLimit } = config;
@@ -201,10 +211,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
       "createFidesAuth needs a confidential client: a backend-for-frontend can't use clientAuth 'none'",
     );
   }
-  const redirectUri = redirectUriOf(oauthConfig);
-  const applicationUrl = config.applicationUrl ?? new URL(redirectUri).origin;
   const defaultRedirectPath = config.defaultRedirectPath ?? '/';
-  const postLogoutRedirectUri = config.postLogoutRedirectUri ?? applicationUrl;
   const validateReturnTo = config.validateReturnTo ?? defaultValidateReturnTo;
 
   const loggers = config.logger ?? configuredLoggers;
@@ -214,20 +221,34 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     logout: loggers.create({ namespace: 'fides-auth:server:oidc-logout' }),
     heartbeat: loggers.create({ namespace: 'fides-auth:server:heartbeat' }),
   };
-
-  const txCookie = transactionCookieOptions(redirectUri);
-  const secure = txCookie.secure !== false;
   const oidc = createOidcClient(oauthConfig, { logger: loggers });
-  const lifecycle = createSessionLifecycle({
-    storage: sessionStore ? storeStorage({ store: sessionStore, secure }) : cookieStorage({ secure }),
-    secret,
-    sessionDurationDays: config.sessionDurationDays,
-    rolesClaim: config.rolesClaim,
-    mapSession: config.mapSession,
-    refreshTokens: (refreshToken) => oidc.refresh(refreshToken),
-    logger: loggers.create({ namespace: 'fides-auth:server:session' }),
-    onSessionEvent: config.onSessionEvent,
-  });
+
+  /** What the redirect URI decides: the app's origin, the cookie flavour and the storage. */
+  function resolveSettings() {
+    const redirectUri = redirectUriOf(oauthConfig);
+    const applicationUrl = config.applicationUrl ?? new URL(redirectUri).origin;
+    const txCookie = transactionCookieOptions(redirectUri);
+    const secure = txCookie.secure !== false;
+    return {
+      applicationUrl,
+      postLogoutRedirectUri: config.postLogoutRedirectUri ?? applicationUrl,
+      txCookie,
+      cookieNames: { session: sessionCookieName(secure) },
+      // One lifecycle per instance: it shares refreshes between the requests it serves.
+      lifecycle: createSessionLifecycle({
+        storage: sessionStore ? storeStorage({ store: sessionStore, secure }) : cookieStorage({ secure }),
+        secret,
+        sessionDurationDays: config.sessionDurationDays,
+        rolesClaim: config.rolesClaim,
+        mapSession: config.mapSession,
+        refreshTokens: (refreshToken) => oidc.refresh(refreshToken),
+        logger: loggers.create({ namespace: 'fides-auth:server:session' }),
+        onSessionEvent: config.onSessionEvent,
+      }),
+    };
+  }
+  let resolved: ReturnType<typeof resolveSettings> | undefined;
+  const settings = () => (resolved ??= resolveSettings());
 
   async function limited(request: Request): Promise<boolean> {
     return !!rateLimit && !(await rateLimit(request));
@@ -236,23 +257,23 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
   /** The return path to redirect to: validated, on the app's origin, or the default. */
   function returnUrl(returnTo: string | null | undefined): URL {
     const path = returnTo ? validateReturnTo(returnTo) : null;
-    return validateReturnUrl(path, applicationUrl, defaultRedirectPath);
+    return validateReturnUrl(path, settings().applicationUrl, defaultRedirectPath);
   }
 
   function loginError(code: string): Response {
-    const url = new URL(defaultRedirectPath, applicationUrl);
+    const url = new URL(defaultRedirectPath, settings().applicationUrl);
     url.searchParams.set('login', 'error');
     url.searchParams.set('error', code);
     return redirect(url);
   }
 
   async function tryReadSession(cookies: CookieStore): Promise<FidesReadResult> {
-    const read = await lifecycle.read(cookies);
+    const read = await settings().lifecycle.read(cookies);
     return read.record ? { session: read.record.session } : { session: null, reason: read.reason };
   }
 
   async function refreshSession(cookies: CookieStore): Promise<FidesRefreshResult> {
-    const result = await lifecycle.refresh(cookies);
+    const result = await settings().lifecycle.refresh(cookies);
     return result.ok
       ? { ok: true, session: result.record.session, rotatedRefreshToken: result.rotatedRefreshToken }
       : { ok: false, reason: result.reason, cause: result.cause };
@@ -262,6 +283,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     async handleOidcLogin(request, cookies, options = {}) {
       // Before the provider is contacted: a bad secret is a config error, not a login failure.
       assertSessionSecret(secret);
+      const { txCookie } = settings();
       if (await limited(request)) {
         log.login.warn('Rate limit exceeded');
         return tooManyRequests();
@@ -293,6 +315,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
 
     async handleOidcCallback(request, cookies) {
       assertSessionSecret(secret);
+      const { applicationUrl, txCookie, lifecycle } = settings();
       if (await limited(request)) {
         log.callback.warn('Rate limit exceeded');
         return tooManyRequests();
@@ -374,7 +397,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
 
     async handleOidcLogout(request, cookies, options = {}) {
       if (request.method !== 'POST') return methodNotAllowed('POST');
-      if (!isSameOriginRequest(request, applicationUrl)) {
+      if (!isSameOriginRequest(request, settings().applicationUrl)) {
         log.logout.warn(
           { origin: request.headers.get('origin'), site: request.headers.get('sec-fetch-site') },
           'Cross-origin logout request rejected',
@@ -387,9 +410,9 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
       }
 
       // Read before ending: the ID token is the hint that lets the provider skip its prompt.
-      const idTokenHint = (await lifecycle.read(cookies)).record?.tokens.idToken;
+      const idTokenHint = (await settings().lifecycle.read(cookies)).record?.tokens.idToken;
       try {
-        await lifecycle.end(cookies, { trigger: 'logout' });
+        await settings().lifecycle.end(cookies, { trigger: 'logout' });
       } catch (error) {
         // Never send the user to the provider with the local session half ended:
         // they would come back looking logged in.
@@ -397,6 +420,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
         return new Response('Logout failed', { status: 500 });
       }
 
+      const { postLogoutRedirectUri } = settings();
       const url = await oidc.logoutUrl({
         postLogoutRedirectUri,
         idTokenHint,
@@ -413,7 +437,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
 
     async handleHeartbeat(request, cookies) {
       if (request.method !== 'POST') return methodNotAllowed('POST');
-      if (!isSameOriginRequest(request, applicationUrl)) {
+      if (!isSameOriginRequest(request, settings().applicationUrl)) {
         log.heartbeat.warn(
           { origin: request.headers.get('origin'), site: request.headers.get('sec-fetch-site') },
           'Cross-origin heartbeat rejected',
@@ -425,7 +449,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
         return new Response(null, { status: 429 });
       }
 
-      const result = await lifecycle.refresh(cookies);
+      const result = await settings().lifecycle.refresh(cookies);
       if (result.ok) {
         const body: HeartbeatResponse = {
           accessTokenExpiresAt: result.record.tokens.accessTokenExpiresAt ?? null,
@@ -459,7 +483,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
 
     async handleSessionInfo(request, cookies) {
       if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed('GET, HEAD');
-      const { record } = await lifecycle.read(cookies);
+      const { record } = await settings().lifecycle.read(cookies);
       const body: SessionInfo = record
         ? {
             authenticated: true,
@@ -473,29 +497,32 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
 
     readSession: async (cookies) => (await tryReadSession(cookies)).session,
     tryReadSession,
-    getTokens: async (cookies) => (await lifecycle.read(cookies)).record?.tokens ?? null,
+    getTokens: async (cookies) => (await settings().lifecycle.read(cookies)).record?.tokens ?? null,
     refreshSession,
-    createSession: async (cookies, tokens) => (await lifecycle.create(cookies, tokens)).session,
-    updateSession: async (cookies, update) => (await lifecycle.update(cookies, update))?.session ?? null,
-    clearSession: (cookies, options = {}) => lifecycle.end(cookies, options),
+    createSession: async (cookies, tokens) => (await settings().lifecycle.create(cookies, tokens)).session,
+    updateSession: async (cookies, update) => (await settings().lifecycle.update(cookies, update))?.session ?? null,
+    clearSession: (cookies, { trigger = 'logout' } = {}) => settings().lifecycle.end(cookies, { trigger }),
 
-    async authorizedFetch(cookies, url, options) {
-      const tokens = (await lifecycle.read(cookies)).record?.tokens;
+    async authorizedFetch(cookies, url, { refresh, ...options }) {
+      const tokens = (await settings().lifecycle.read(cookies)).record?.tokens;
       // The token holder authorizedFetch expects; it reads only `tokens`.
       const holder: LegacySession = { tokens };
+      const refreshTokens = async (): Promise<LegacyRefreshResult> => {
+        const refreshed = await settings().lifecycle.refresh(cookies);
+        return refreshed.ok
+          ? { ok: true, session: { tokens: refreshed.record.tokens }, rotatedRefreshToken: refreshed.rotatedRefreshToken }
+          : { ok: false, reason: refreshed.reason, cause: refreshed.cause };
+      };
       const result = await fetchWithSession(holder, url, {
         ...options,
-        refresh: async (): Promise<LegacyRefreshResult> => {
-          const refreshed = await lifecycle.refresh(cookies);
-          return refreshed.ok
-            ? { ok: true, session: { tokens: refreshed.record.tokens }, rotatedRefreshToken: refreshed.rotatedRefreshToken }
-            : { ok: false, reason: refreshed.reason, cause: refreshed.cause };
-        },
+        refresh: refresh === false ? undefined : refreshTokens,
       });
       return { response: result.response, data: result.data, refreshed: result.refreshed };
     },
 
-    cookieNames: { session: sessionCookieName(secure) },
+    get cookieNames() {
+      return settings().cookieNames;
+    },
     oidc,
   };
 }
