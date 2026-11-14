@@ -5,7 +5,7 @@
 // framework adapter (Next.js, React Router, …) implements over its own cookie
 // store. Methods may be sync or async; the handlers `await` them either way.
 
-import type { CookieOptions } from '../cookies.js';
+import type { CookieOptions } from '../shared/cookies.js';
 
 export interface CookieStore {
   /** Returns the cookie's value, or null/undefined when it is not set. */

@@ -5,10 +5,11 @@
 // Uses the standard Request/Response, a CookieStore, and an optional rate-limit
 // callback, so any server runtime can call it.
 
-import { CookieTooLargeError } from '../cookies.js';
-import { createLogger } from '../logger.js';
-import { buildPKCEOptions, discoverAndBuildAuthorizationUrl } from '../oauth.js';
-import type { OAuthConfig } from '../oauth-config.js';
+import { CookieTooLargeError } from '../shared/cookies.js';
+import { createLogger } from '../shared/logger.js';
+import { buildPKCEOptions } from '../protocol/authorization-parameters.js';
+import { discoverAndBuildAuthorizationUrl } from '../protocol/authorization-url.js';
+import type { OAuthConfig } from '../protocol/config.js';
 import type { CookieStore } from './cookie-store.js';
 import {
   createTransaction,

@@ -5,10 +5,10 @@
 // parallel logins in one browser neither overwrite each other nor pile up. It is
 // sealed under a key derived from the secret, so it never opens as a session.
 
-import { assertCookieWithinLimit, defaultOAuthCookieOptions } from '../cookies.js';
-import { createLogger } from '../logger.js';
-import type { PKCEOptions } from '../oauth-authorization-parameters.js';
-import { createEncryptedJWT, decryptJWT, hexToUint8Array } from '../utils.js';
+import { assertCookieWithinLimit, defaultOAuthCookieOptions } from '../shared/cookies.js';
+import { createLogger } from '../shared/logger.js';
+import type { PKCEOptions } from '../protocol/authorization-parameters.js';
+import { createEncryptedJWT, decryptJWT, hexToUint8Array } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
 import { assertSessionSecret, type SessionSecret } from './session-persistence.js';
 

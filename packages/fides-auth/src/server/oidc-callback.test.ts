@@ -11,19 +11,15 @@
  */
 import { vi, describe, it, expect, beforeEach, afterAll } from 'vitest';
 
-vi.mock('../oauth.js', () => ({
-  exchangeAuthorizationCode: vi.fn(),
-  buildSessionFromTokens: vi.fn(),
-  validateReturnUrl: vi.fn(),
-}));
+vi.mock('../protocol/code-exchange.js', () => ({ exchangeAuthorizationCode: vi.fn() }));
+vi.mock('../session/build.js', () => ({ buildSessionFromTokens: vi.fn() }));
+vi.mock('./return-to.js', () => ({ validateReturnUrl: vi.fn() }));
 
 import { handleOidcCallback } from './oidc-callback.js';
-import {
-  exchangeAuthorizationCode,
-  buildSessionFromTokens,
-  validateReturnUrl,
-} from '../oauth.js';
-import type { CookieOptions } from '../cookies.js';
+import { exchangeAuthorizationCode } from '../protocol/code-exchange.js';
+import { buildSessionFromTokens } from '../session/build.js';
+import { validateReturnUrl } from './return-to.js';
+import type { CookieOptions } from '../shared/cookies.js';
 import type { CookieStore } from './cookie-store.js';
 import {
   createTransaction,
@@ -34,7 +30,7 @@ import {
 import { transactionCookieOptions } from './index.js';
 import { serverPersistence } from './session-persistence.js';
 import { createMemorySessionStore } from './session-store.js';
-import { sha256 } from '../utils.js';
+import { sha256 } from '../session/utils.js';
 
 const mockedExchange = vi.mocked(exchangeAuthorizationCode);
 const mockedBuildSession = vi.mocked(buildSessionFromTokens);

@@ -4,14 +4,13 @@
  */
 import { vi, describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 
-vi.mock('../oauth.js', () => ({
-  buildPKCEOptions: vi.fn(),
-  discoverAndBuildAuthorizationUrl: vi.fn(),
-}));
+vi.mock('../protocol/authorization-parameters.js', () => ({ buildPKCEOptions: vi.fn() }));
+vi.mock('../protocol/authorization-url.js', () => ({ discoverAndBuildAuthorizationUrl: vi.fn() }));
 
 import { handleOidcLogin } from './oidc-login.js';
-import { buildPKCEOptions, discoverAndBuildAuthorizationUrl } from '../oauth.js';
-import { CookieTooLargeError, type CookieOptions } from '../cookies.js';
+import { buildPKCEOptions } from '../protocol/authorization-parameters.js';
+import { discoverAndBuildAuthorizationUrl } from '../protocol/authorization-url.js';
+import { CookieTooLargeError, type CookieOptions } from '../shared/cookies.js';
 import type { CookieStore } from './cookie-store.js';
 import { readTransaction } from './login-transaction.js';
 

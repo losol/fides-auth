@@ -7,16 +7,16 @@
 
 import * as openid from 'openid-client';
 
-import { createLogger } from '../../logger.js';
+import { createLogger } from '../../shared/logger.js';
 import {
   buildPKCEOptions,
   type AuthorizationRequestOptions,
   type PKCEOptions,
-} from '../../oauth-authorization-parameters.js';
-import { buildAuthorizationUrl } from '../../oauth-authorization-url.js';
-import type { OAuthConfig } from '../../oauth-config.js';
-import { joinScope } from '../../oauth-scope.js';
-import { discoverConfiguration } from '../../oidc-discovery.js';
+} from '../../protocol/authorization-parameters.js';
+import { buildAuthorizationUrl } from '../../protocol/authorization-url.js';
+import type { OAuthConfig } from '../../protocol/config.js';
+import { joinScope } from '../../protocol/scope.js';
+import { discoverConfiguration } from '../../protocol/discovery.js';
 import {
   defaultVippsLoginScope,
   type VippsLoginConfig,

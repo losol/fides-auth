@@ -1,12 +1,12 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 // Mock only the OAuth exchange; encode/decode and persistence run for real.
-vi.mock('../session-refresh.js', () => ({ refreshSession: vi.fn() }));
+vi.mock('./session-refresh.js', () => ({ refreshSession: vi.fn() }));
 
-import { CookieTooLargeError } from '../cookies.js';
-import { createEncryptedJWT } from '../utils.js';
-import { refreshSession } from '../session-refresh.js';
-import type { Session } from '../types.js';
+import { CookieTooLargeError } from '../shared/cookies.js';
+import { createEncryptedJWT } from '../session/utils.js';
+import { refreshSession } from './session-refresh.js';
+import type { Session } from '../shared/types.js';
 import type { CookieStore } from './cookie-store.js';
 import {
   persistSession,

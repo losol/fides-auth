@@ -8,18 +8,18 @@
 // what persisting it cost, so `session.created` / `session.refreshed` are
 // raised from here rather than from each caller.
 
-import { createLogger } from '../logger.js';
-import type { OAuthConfig } from '../oauth-config.js';
-import { classifyRefreshFailure, getOAuthErrorLogContext } from '../oauth-logging.js';
-import { refreshSession } from '../session-refresh.js';
+import { createLogger } from '../shared/logger.js';
+import type { OAuthConfig } from '../protocol/config.js';
+import { classifyRefreshFailure, getOAuthErrorLogContext } from '../protocol/logging.js';
+import { refreshSession } from './session-refresh.js';
 import {
   SESSION_EVENT,
   logSessionEvent,
   type RefreshFailureCause,
   type SessionClearedTrigger,
   type SessionRejectedReason,
-} from '../session-events.js';
-import type { CreateSessionOptions, Session } from '../types.js';
+} from '../shared/session-events.js';
+import type { CreateSessionOptions, Session } from '../shared/types.js';
 import type { CookieStore } from './cookie-store.js';
 import {
   clearSessionCookies,

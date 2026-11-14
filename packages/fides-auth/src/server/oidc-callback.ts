@@ -5,16 +5,13 @@
 // redirect — over the standard Request/Response and a CookieStore, delegating the
 // protocol to the core oauth module and persistence to the server session helpers.
 
-import { CookieTooLargeError } from '../cookies.js';
-import { createLogger } from '../logger.js';
-import type { MapSession } from '../oauth.js';
-import {
-  buildSessionFromTokens,
-  exchangeAuthorizationCode,
-  validateReturnUrl,
-} from '../oauth.js';
-import type { OAuthConfig } from '../oauth-config.js';
-import { SESSION_EVENT } from '../session-events.js';
+import { CookieTooLargeError } from '../shared/cookies.js';
+import { createLogger } from '../shared/logger.js';
+import { buildSessionFromTokens, type MapSession } from '../session/build.js';
+import { exchangeAuthorizationCode } from '../protocol/code-exchange.js';
+import { validateReturnUrl } from './return-to.js';
+import type { OAuthConfig } from '../protocol/config.js';
+import { SESSION_EVENT } from '../shared/session-events.js';
 import type { CookieStore } from './cookie-store.js';
 import {
   CallbackValidationError,
