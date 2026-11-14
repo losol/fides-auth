@@ -24,11 +24,7 @@ import type {
 import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { redirectUriOf, type OidcClientConfig } from '../protocol/config.js';
 import type { MapRecordSession } from '../session/record.js';
-import {
-  authorizedFetch as fetchWithTokens,
-  type AuthorizedFetchOptions,
-  type TokenRefreshResult,
-} from './authorized-fetch.js';
+import { authorizedFetch as fetchWithTokens, type AuthorizedFetchOptions } from './authorized-fetch.js';
 import type { CookieStore } from './cookie-store.js';
 import { isSameOriginRequest } from './csrf.js';
 import {
@@ -102,20 +98,29 @@ export type FidesReadResult =
   | { session: Session; reason?: undefined }
   | { session: null; reason: SessionRejectedReason };
 
+/** Options for {@link FidesAuth.refreshSession}. */
+export interface RefreshSessionOptions {
+  /**
+   * Refresh only when the access token expires within this many seconds.
+   * Without it, the session is refreshed at once. A token whose lifetime the
+   * provider didn't give counts as fresh.
+   */
+  ifExpiresWithin?: number;
+}
+
 /** The result of {@link FidesAuth.refreshSession}. Only `cause: 'invalid_grant'` means the user must log in again. */
 export type FidesRefreshResult =
-  | { ok: true; session: Session; rotatedRefreshToken: boolean }
+  | {
+      ok: true;
+      session: Session;
+      /** False when `ifExpiresWithin` found the access token fresh enough. */
+      refreshed: boolean;
+      rotatedRefreshToken: boolean;
+    }
   | { ok: false; reason: SessionRejectedReason; cause?: RefreshFailureCause };
 
-/** Options for {@link FidesAuth.authorizedFetch}. The instance refreshes on a 401 itself. */
-export type FidesAuthorizedFetchOptions<T> = Omit<AuthorizedFetchOptions<T>, 'refresh'> & {
-  /**
-   * `false` skips the refresh, so a 401 is an `http_error`. Pass it where the
-   * cookies can't be written, such as a Next.js Server Component: a refresh
-   * there spends the refresh token and can't save the new one.
-   */
-  refresh?: false;
-};
+/** Options for {@link FidesAuth.authorizedFetch}. */
+export type FidesAuthorizedFetchOptions<T> = AuthorizedFetchOptions<T>;
 
 export interface FidesAuth {
   /** `GET`, with an optional `?returnTo=`. Redirects to the provider. */
@@ -143,8 +148,13 @@ export interface FidesAuth {
   tryReadSession(cookies: CookieStore): Promise<FidesReadResult>;
   /** The session's tokens, or null without a session. */
   getTokens(cookies: CookieStore): Promise<Tokens | null>;
-  /** Refreshes the tokens. The session's identity and lifetime stay. */
-  refreshSession(cookies: CookieStore): Promise<FidesRefreshResult>;
+  /**
+   * Refreshes the tokens, or with `ifExpiresWithin` only when the access token
+   * is about to expire. Apart from the heartbeat endpoint, nothing else on the
+   * instance refreshes. With cookie storage it writes cookies, so call it where
+   * they can be set.
+   */
+  refreshSession(cookies: CookieStore, options?: RefreshSessionOptions): Promise<FidesRefreshResult>;
   /** Starts a session from a token response, for a login that doesn't go through the handlers. */
   createSession(cookies: CookieStore, tokens: TokenResponse): Promise<Session>;
   /** Changes the user or data. Null when there is no session. */
@@ -154,12 +164,16 @@ export interface FidesAuth {
   ): Promise<Session | null>;
   /** Ends the session. With a store, the record is deleted too. `trigger` defaults to `'logout'`. */
   clearSession(cookies: CookieStore, options?: { trigger?: SessionClearedTrigger }): Promise<void>;
-  /** Calls an API with the session's access token, refreshing once on a 401. */
+  /**
+   * Calls an API with the session's access token. It never refreshes, so a 401
+   * is an `http_error`; call `refreshSession({ ifExpiresWithin })` first where
+   * the new tokens can be saved.
+   */
   authorizedFetch<T = undefined>(
     cookies: CookieStore,
     url: string | URL,
     options: FidesAuthorizedFetchOptions<T>,
-  ): Promise<{ response: Response; data: T; refreshed: boolean }>;
+  ): Promise<{ response: Response; data: T }>;
 
   /** The session cookie's name, for middleware that checks whether one is present. */
   readonly cookieNames: { session: string };
@@ -271,10 +285,32 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     return read.record ? { session: read.record.session } : { session: null, reason: read.reason };
   }
 
-  async function refreshSession(cookies: CookieStore): Promise<FidesRefreshResult> {
-    const result = await settings().lifecycle.refresh(cookies);
+  async function refreshSession(
+    cookies: CookieStore,
+    { ifExpiresWithin }: RefreshSessionOptions = {},
+  ): Promise<FidesRefreshResult> {
+    const { lifecycle } = settings();
+    if (ifExpiresWithin !== undefined) {
+      if (!(ifExpiresWithin >= 0)) {
+        throw new TypeError('refreshSession: ifExpiresWithin must be a number of seconds, 0 or more');
+      }
+      const read = await lifecycle.read(cookies);
+      if (!read.record) return { ok: false, reason: read.reason };
+      const expiresAt = Date.parse(read.record.tokens.accessTokenExpiresAt ?? '');
+      // Without a lifetime to judge by, refreshing on every call would only load the provider.
+      if (Number.isNaN(expiresAt) || expiresAt - Date.now() > ifExpiresWithin * 1000) {
+        return { ok: true, session: read.record.session, refreshed: false, rotatedRefreshToken: false };
+      }
+    }
+
+    const result = await lifecycle.refresh(cookies);
     return result.ok
-      ? { ok: true, session: result.record.session, rotatedRefreshToken: result.rotatedRefreshToken }
+      ? {
+          ok: true,
+          session: result.record.session,
+          refreshed: true,
+          rotatedRefreshToken: result.rotatedRefreshToken,
+        }
       : { ok: false, reason: result.reason, cause: result.cause };
   }
 
@@ -502,19 +538,9 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     updateSession: async (cookies, update) => (await settings().lifecycle.update(cookies, update))?.session ?? null,
     clearSession: (cookies, { trigger = 'logout' } = {}) => settings().lifecycle.end(cookies, { trigger }),
 
-    async authorizedFetch(cookies, url, { refresh, ...options }) {
-      const { lifecycle } = settings();
-      const tokens = (await lifecycle.read(cookies)).record?.tokens;
-      const refreshTokens = async (): Promise<TokenRefreshResult> => {
-        const refreshed = await lifecycle.refresh(cookies);
-        return refreshed.ok
-          ? { ok: true, tokens: refreshed.record.tokens }
-          : { ok: false, reason: refreshed.reason, cause: refreshed.cause };
-      };
-      return fetchWithTokens(tokens, url, {
-        ...options,
-        refresh: refresh === false ? undefined : refreshTokens,
-      });
+    async authorizedFetch(cookies, url, options) {
+      const tokens = (await settings().lifecycle.read(cookies)).record?.tokens;
+      return fetchWithTokens(tokens, url, options);
     },
 
     get cookieNames() {

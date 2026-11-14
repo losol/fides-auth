@@ -12,6 +12,7 @@ export {
   type FidesReadResult,
   type FidesRefreshResult,
   type MapSession,
+  type RefreshSessionOptions,
 } from './fides-auth.js';
 export { SessionSecretError, type SessionSecret } from './session-secret.js';
 export { AuthorizedFetchError, type AuthorizedFetchErrorReason } from './authorized-fetch.js';

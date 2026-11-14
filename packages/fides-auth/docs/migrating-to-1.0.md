@@ -144,6 +144,12 @@ internal. For `hasScope(session, scope)`, check `session.scopes?.includes(scope)
   correlation id is `correlationId`.
 - **`CookieStore` has only `get` and `set`.** The library deletes a cookie by
   setting it empty with `maxAge: 0`, so an adapter needs no `delete`.
+- **Nothing refreshes unless you ask.** `authorizedFetch` no longer refreshes
+  on a 401: it throws an `http_error`, and the `refresh` option and the
+  `refresh_failed` reason go. Call `refreshSession({ ifExpiresWithin: 60 })`
+  first, where cookies can be written. It refreshes only when the access token
+  expires within that many seconds, and its result says whether it
+  `refreshed`.
 - **Users log in again once.** 1.0 doesn't read 0.x sessions, and deletes their
   cookies the next time it writes a session.
 
@@ -155,11 +161,11 @@ internal. For `hasScope(session, scope)`, check `session.scopes?.includes(scope)
   |---|---|
   | `handleOidcLogin`, `handleOidcCallback`, `handleOidcLogout`, `handleHeartbeat` | the same members on the instance, with the options in `createFidesAuth` |
   | `readSession(cookies, secret)`, `tryReadSession(cookies, secret)` | `readSession(cookies)`, `tryReadSession(cookies)` |
-  | `refreshSessionInStore`, `tryRefreshSessionInStore` | `refreshSession(cookies)` |
+  | `refreshSessionInStore`, `tryRefreshSessionInStore` | `refreshSession(cookies, { ifExpiresWithin? })` |
   | `persistSession(cookies, session, secret)` | `createSession(cookies, tokenResponse)` |
   | `clearSession(cookies, options)` | `clearSession(cookies, options)` |
   | `readIdToken(cookies, secret)` | `getTokens(cookies)`, then `idToken` |
-  | `authorizedFetch(session, url, options)` | `authorizedFetch(cookies, url, options)` |
+  | `authorizedFetch(session, url, options)` | `authorizedFetch(cookies, url, options)`, which doesn't refresh |
   | `serverPersistence({ store, secret })`, `cookiePersistence(secret)` | `sessionStore` in `createFidesAuth`, or nothing |
 
 - **The login transaction helpers**: `createTransaction`, `persistTransaction`,
@@ -190,10 +196,10 @@ took per call move to it: `applicationUrl`, `mapSession`, `rolesClaim`,
 |---|---|
 | `getCurrentSession()` | `readSession()` |
 | `tryGetCurrentSession()` | `tryReadSession()` |
-| `refreshCurrentSession()`, `tryRefreshCurrentSession()` | `refreshSession()`, which says why on failure |
+| `refreshCurrentSession()`, `tryRefreshCurrentSession()` | `refreshSession({ ifExpiresWithin? })`, which says why on failure |
 | `createAndPersistSession(session)` | `createSession(tokenResponse)` |
 | `clearCurrentSession(options)` | `clearSession(options)` |
-| `authorizedFetch(session, url, options)` | `authorizedFetch(url, options)`: it reads the tokens itself |
+| `authorizedFetch(session, url, options)` | `authorizedFetch(url, options)`: it reads the tokens itself and never refreshes, so `refresh: false` goes |
 | `handleOidcLogin(request, { validateReturnTo, authorizationParameters })` | `handleOidcLogin(request, { authorizationParameters })` |
 | `handleOidcCallback(request, { applicationUrl, ... })` | `handleOidcCallback(request)` |
 | `handleOidcLogout(request, { postLogoutRedirectUri, state, logoutHint, ... })` | `handleOidcLogout(request, { state, logoutHint })` |

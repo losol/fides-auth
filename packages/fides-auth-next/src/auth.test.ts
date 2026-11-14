@@ -292,29 +292,40 @@ describe('createFidesAuth for Next', () => {
   });
 });
 
-describe('authorizedFetch', () => {
-  it('refreshes once on a 401 and saves the new tokens', async () => {
+describe('authorizedFetch and refreshSession', () => {
+  it('never refreshes in authorizedFetch: a 401 is an http_error', async () => {
     const { auth } = setup();
     await login(auth);
 
     newRender();
+    await expect(auth.authorizedFetch(`${API}me`, { allowedBase: API })).rejects.toMatchObject({
+      reason: 'http_error',
+      status: 401,
+    });
+    expect(provider.tokenRequests).toHaveLength(1);
+  });
+
+  it('refreshes first with ifExpiresWithin, and the call uses the new token', async () => {
+    const { auth } = setup();
+    provider.expiresIn = 30;
+    await login(auth);
+
+    newRender();
+    expect(await auth.refreshSession({ ifExpiresWithin: 60 })).toMatchObject({ ok: true, refreshed: true });
     const result = await auth.authorizedFetch(`${API}me`, {
       allowedBase: API,
       parse: (response) => response.json() as Promise<{ ok: boolean }>,
     });
-    expect(result).toMatchObject({ data: { ok: true }, refreshed: true });
-    expect(provider.apiCalls).toEqual(['Bearer access-1', 'Bearer access-2']);
-    expect((await auth.getTokens())?.accessToken).toBe('access-2');
+    expect(result.data).toEqual({ ok: true });
+    expect(provider.apiCalls).toEqual(['Bearer access-2']);
   });
 
-  it('skips the refresh with refresh: false', async () => {
+  it('leaves a fresh session alone with ifExpiresWithin', async () => {
     const { auth } = setup();
     await login(auth);
 
     newRender();
-    await expect(
-      auth.authorizedFetch(`${API}me`, { allowedBase: API, refresh: false }),
-    ).rejects.toMatchObject({ reason: 'http_error', status: 401 });
+    expect(await auth.refreshSession({ ifExpiresWithin: 60 })).toMatchObject({ ok: true, refreshed: false });
     expect(provider.tokenRequests).toHaveLength(1);
   });
 });
@@ -370,7 +381,7 @@ describe('refreshInProxy', () => {
   it('takes the refresh window as an option', async () => {
     const { auth } = setup();
     await login(auth);
-    const response = await auth.refreshInProxy(proxied(), { refreshWithinSeconds: 600 });
+    const response = await auth.refreshInProxy(proxied(), { ifExpiresWithin: 600 });
     expect(response.headers.get('set-cookie')).toMatch(/^__Host-session=/);
   });
 

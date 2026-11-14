@@ -14,6 +14,7 @@ export type {
   FidesReadResult,
   FidesRefreshResult,
   MapSession,
+  RefreshSessionOptions,
   SessionStore,
   StoredSession,
 } from '@eventuras/fides-auth/server';

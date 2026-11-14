@@ -13,6 +13,7 @@ import {
   type FidesAuthorizedFetchOptions,
   type FidesReadResult,
   type FidesRefreshResult,
+  type RefreshSessionOptions,
 } from '@eventuras/fides-auth/server';
 import type { SessionClearedTrigger } from '@eventuras/fides-auth/session-events';
 import { type NextRequest, NextResponse } from 'next/server';
@@ -26,7 +27,7 @@ export interface RefreshInProxyOptions {
    * Refresh when the access token expires within this many seconds.
    * @default 60
    */
-  refreshWithinSeconds?: number;
+  ifExpiresWithin?: number;
 }
 
 /** The core instance's members, bound to the request's cookies. */
@@ -55,10 +56,12 @@ export interface FidesAuth {
   /** The session's tokens, or null without a session. The access token may have expired. */
   getTokens(): Promise<Tokens | null>;
   /**
-   * Refreshes the tokens. With cookie sessions this writes cookies, so it works
-   * only in Server Actions, Route Handlers and the proxy.
+   * Refreshes the tokens, or with `ifExpiresWithin` only when the access token
+   * is about to expire. With cookie sessions this writes cookies, so it works
+   * only in Server Actions and Route Handlers; pages get theirs from
+   * `refreshInProxy`.
    */
-  refreshSession(): Promise<FidesRefreshResult>;
+  refreshSession(options?: RefreshSessionOptions): Promise<FidesRefreshResult>;
   /** Starts a session from a token response, for a login that doesn't go through the handlers. */
   createSession(tokens: TokenResponse): Promise<Session>;
   /** Changes the user or data. Null when there is no session. */
@@ -66,17 +69,16 @@ export interface FidesAuth {
   /** Ends the session. With a store, the record is deleted too. `trigger` defaults to `'logout'`. */
   clearSession(options?: { trigger?: SessionClearedTrigger }): Promise<void>;
   /**
-   * Calls an API with the session's access token, refreshing once on a 401.
-   * With cookie sessions, pass `refresh: false` in a Server Component: it can't
-   * save the new tokens, and the refresh would spend the refresh token.
+   * Calls an API with the session's access token. It never refreshes, so it is
+   * safe in a Server Component; a 401 is an `http_error`.
    */
   authorizedFetch<T = undefined>(
     url: string | URL,
     options: FidesAuthorizedFetchOptions<T>,
-  ): Promise<{ response: Response; data: T; refreshed: boolean }>;
+  ): Promise<{ response: Response; data: T }>;
   /**
    * For `proxy.ts`. Refreshes a session whose access token expires within
-   * `refreshWithinSeconds`, before the page renders, since a Server Component
+   * `ifExpiresWithin` seconds, before the page renders, since a Server Component
    * can't save a refresh. Sets the new cookies on the response and on the
    * request it forwards, so the page reads the refreshed session.
    *
@@ -171,25 +173,19 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     readSession: cache(async () => (await tryReadSession()).session),
     tryReadSession,
     getTokens: async () => core.getTokens(await nextCookieStore()),
-    refreshSession: async () => core.refreshSession(await nextCookieStore()),
+    refreshSession: async (options) => core.refreshSession(await nextCookieStore(), options),
     createSession: async (tokens) => core.createSession(await nextCookieStore(), tokens),
     updateSession: async (update) => core.updateSession(await nextCookieStore(), update),
     clearSession: async (options) => core.clearSession(await nextCookieStore(), options),
     authorizedFetch: async (url, options) =>
       core.authorizedFetch(await nextCookieStore(), url, options),
 
-    async refreshInProxy(request, { refreshWithinSeconds = 60 } = {}) {
+    async refreshInProxy(request, { ifExpiresWithin = 60 } = {}) {
       // Without a session cookie there is nothing to refresh, and nothing to decrypt.
       if (!request.cookies.has(core.cookieNames.session)) return NextResponse.next();
 
       const { cookies, writes } = proxyCookieStore(request);
-      const tokens = await core.getTokens(cookies);
-      const expiresAt = Date.parse(tokens?.accessTokenExpiresAt ?? '');
-      // Without a refresh token, or an expiry to judge by, there is nothing to do.
-      if (!tokens?.refreshToken || Number.isNaN(expiresAt)) return NextResponse.next();
-      if (expiresAt - Date.now() > refreshWithinSeconds * 1000) return NextResponse.next();
-
-      await core.refreshSession(cookies);
+      await core.refreshSession(cookies, { ifExpiresWithin });
       return forward(request, writes);
     },
 
