@@ -214,4 +214,4 @@ export const auth = createFidesAuth({
 
 ## Upgrading from 0.x
 
-See [Migrating to 1.0](../fides-auth/docs/migrating-to-1.0.md).
+See [Upgrading to 1.0](../fides-auth/docs/migrating-to-1.0.md).

@@ -81,4 +81,4 @@ passing new ones on each render doesn't restart them.
 
 The store comes from `@eventuras/fides-auth/browser` instead of
 `@eventuras/fides-auth-store`, and has methods instead of
-`send({ type })`. See [Migrating to 1.0](../fides-auth/docs/migrating-to-1.0.md).
+`send({ type })`. See [Upgrading to 1.0](../fides-auth/docs/migrating-to-1.0.md).

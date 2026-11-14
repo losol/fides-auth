@@ -72,8 +72,7 @@ Each module is available as a separate entry point for tree-shaking:
 | `@eventuras/fides-auth/session-events`    | Universal   | The names and vocabulary of the session events          |
 | `@eventuras/fides-auth/providers/vipps`   | Universal   | Vipps Login identity provider                           |
 
-Coming from 0.x? [Migrating to 1.0](docs/migrating-to-1.0.md) lists what
-replaces each entry that went.
+Coming from 0.x? See [Upgrading to 1.0](docs/migrating-to-1.0.md).
 
 ### OIDC client (`/oidc`)
 
