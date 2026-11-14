@@ -60,7 +60,11 @@ export interface IdTokenExpectations {
   algorithms?: string[];
 }
 
-/** Options for {@link verifyIdToken}. Pass `jwksUri` or `oauthConfig`. */
+/**
+ * Options for {@link verifyIdToken}. Pass `jwksUri` or `oauthConfig`.
+ *
+ * @deprecated Use `oidc.verifyIdToken(idToken)` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`).
+ */
 export type VerifyIdTokenOptions = IdTokenExpectations &
   (
     | {
@@ -75,7 +79,11 @@ export type VerifyIdTokenOptions = IdTokenExpectations &
       }
   );
 
-/** Drops every cached JWKS. Tests should call it between cases. */
+/**
+ * Drops every cached JWKS. Tests should call it between cases.
+ *
+ * @deprecated Each OIDC client from `createOidcClient` caches its own JWKS. Create a new client to drop it.
+ */
 export function clearJwksCache(): void {
   jwksCache.clear();
 }
@@ -94,6 +102,8 @@ async function resolveJwksUri(options: VerifyIdTokenOptions): Promise<string | U
  *
  * @returns The verified claims.
  * @throws A jose error if the token is invalid, or a `TypeError` if no JWKS URI is found.
+ *
+ * @deprecated Use `oidc.verifyIdToken(idToken)` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`). It checks the issuer from the metadata and the client ID as audience.
  */
 export async function verifyIdToken(
   idToken: string,

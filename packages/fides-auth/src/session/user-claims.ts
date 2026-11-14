@@ -26,6 +26,8 @@ export interface OidcUserInfo {
  * @param tokens - Token response from the OIDC provider
  * @param rolesClaim - Name of the claim containing user roles (default: 'roles')
  * @returns Extracted user information
+ *
+ * @deprecated Use `userFromClaims(await oidc.verifyIdToken(tokens.id_token))` from `@eventuras/fides-auth/oidc`, which verifies the token first.
  */
 export function extractUserFromTokens(
   tokens: TokenEndpointResponse,

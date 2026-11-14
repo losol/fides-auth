@@ -51,6 +51,8 @@ export interface OidcLogoutOptions {
  *   idTokenHint: session?.tokens?.idToken,
  * });
  * ```
+ *
+ * @deprecated Use `oidc.logoutUrl(options)` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`).
  */
 export async function buildOidcLogoutUrl(
   oauthConfig: OAuthConfig,

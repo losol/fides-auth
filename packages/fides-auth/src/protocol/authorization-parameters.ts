@@ -6,7 +6,11 @@ import { createPkcePair, createState } from './pkce.js';
 
 const logger = createLogger({ namespace: 'fides-auth:oauth' });
 
-/** PKCE parameters generated for an authorization request. */
+/**
+ * PKCE parameters generated for an authorization request.
+ *
+ * @deprecated Use `AuthorizationRequest` from `@eventuras/fides-auth/oidc`.
+ */
 export interface PKCEOptions {
   code_verifier: string;
   code_challenge: string;
@@ -62,6 +66,8 @@ const RESERVED_AUTHORIZATION_PARAMETERS = new Set([
  *  - state: A random state to protect against CSRF.
  *  - parameters: A Record<string,string> with the assembled parameters.
  * @throws Error if an extra parameter is a reserved key (see `OAuthConfig.authorizationParameters`).
+ *
+ * @deprecated Use `createOidcClient(config).createAuthorizationRequest(options)` from `@eventuras/fides-auth/oidc`. Its result uses camelCase: `codeVerifier`, `codeChallenge`.
  */
 export async function buildPKCEOptions(
   config: OAuthConfig,

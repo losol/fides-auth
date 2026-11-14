@@ -201,6 +201,8 @@ let factoryVersion = 0;
  * If not called, fides-auth uses a console-based logger.
  *
  * @param factory - A factory that creates logger instances
+ *
+ * @deprecated Pass `logger` to `createOidcClient` (`@eventuras/fides-auth/oidc`). Until 1.0, a client without one uses this factory.
  */
 export function configureLogger(factory: FidesLoggerFactory): void {
   currentFactory = factory;

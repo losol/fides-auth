@@ -45,7 +45,11 @@ interface CacheEntry {
   inputs: readonly unknown[];
 }
 
-/** Options for {@link configureDiscoveryCache}. */
+/**
+ * Options for {@link configureDiscoveryCache}.
+ *
+ * @deprecated Pass `discoveryTtlMs` to `createOidcClient`.
+ */
 export interface DiscoveryCacheOptions {
   /**
    * How long a discovered configuration stays reusable, in milliseconds.
@@ -65,6 +69,8 @@ export interface DiscoveryCacheOptions {
  * `Number(process.env.DISCOVERY_TTL)` yields when the variable is unset — would
  * otherwise turn the cache off and restore a discovery round-trip on every
  * token operation, with nothing to show for it in the logs.
+ *
+ * @deprecated Pass `discoveryTtlMs` to `createOidcClient` (`@eventuras/fides-auth/oidc`).
  */
 export function configureDiscoveryCache(options: DiscoveryCacheOptions): void {
   if (options.ttlMs !== undefined) {
@@ -79,6 +85,8 @@ export function configureDiscoveryCache(options: DiscoveryCacheOptions): void {
  * Call this after changing provider configuration that discovery would not
  * otherwise pick up until the TTL expires. Tests should call it between cases,
  * since the cache is module state.
+ *
+ * @deprecated Each OIDC client from `createOidcClient` has its own cache. Create a new client to drop it.
  */
 export function clearDiscoveryCache(): void {
   moduleCache.clear();
@@ -89,6 +97,8 @@ export function clearDiscoveryCache(): void {
  * `Configuration` fides-auth builds gets its client authentication from here.
  *
  * @throws TypeError for an unknown `clientAuth`, rather than falling back to another method.
+ *
+ * @deprecated Internal from 1.0. `createOidcClient` sets up client authentication from the config.
  */
 export function resolveClientAuth(config: ClientAuthConfig): {
   /** Client metadata shorthand; set only for the secret methods. */
@@ -264,6 +274,8 @@ const moduleCache = createDiscoveryCache(createLogger({ namespace: 'fides-auth:o
  *
  * @param config - OAuth configuration identifying the provider and client.
  * @returns The openid-client `Configuration` for this provider and client.
+ *
+ * @deprecated Use `oidc.metadata()` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`).
  */
 export async function discoverConfiguration(
   config: OAuthConfig,

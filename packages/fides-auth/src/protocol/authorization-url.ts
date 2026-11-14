@@ -13,6 +13,8 @@ const logger = createLogger({ namespace: 'fides-auth:oauth' });
  * @param config - Discovered OpenID Configuration (use discoverConfiguration() to obtain)
  * @param pkceOptions - The PKCE options (e.g., code challenge, state, parameters)
  * @returns A Promise that resolves to the authorization URL
+ *
+ * @deprecated Use `oidc.authorizationUrl(request)` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`).
  */
 export async function buildAuthorizationUrl(
   config: openid.Configuration,
@@ -46,6 +48,8 @@ async function urlFor(
  * @param config - Discovered OpenID Configuration (use discoverConfiguration() to obtain)
  * @param pkceOptions - The PKCE options (e.g., code challenge, state, parameters)
  * @returns A Promise that resolves to the PAR-based authorization URL
+ *
+ * @deprecated Use `oidc.authorizationUrl(request)` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`), with `usePar: true` in the config.
  */
 export async function buildAuthorizationUrlWithPAR(
   config: openid.Configuration,
@@ -83,6 +87,8 @@ async function parUrlFor(
  * @param oauthConfig - Your OAuth configuration
  * @param pkceOptions - The PKCE options (e.g., code challenge, state, parameters)
  * @returns A Promise that resolves to the authorization URL
+ *
+ * @deprecated Use `oidc.authorizationUrl(request)` on a client from `createOidcClient` (`@eventuras/fides-auth/oidc`).
  */
 export async function discoverAndBuildAuthorizationUrl(
   oauthConfig: OAuthConfig,
