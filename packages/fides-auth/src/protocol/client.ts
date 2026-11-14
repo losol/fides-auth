@@ -1,4 +1,4 @@
-// The OIDC client (ADR 0001 §3). One object holds the config, its discovery
+// The OIDC client. One object holds the config, its discovery
 // cache, its JWKS cache and its loggers, so two clients share no state.
 // Creating one does no I/O: discovery runs on first use.
 
@@ -108,7 +108,7 @@ export interface OidcClient {
   verifyIdToken(idToken: string, options?: VerifyOptions): Promise<JWTPayload>;
 }
 
-/** The loggers `configureLogger` controls. The default until 1.0 removes `configureLogger`. */
+/** The default: loggers from the factory `configureLogger` set, JSON lines on the console unless changed. */
 const configuredLoggers: FidesLoggerFactory = { create: (options) => createLogger(options) };
 
 /**

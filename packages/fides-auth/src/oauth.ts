@@ -31,7 +31,7 @@ export { clientCredentialsGrant } from './protocol/client-credentials.js';
 export { buildOidcLogoutUrl } from './protocol/logout-url.js';
 export { extractUserFromTokens } from './session/user-claims.js';
 
-// Not deprecated: createFidesAuth replaces them in 1.0.
+// Not deprecated, since nothing replaces them yet.
 export {
   buildSessionFromTokens,
   type BuildSessionOptions,

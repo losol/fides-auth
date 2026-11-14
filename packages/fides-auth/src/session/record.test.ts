@@ -1,5 +1,5 @@
 /**
- * Tests for the 1.0 session record: how it is built from a token response,
+ * Tests for the session record: how it is built from a token response,
  * refreshed and updated, when it expires, and how it is sealed and opened.
  */
 import { UnsecuredJWT } from 'jose';

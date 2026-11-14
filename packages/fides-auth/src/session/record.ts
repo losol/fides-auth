@@ -1,9 +1,9 @@
-// The 1.0 session record (ADR 0001 §4, "The session model"): what is sealed,
-// how it is built, refreshed and updated, and when it has expired. Pure: no
-// network, no storage. The lifecycle in server/ decides when each runs, and a
-// storage keeps the sealed string.
-//
-// Not wired in yet: the createFidesAuth factory switches to it.
+// A session as it is sealed: `{ v: 1, session, tokens }`. The app sees
+// `session`, which carries no tokens; only the library reads `tokens`. The
+// functions here build, refresh and update a record and say when it has
+// expired. They are pure: when each one runs is up to the lifecycle
+// (server/session-lifecycle.ts), and where the sealed string is kept is up to
+// a storage (server/session-storage.ts).
 
 import { decodeJwt, type JWTPayload } from 'jose';
 
@@ -191,7 +191,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * Opens a sealed record, or returns null when it doesn't open or opens as
- * something else. A pre-1.0 session, which has no `v`, is something else.
+ * something else. A payload without `v: 1`, such as a session sealed in the
+ * older shape, is something else.
  */
 export async function openRecord(
   sealed: string,

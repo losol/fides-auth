@@ -1,14 +1,14 @@
-// The storage seam of the 1.0 session model (ADR 0001 §4, "The seam"). A
-// storage moves the sealed record and the few plain fields a store needs. It
-// never sees a session, so it can't apply a rule differently from the other
-// storage: the rules live in session-lifecycle.ts.
+// Where a sealed session is kept between requests. A storage moves the sealed
+// string and the few plain fields a store needs. It never sees a session, so
+// it can't apply a rule differently from the other storage: the rules are in
+// session-lifecycle.ts.
 //
 // Both storages use one cookie name: `__Host-session` when Secure, `session`
-// otherwise. Cookie storage cuts the sealed record into up to three chunks;
-// store storage keeps it in a SessionStore and puts a random handle there.
-// Every write deletes the 0.x cookies, so a browser never carries both sets.
-//
-// Not wired in yet: the createFidesAuth factory switches to it.
+// otherwise. Cookie storage cuts the sealed string into up to three chunks;
+// store storage keeps it in a SessionStore and puts a random handle in the
+// cookie. Every write also deletes the cookies of the older session format
+// (LEGACY_COOKIE_NAMES): a browser carrying both could send a Cookie header
+// larger than proxies accept.
 
 import {
   COOKIE_MAX_BYTES,
@@ -25,8 +25,9 @@ import type { SessionStore, StoredSession } from './session-store.js';
 export const MAX_CHUNKS = 3;
 
 /**
- * The 0.x session cookies. 1.0 doesn't read them, and deletes them on every
- * write. They were always set Secure, with `Path=/`.
+ * The cookies of the older session format, which split a session by meaning.
+ * Nothing reads them, and every write deletes them. They were always set
+ * Secure with `Path=/`, and a deletion must match both to take effect.
  */
 export const LEGACY_COOKIE_NAMES = ['session', 'session_at', 'session_it', 'session_ref'] as const;
 
@@ -119,8 +120,9 @@ async function deletePresent(
 }
 
 /**
- * Deletes the 0.x cookies the request carries. Under plain http the new cookie
- * is called `session` too, so that one is left for the new value to overwrite.
+ * Deletes the legacy cookies the request carries. Under plain http the session
+ * cookie is called `session` too, so that one is left for the new value to
+ * overwrite.
  */
 function deleteLegacy(cookies: CookieStore, secure: boolean): Promise<void> {
   const names = secure ? LEGACY_COOKIE_NAMES : LEGACY_COOKIE_NAMES.filter((n) => n !== 'session');
@@ -187,7 +189,10 @@ export function cookieStorage({ secure }: StorageOptions): SessionStorage {
   };
 }
 
-/** The fields 1.0 adds to a stored record. `StoredSession` gains them with the factory. */
+/**
+ * What this storage writes: `StoredSession`, plus the correlation id, so a
+ * record can be found from a log line, and the lookup fields.
+ */
 type StoredRecord = StoredSession & LookupFields & { correlationId: string };
 
 /** A handle is 32 random bytes in hex. Anything else is another storage's cookie. */

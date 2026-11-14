@@ -1,6 +1,6 @@
 /**
- * Tests for the two 1.0 session storages: cookie chunking and its size limit,
- * the cookie attributes, the deletion of the 0.x cookies, and store storage's
+ * Tests for the two session storages: cookie chunking and its size limit, the
+ * cookie attributes, the deletion of the legacy cookies, and store storage's
  * handle rules. The lifecycle rules they share are in session-lifecycle.test.ts.
  */
 import { describe, expect, it } from 'vitest';
@@ -34,7 +34,7 @@ function cookieJar(initial: Record<string, string> = {}) {
       else jar.set(name, value);
     },
     delete: () => {
-      throw new Error('the 1.0 storages delete with set and maxAge 0');
+      throw new Error('the storages delete with set and maxAge 0');
     },
   };
   return { cookies, jar, writes };
@@ -116,7 +116,7 @@ describe('cookieStorage', () => {
   });
 });
 
-describe('the 0.x cookies', () => {
+describe('the legacy cookies', () => {
   const legacy = Object.fromEntries(LEGACY_COOKIE_NAMES.map((name) => [name, 'old']));
 
   it.each([

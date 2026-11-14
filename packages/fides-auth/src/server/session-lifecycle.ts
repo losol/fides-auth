@@ -1,6 +1,5 @@
-// The lifecycle of the 1.0 session model (ADR 0001 §4, "The session model"):
-// create, read, refresh, update and end, written once over a SessionStorage.
-// The rules hold in both storages:
+// The session lifecycle: create, read, refresh, update and end, written once
+// over a SessionStorage. These rules hold in both storages:
 //
 // 1. A login never continues the session the browser arrived with.
 // 2. `expiresAt` is fixed at creation and checked on every read.
@@ -12,8 +11,6 @@
 // One difference can't be hidden: a store drops an expired record with its TTL,
 // after which store storage answers `session_not_found` where cookie storage
 // answers `session_expired`. Both mean the session is over.
-//
-// Not wired in yet: the createFidesAuth factory switches to it.
 
 import type { FidesLogger } from '../shared/logger.js';
 import { classifyRefreshFailure, getOAuthErrorLogContext } from '../protocol/logging.js';
@@ -43,7 +40,7 @@ import type { CookieStore } from './cookie-store.js';
 import { assertSessionSecret, type SessionSecret } from './session-persistence.js';
 import type { LookupFields, SaveResult, SessionStorage } from './session-storage.js';
 
-/** Why there is no session. 1.0 adds `session_expired` to the public reasons. */
+/** Why there is no session: a storage's reason, or `session_expired` once the lifetime has run out. */
 export type LifecycleRejectedReason = SessionRejectedReason | 'session_expired';
 
 export type ReadRecordResult =

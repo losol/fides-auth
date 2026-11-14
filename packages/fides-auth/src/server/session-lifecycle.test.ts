@@ -1,7 +1,6 @@
 /**
- * The 1.0 lifecycle rules, run against both storages (ADR 0001 §2, "One
- * session model"). A rule that holds for one storage must hold for the other;
- * the few store-only behaviours are at the end.
+ * The lifecycle rules, run against both storages. A rule that holds for one
+ * storage must hold for the other; the few store-only behaviours are at the end.
  */
 import { UnsecuredJWT } from 'jose';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -31,7 +30,7 @@ function cookieJar(): { cookies: CookieStore; jar: Map<string, string> } {
         else jar.set(name, value);
       },
       delete: () => {
-        throw new Error('the 1.0 storages delete with set and maxAge 0');
+        throw new Error('the storages delete with set and maxAge 0');
       },
     },
   };
@@ -197,7 +196,7 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
     expect(['unreadable_session', 'session_not_found']).toContain(read.reason);
   });
 
-  it('rule 4: a 0.x session is not read', async () => {
+  it('rule 4: a session in the legacy cookies is not read', async () => {
     const { lifecycle, cookies, jar } = setup();
     jar.set('session', 'eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0.old');
     expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'no_session_cookie' });
