@@ -76,20 +76,23 @@ Each module is available as a separate entry point for tree-shaking:
 | Entry Point                                | Environment | Description                                           |
 | ------------------------------------------ | ----------- | ----------------------------------------------------- |
 | `@eventuras/fides-auth`                    | Node.js     | Main entry — re-exports utils, session, types, logger |
-| `@eventuras/fides-auth/oauth`              | Node.js     | OAuth/OIDC flows with `openid-client`                 |
+| `@eventuras/fides-auth/oauth`              | Node.js     | **Deprecated** — use `/oidc`                          |
 | `@eventuras/fides-auth/oidc`               | Universal   | The OIDC client (`createOidcClient`) and pure helpers |
-| `@eventuras/fides-auth/pkce`               | Universal   | PKCE verifier/challenge and `state` (Web Crypto)      |
-| `@eventuras/fides-auth/id-token`           | Universal   | ID token verification against the provider JWKS       |
+| `@eventuras/fides-auth/pkce`               | Universal   | **Deprecated** — same functions on `/oidc`            |
+| `@eventuras/fides-auth/id-token`           | Universal   | **Deprecated** — use `oidc.verifyIdToken`             |
 | `@eventuras/fides-auth/oauth-browser`      | Browser     | **Deprecated** — OAuth/OIDC flows with Web Crypto API |
 | `@eventuras/fides-auth/session-validation` | Node.js     | Encrypted JWT session validation                      |
 | `@eventuras/fides-auth/session-refresh`    | Node.js     | Automatic token refresh for sessions                  |
-| `@eventuras/fides-auth/silent-login`       | Node.js     | Silent login (`prompt=none`) utilities                |
-| `@eventuras/fides-auth/utils`              | Universal   | Crypto helpers, hashing, token generation             |
-| `@eventuras/fides-auth/rate-limit`         | Universal   | Token-bucket rate limiter                             |
-| `@eventuras/fides-auth/logger`             | Universal   | Pluggable logger interface and configuration          |
-| `@eventuras/fides-auth/types`              | Universal   | TypeScript types (Session, Tokens, etc.)              |
+| `@eventuras/fides-auth/silent-login`       | Node.js     | **Deprecated** — use `oidc.silentLoginUrl`            |
+| `@eventuras/fides-auth/utils`              | Universal   | **Deprecated** — no replacement                       |
+| `@eventuras/fides-auth/rate-limit`         | Universal   | **Deprecated** — pass `rateLimit` to the handlers     |
+| `@eventuras/fides-auth/logger`             | Universal   | **Deprecated** — types on the root entry              |
+| `@eventuras/fides-auth/types`              | Universal   | **Deprecated** — types on the root entry              |
 | `@eventuras/fides-auth/server`             | Node.js     | Request handlers (login, callback, logout, heartbeat) |
 | `@eventuras/fides-auth/providers/vipps`    | Node.js     | Vipps Login identity provider                         |
+
+Deprecated entries keep working until 1.0. [Migrating to 1.0](docs/migrating-to-1.0.md)
+lists what replaces each one.
 
 ### OIDC client (`/oidc`)
 

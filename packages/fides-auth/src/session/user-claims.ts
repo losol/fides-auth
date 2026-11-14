@@ -1,8 +1,7 @@
 import { decodeJwt, type JWTPayload } from 'jose';
-// biome-ignore lint/style/noRestrictedImports: type-only, until #142 adds a shared TokenResponse.
-import type { TokenEndpointResponse } from 'openid-client';
 
 import { createLogger } from '../shared/logger.js';
+import type { TokenResponse } from '../shared/types.js';
 
 const logger = createLogger({ namespace: 'fides-auth:oauth' });
 
@@ -30,7 +29,7 @@ export interface OidcUserInfo {
  * @deprecated Use `userFromClaims(await oidc.verifyIdToken(tokens.id_token))` from `@eventuras/fides-auth/oidc`, which verifies the token first.
  */
 export function extractUserFromTokens(
-  tokens: TokenEndpointResponse,
+  tokens: TokenResponse,
   rolesClaim: string = 'roles',
 ): OidcUserInfo {
   if (!tokens.id_token) {

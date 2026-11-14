@@ -42,3 +42,36 @@ export interface CreateSessionOptions {
   /** Session duration in days (default depends on implementation). */
   sessionDurationDays?: number;
 }
+
+type JsonPrimitive = string | number | boolean | null;
+type JsonObject = { [key: string]: JsonValue | undefined };
+type JsonArray = JsonValue[];
+type JsonValue = JsonPrimitive | JsonObject | JsonArray;
+
+/** Rich authorization request details (RFC 9396), as a token response may return them. */
+interface AuthorizationDetails {
+  readonly type: string;
+  readonly locations?: string[];
+  readonly actions?: string[];
+  readonly datatypes?: string[];
+  readonly privileges?: string[];
+  readonly identifier?: string;
+  readonly [parameter: string]: JsonValue | undefined;
+}
+
+/**
+ * A token endpoint response. It has the same shape as openid-client's
+ * `TokenEndpointResponse`, so either can be passed where the other is
+ * expected, and layers that don't load openid-client can still name it.
+ */
+export interface TokenResponse {
+  readonly access_token: string;
+  readonly expires_in?: number;
+  readonly id_token?: string;
+  readonly refresh_token?: string;
+  readonly scope?: string;
+  readonly authorization_details?: AuthorizationDetails[];
+  /** Lowercase, since the value is case-insensitive. */
+  readonly token_type: Lowercase<string>;
+  readonly [parameter: string]: JsonValue | undefined;
+}

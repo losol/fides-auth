@@ -1,17 +1,15 @@
 import { decodeJwt, type JWTPayload } from 'jose';
-// biome-ignore lint/style/noRestrictedImports: type-only, until #142 adds a shared TokenResponse.
-import type { TokenEndpointResponse } from 'openid-client';
 
 import { userFromClaims } from './user-claims.js';
 import { newSessionId } from '../shared/session-events.js';
-import type { Session } from '../shared/types.js';
+import type { Session, TokenResponse } from '../shared/types.js';
 
 /**
  * Changes the session built from a token response, e.g. to add `data` or custom user
  * fields. `claims` are decoded from the ID token, not verified, and undefined without one.
  */
 export type MapSession = (
-  tokens: TokenEndpointResponse,
+  tokens: TokenResponse,
   claims: JWTPayload | undefined,
   session: Session,
 ) => Session;
@@ -41,7 +39,7 @@ export interface BuildSessionOptions {
  * @returns A Session object ready to be encrypted and stored
  */
 export function buildSessionFromTokens(
-  tokens: TokenEndpointResponse,
+  tokens: TokenResponse,
   options?: BuildSessionOptions,
 ): Session;
 /**
@@ -49,11 +47,11 @@ export function buildSessionFromTokens(
  * @param rolesClaim - Name of the claim containing user roles (default: 'roles')
  */
 export function buildSessionFromTokens(
-  tokens: TokenEndpointResponse,
+  tokens: TokenResponse,
   rolesClaim?: string,
 ): Session;
 export function buildSessionFromTokens(
-  tokens: TokenEndpointResponse,
+  tokens: TokenResponse,
   options: BuildSessionOptions | string = {},
 ): Session {
   const { rolesClaim = 'roles', mapSession } =
