@@ -192,18 +192,17 @@ if (!session) {
 `logSessionEvent` picks the level from the policy above, so every caller stays
 consistent without repeating it.
 
-Next.js apps get the same thing from `createFidesAuth` without wiring a cookie
-store, and the read is cached per render alongside `getCurrentSession`, so
-asking for the reason costs no extra decrypt:
+Next.js apps get the same from `createFidesAuth` in `@eventuras/fides-auth-next`,
+without a cookie store. Its `tryReadSession` is cached per render together with
+`readSession`, so asking for the reason costs no extra decrypt:
 
 ```ts
 import { createFidesAuth } from "@eventuras/fides-auth-next";
 
-const auth = createFidesAuth({ secret: process.env.SESSION_SECRET!, oauthConfig });
+const auth = createFidesAuth({ oauthConfig, secret: process.env.SESSION_SECRET! });
 
-const { session, reason } = await auth.tryGetCurrentSession();
+const { session, reason } = await auth.tryReadSession();
 ```
 
-`auth.tryRefreshCurrentSession` is the matching refresh, returning `cause` so a
-route can answer 503 rather than ending a session over a provider blip. If you
-need the framework-agnostic helpers directly, `nextCookieStore` is exported too.
+`auth.refreshSession` is the matching refresh. It returns `cause`, so a route can
+answer 503 rather than end a session over a provider blip.

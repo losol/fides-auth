@@ -154,13 +154,17 @@ describe('createFidesAuth', () => {
     ).toThrow(TypeError);
   });
 
-  it('needs a redirect URI', () => {
-    expect(() =>
-      createFidesAuth({
-        oauthConfig: { issuer: 'https://idp.test', clientId: 'web', clientSecret: 'shh', scope: 'openid' },
-        secret,
-      }),
-    ).toThrow(/redirectUri/);
+  it('reads the redirect URI on first use, so a build can create it without the environment', async () => {
+    const auth = createFidesAuth({
+      oauthConfig: { issuer: 'https://idp.test', clientId: 'web', clientSecret: 'shh', scope: 'openid' },
+      secret,
+    });
+    const { cookies } = cookieJar();
+    await expect(auth.readSession(cookies)).rejects.toThrow(/redirectUri/);
+    await expect(auth.handleOidcCallback(get('/api/auth/callback?state=x'), cookies)).rejects.toThrow(
+      /redirectUri/,
+    );
+    expect(() => auth.cookieNames).toThrow(/redirectUri/);
   });
 
   it('names the session cookie by whether the app is served over https', () => {
@@ -457,7 +461,7 @@ describe('session members', () => {
   });
 
   it('creates, updates, refreshes and clears a session without the handlers', async () => {
-    const { auth, cookies, jar } = setup();
+    const { auth, cookies, jar, events } = setup();
     const created = await auth.createSession(cookies, tokens(1));
     expect(created.user?.name).toBe('Ada');
 
@@ -470,6 +474,7 @@ describe('session members', () => {
 
     await auth.clearSession(cookies);
     expect(jar.size).toBe(0);
+    expect(events.at(-1)).toMatchObject({ event: 'session.cleared', trigger: 'logout' });
     expect(await auth.updateSession(cookies, (session) => session)).toBeNull();
     expect(await auth.refreshSession(cookies)).toEqual({ ok: false, reason: 'no_session_cookie' });
   });
@@ -517,6 +522,20 @@ describe('authorizedFetch', () => {
       expect(seen).toEqual(['Bearer access-1', 'Bearer access-2']);
       // The refreshed tokens were saved for the next request.
       expect((await auth.getTokens(cookies))?.accessToken).toBe('access-2');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('skips the refresh with refresh: false', async () => {
+    const { auth, cookies } = setup();
+    await login(auth, cookies);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 401 })));
+    try {
+      await expect(
+        auth.authorizedFetch(cookies, `${api}items`, { allowedBase: api, refresh: false }),
+      ).rejects.toMatchObject({ reason: 'http_error', status: 401 });
+      expect(oidc.refresh).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }

@@ -1,116 +1,173 @@
 # @eventuras/fides-auth-next
 
-Next.js authentication with XState Store state management.
+Next.js bindings for `@eventuras/fides-auth`. `createFidesAuth` here is the core
+instance bound to `cookies()` from `next/headers`. It caches session reads per
+render with React's `cache()`, and adds a refresh for `proxy.ts`.
 
 ## Installation
 
 ```bash
-pnpm add @eventuras/fides-auth-next @xstate/store
+pnpm add @eventuras/fides-auth-next
 ```
 
-## Quick Start
+## Setup
 
-```typescript
-// 1. Create store
-import {
-  createAuthStore,
-  createAuthStoreHooks,
-} from "@eventuras/fides-auth-next/store";
-
-export const authStore = createAuthStore({
-  checkAuthStatus: getAuthStatus,
-  config: { adminRole: "Admin" },
-});
-
-export const { useAuthStore, useAuthActions } = createAuthStoreHooks(authStore);
-
-// 2. Initialize in app
-useEffect(() => {
-  initializeAuth(authStore, getAuthStatus);
-  return startSessionMonitor(authStore, getAuthStatus, { interval: 30_000 });
-}, []);
-
-// 3. Use in components
-const { isAuthenticated, user, isAdmin } = useAuthStore();
-const { logout } = useAuthActions();
-```
-
-## Features
-
-- **XState Store**: Simple auth state management with automatic session monitoring
-- **Cookie Helpers**: Server-side cookie operations
-- **Session Management**: High-level session functions
-- **OAuth**: Complete OAuth flow with PKCE and RP-initiated logout
-- **TypeScript**: Full type safety
-
-## Server Setup
-
-Create one instance and import it where you need it. The library never reads
-the environment, so pass the secret in:
+Create one instance in a module of its own and import it where you need it:
 
 ```typescript
 // lib/auth.ts
 import { createFidesAuth } from "@eventuras/fides-auth-next";
 
 export const auth = createFidesAuth({
+  oauthConfig: {
+    issuer: process.env.OIDC_ISSUER!,
+    clientId: process.env.OIDC_CLIENT_ID!,
+    clientSecret: process.env.OIDC_CLIENT_SECRET!,
+    redirectUri: "https://app.example.com/api/auth/callback",
+    scope: "openid profile email offline_access",
+  },
   secret: process.env.SESSION_SECRET!, // openssl rand -hex 32
-  oauthConfig,
 });
 ```
 
-Route handlers:
+The library never reads the environment, so pass the values in. It checks the
+secret and the redirect URI on first use, so `next build` can import the module
+without them. A client with `clientAuth: 'none'` throws at once: the server side
+of an app is a confidential client.
+
+| Option | Default | |
+|---|---|---|
+| `sessionStore` | none | Keeps sessions in a store, with only a handle in the cookie. See below. |
+| `sessionDurationDays` | 30 | How long a session lasts from login. Refreshes don't extend it. |
+| `applicationUrl` | the redirect URI's origin | The app's public origin, for the same-origin check and redirects. |
+| `mapSession` | none | Changes the session built at login, e.g. to add `data`. |
+| `rolesClaim` | `'roles'` | The ID token claim that holds the user's roles. |
+| `validateReturnTo` | a path on this origin | Turns `?returnTo=` into a safe path, or null. |
+| `defaultRedirectPath` | `'/'` | Where a login without a return path lands. |
+| `postLogoutRedirectUri` | `applicationUrl` | Where the provider sends the user after logout. |
+| `rateLimit` | none | `(request) => boolean`. The handlers answer 429 when it returns false. |
+| `logger` | JSON lines on the console | A `FidesLoggerFactory`. |
+| `onSessionEvent` | none | Gets every session event. See [session events](../fides-auth/docs/session-events.md). |
+
+## Route handlers
 
 ```typescript
 // app/api/auth/login/route.ts
 export const GET = (request: Request) => auth.handleOidcLogin(request);
 
-// app/api/auth/callback/oidc/route.ts
-export const GET = (request: Request) =>
-  auth.handleOidcCallback(request, { applicationUrl: "https://app.example.com" });
+// app/api/auth/callback/route.ts
+export const GET = (request: Request) => auth.handleOidcCallback(request);
 
 // app/api/auth/logout/route.ts
-export const POST = (request: Request) =>
-  auth.handleOidcLogout(request, { postLogoutRedirectUri: "https://app.example.com/" });
+export const POST = (request: Request) => auth.handleOidcLogout(request);
 
-// app/api/auth/heartbeat/route.ts
-export const POST = (request: Request) => auth.handleHeartbeat(request);
+// app/api/auth/session/route.ts
+export const GET = (request: Request) => auth.handleSessionInfo(request);
 ```
 
-Server components, server actions and route handlers:
+The callback's path must be the redirect URI's. Login takes `?returnTo=/path`
+and lands there with `?login=success`.
+
+Logout answers only a `POST` from the app's own pages, so a form does it:
+
+```tsx
+<form method="post" action="/api/auth/logout">
+  <button>Log out</button>
+</form>
+```
+
+`handleSessionInfo` answers whether there is a session, and whose. It never
+refreshes and never returns tokens. `handleHeartbeat` is there for apps that tie
+refreshes to user activity; it too answers only a same-origin `POST`.
+
+## Reading the session
+
+In Server Components, Server Actions and Route Handlers:
 
 ```typescript
-const session = await auth.getCurrentSession();
-const { reason } = await auth.tryGetCurrentSession();
-const refreshed = await auth.tryRefreshCurrentSession();
-await auth.clearCurrentSession();
+const session = await auth.readSession(); // Session | null
+const { session, reason } = await auth.tryReadSession();
+const tokens = await auth.getTokens(); // Tokens | null
 ```
 
-API calls with the access token. On a 401, `authorizedFetch` refreshes the
-session and retries once; parallel calls in one request share the refresh. The
-refresh writes cookies, so it works only in Server Actions and Route Handlers.
-In a Server Component pass `refresh: false`, and a 401 is an `http_error`:
+`readSession` and `tryReadSession` share one read per render. A `Session` has
+`user`, `scopes`, `data`, `idp`, `correlationId`, `createdAt` and `expiresAt`.
+The tokens aren't on it: `getTokens` returns them, and `authorizedFetch` uses
+them.
+
+`createSession`, `updateSession`, `refreshSession` and `clearSession` write
+cookies, so they work in Server Actions and Route Handlers.
+
+## Keeping the session fresh
+
+A Server Component can't set cookies, so it can't save a refreshed session.
+Refresh in the proxy instead, before the page renders:
+
+```typescript
+// proxy.ts
+import type { NextRequest } from "next/server";
+import { auth } from "@/lib/auth";
+
+export function proxy(request: NextRequest) {
+  return auth.refreshInProxy(request);
+}
+
+export const config = {
+  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico).*)"],
+};
+```
+
+`refreshInProxy` refreshes a session whose access token expires within 60
+seconds; `refreshWithinSeconds` changes that. It sets the new cookies on the
+response and on the request it forwards, so the page renders with the
+refreshed session. A request without a session cookie passes straight through,
+and a failed refresh leaves the session as it is.
+
+To send users without a session to the login, check the cookie first:
+
+```typescript
+import { NextResponse, type NextRequest } from "next/server";
+
+export function proxy(request: NextRequest) {
+  if (!request.cookies.has(auth.cookieNames.session)) {
+    return NextResponse.redirect(new URL("/api/auth/login", request.url));
+  }
+  return auth.refreshInProxy(request);
+}
+```
+
+## Calling APIs
+
+`authorizedFetch` sends the access token to URLs under `allowedBase`, and on a
+401 refreshes the session and retries once:
 
 ```typescript
 const api = { allowedBase: "https://api.example.com/v1/" };
 
 // Server Action or Route Handler
-const { data } = await auth.authorizedFetch(session, "users/me", {
+const { data } = await auth.authorizedFetch("users/me", {
   ...api,
   parse: (response) => response.json(),
 });
 
 // Server Component
-const { data } = await auth.authorizedFetch(session, "users/me", { ...api, refresh: false });
+const { data } = await auth.authorizedFetch("users/me", {
+  ...api,
+  refresh: false,
+  parse: (response) => response.json(),
+});
 ```
 
-The handlers are also exported on their own (`@eventuras/fides-auth-next/oidc-login`
-and so on). Those take `oauthConfig` and `secret` in their config.
+In a Server Component, pass `refresh: false` with cookie sessions: the refresh
+would spend the refresh token and couldn't save the new one. A 401 then throws
+an `AuthorizedFetchError` with the reason `http_error`. With a `sessionStore`, a
+refresh doesn't write cookies, so it works there too.
 
 ## Server sessions
 
-By default the session lives in encrypted cookies. Pass a `sessionStore` to keep
-it on the server instead. The browser then holds only a random handle, in the
-`session_ref` cookie:
+By default the session lives in the `__Host-session` cookie, in up to three
+chunks. Pass a `sessionStore` to keep it on the server. The browser then holds
+only a random handle, and logout deletes the record:
 
 ```typescript
 // lib/auth.ts
@@ -122,57 +179,28 @@ const sessionStore: SessionStore = {
   delete: (key) => db.sessions.remove(key),
 };
 
-export const auth = createFidesAuth({
-  secret: process.env.SESSION_SECRET!,
-  oauthConfig,
-  sessionStore,
-});
+export const auth = createFidesAuth({ oauthConfig, secret, sessionStore });
 ```
-
-Every handler and helper on `auth` then uses the store, and logout deletes the
-record. `secret` is still required: it encrypts the records and seals the login
-transaction.
 
 Use a store that every instance shares, such as a database, and add `withLock`
 when you run more than one instance. `createMemorySessionStore()` from
 `@eventuras/fides-auth/server` is for tests. See
 [Server-side sessions](../fides-auth/docs/server-sessions.md) for the store
-contract and an adapter example.
+contract.
 
 ## Rate limiting
 
-The route handlers use a default limiter. It is deprecated, together with
-`globalGETRateLimit`, `globalPOSTRateLimit` and `TokenBucket`: it keys on the raw
-`X-Forwarded-For` header, which a client can send itself, and lets requests
-without the header through.
-
-For a limiter of your own, add `@eventuras/fides-auth` and call its handler from
-`/server` with the Next cookie store and a `rateLimit` callback. Key it on
-something the app trusts, such as the client address your own proxy sets. The
-handler answers 429 when the callback returns `false`:
+There is no default limiter. Pass `rateLimit`, keyed on something the app
+trusts, such as the client address your own proxy sets:
 
 ```typescript
-// app/api/auth/login/route.ts
-import { handleOidcLogin } from "@eventuras/fides-auth/server";
-import { nextCookieStore } from "@eventuras/fides-auth-next";
-
-export async function GET(request: Request) {
-  return handleOidcLogin(request, {
-    oauthConfig,
-    secret: process.env.SESSION_SECRET!,
-    cookies: await nextCookieStore(),
-    rateLimit: () => limiter.consume(clientKey(request)),
-  });
-}
+export const auth = createFidesAuth({
+  oauthConfig,
+  secret,
+  rateLimit: (request) => limiter.consume(clientKey(request)),
+});
 ```
 
-`handleOidcCallback`, `handleOidcLogout` and `handleHeartbeat` take the same option.
-With a `sessionStore`, also pass those three
-`persistence: serverPersistence({ store: sessionStore, secret })`, or they keep
-the session in cookies. Build it once. It does not share refreshes with `auth`,
-so give the store `withLock`.
+## Upgrading from 0.x
 
-## Documentation
-
-- [Store API](./src/store/) - XState Store details
-- [Setup Guide](./SETUP_GUIDE.md) - Complete walkthrough
+See [Migrating to 1.0](../fides-auth/docs/migrating-to-1.0.md).

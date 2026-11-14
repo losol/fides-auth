@@ -2,11 +2,9 @@ import type { CookieStore } from '@eventuras/fides-auth/server';
 import { cookies } from 'next/headers';
 
 /**
- * Builds a {@link CookieStore} backed by Next.js's request cookie store, for the
- * framework-agnostic server helpers in `@eventuras/fides-auth/server`.
- *
- * Must be called where `next/headers` `cookies()` is available: Server Actions,
- * Route Handlers, or Server Components.
+ * A {@link CookieStore} over Next's `cookies()`, for the core instance from
+ * `@eventuras/fides-auth/server`. It works wherever `cookies()` does. A Server
+ * Component can read cookies but not set them, and Next throws on a write there.
  */
 export async function nextCookieStore(): Promise<CookieStore> {
   const store = await cookies();

@@ -3,36 +3,6 @@ import { defineNextLibConfig } from '@eventuras/vite-config/next-lib';
 export default defineNextLibConfig({
   entry: {
     index: 'src/index.ts',
-    auth: 'src/auth.ts',
-    'cookie-store': 'src/cookie-store.ts',
-    request: 'src/request.ts',
-    'store/index': 'src/store/index.ts',
-    'heartbeat-handler': 'src/heartbeat-handler.ts',
-    'oidc-callback': 'src/oidc-callback.ts',
-    'oidc-login': 'src/oidc-login.ts',
-    'oidc-logout': 'src/oidc-logout.ts',
   },
-  external: [
-    // State management
-    'xstate',
-    '@xstate/react',
-    '@xstate/store',
-    '@xstate/store-react',
-    /^@xstate\//,
-
-    // React
-    'react',
-    'react-dom',
-    /^react\//,
-
-    // React internals
-    'use-sync-external-store',
-    /^use-sync-external-store\//,
-
-    // Workspace dependencies
-    '@eventuras/fides-auth',
-    '@eventuras/fides-auth-react',
-    '@eventuras/fides-auth-store',
-    '@eventuras/logger',
-  ],
+  external: ['react', /^react\//, '@eventuras/fides-auth', /^@eventuras\/fides-auth\//],
 });

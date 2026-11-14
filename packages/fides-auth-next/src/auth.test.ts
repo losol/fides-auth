@@ -1,390 +1,396 @@
-// @vitest-environment node
 /**
- * Tests for createFidesAuth. Split-cookie storage: the access token lives in its
- * own "session_at" cookie while the rest of the session lives in "session".
- * getCurrentSession must reassemble the two — expired access token included —
- * and still read legacy single-cookie sessions with a live access token.
+ * The Next binding over the real core instance. next/headers and React's cache()
+ * are small fakes, and fetch answers for the provider's token endpoint and one
+ * API, so the protocol and session code run as they do in an app.
  */
-import { vi, describe, it, expect, beforeEach, afterEach, onTestFinished } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// In-memory cookie jar backing the mocked next/headers cookie store (hoisted so
-// the vi.mock factory can close over it). This exercises the real adapter path:
-// auth.ts -> nextCookieStore -> @eventuras/fides-auth/server. Like Next, cookies()
-// returns one object per request; each test is a new request.
-const { jar, currentRequest } = vi.hoisted(() => {
-  const jar = new Map<string, string>();
-  const newRequestCookies = () => ({
-    get: (name: string) => (jar.has(name) ? { value: jar.get(name) } : undefined),
-    set: (name: string, value: string) => { jar.set(name, value); },
-    delete: (name: string) => { jar.delete(name); },
-  });
-  return { jar, currentRequest: { cookies: newRequestCookies(), newRequestCookies } };
-});
-
-vi.mock('next/headers', () => ({
-  cookies: vi.fn(async () => currentRequest.cookies),
-  headers: vi.fn(async () => new Headers()),
+const { jar, render } = vi.hoisted(() => ({
+  jar: new Map<string, string>(),
+  render: { id: 0, cookieCalls: 0 },
 }));
 
-// Only the route handlers are stubbed; the session helpers stay real, the
-// refresh behind a spy.
-vi.mock('@eventuras/fides-auth/server', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@eventuras/fides-auth/server')>();
-  return {
-    ...original,
-    tryRefreshSessionInStore: vi.fn(original.tryRefreshSessionInStore),
-    serverPersistence: vi.fn(original.serverPersistence),
-    handleOidcLogin: vi.fn(async () => new Response(null, { status: 302 })),
-    handleOidcCallback: vi.fn(async () => new Response(null, { status: 302 })),
-    handleOidcLogout: vi.fn(async () => new Response(null, { status: 302 })),
-    handleHeartbeat: vi.fn(async () => new Response(null, { status: 200 })),
-  };
-});
+vi.mock('next/headers', () => ({
+  cookies: vi.fn(async () => {
+    render.cookieCalls += 1;
+    return {
+      get: (name: string) => (jar.has(name) ? { name, value: jar.get(name) } : undefined),
+      set: (name: string, value: string, options?: { maxAge?: number }) => {
+        if (options?.maxAge === 0) jar.delete(name);
+        else jar.set(name, value);
+      },
+      delete: (name: string) => {
+        jar.delete(name);
+      },
+    };
+  }),
+}));
 
-// getCurrentSession is wrapped in React's cache(); make it a pass-through.
-vi.mock('react', () => ({ cache: (fn: unknown) => fn }));
+// React's cache() memoizes for one server render; here a render lasts until newRender().
+vi.mock('react', () => ({
+  cache: <A extends unknown[], R>(fn: (...args: A) => R) => {
+    let seen = -1;
+    let value: R;
+    return (...args: A): R => {
+      if (seen !== render.id) {
+        seen = render.id;
+        value = fn(...args);
+      }
+      return value;
+    };
+  },
+}));
 
-import { createFidesAuth } from './auth.js';
-import * as core from '@eventuras/fides-auth/server';
-import { createEncryptedJWT } from '@eventuras/fides-auth/utils';
-import type { MapSession } from '@eventuras/fides-auth/oauth';
-import type { LegacySession as Session } from '@eventuras/fides-auth';
+import { createMemorySessionStore, type FidesAuthConfig, type SessionEvent } from '@eventuras/fides-auth/server';
+import { NextRequest } from 'next/server';
 
+import { createFidesAuth, type FidesAuth } from './index.js';
+
+const APP = 'https://app.test';
+const ISSUER = 'https://idp.test';
+const API = 'https://api.test/';
 const secret = 'a'.repeat(64);
-const oauthConfig = {
-  issuer: 'https://id.example.test',
-  clientId: 'web',
-  clientSecret: 'shh',
-  redirect_uri: 'https://app.test/api/auth/callback/oidc',
-  scope: 'openid',
-};
-const auth = createFidesAuth({ secret, oauthConfig });
-const { createAndPersistSession, getCurrentSession, tryGetCurrentSession, clearCurrentSession } =
-  auth;
+const quiet = { debug() {}, info() {}, warn() {}, error() {} };
 
-/** Builds an unsigned JWT carrying only an `exp` claim (decoded, never verified). */
-function jwtWithExp(secondsFromNow: number): string {
-  const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
-  const exp = Math.floor(Date.now() / 1000) + secondsFromNow;
-  return `${enc({ alg: 'none', typ: 'JWT' })}.${enc({ exp })}.sig`;
+const b64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+
+/** An ID token as the token endpoint returns it. Its signature isn't checked there. */
+function idToken(): string {
+  const now = Math.floor(Date.now() / 1000);
+  const claims = { iss: ISSUER, aud: 'web', sub: 'user-1', sid: 'idp-1', name: 'Ada', iat: now, exp: now + 300 };
+  return `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64(claims)}.c2lnbmF0dXJl`;
 }
 
-const baseSession = (accessToken?: string): Session => ({
-  tokens: {
-    accessToken,
-    refreshToken: 'refresh-token',
-    accessTokenExpiresAt: '2099-01-01T00:00:00.000Z',
-  },
-  user: { name: 'Ada', email: 'ada@example.test', roles: ['admin'] },
-  scopes: ['openid', 'profile'],
-});
+interface Provider {
+  /** The token endpoint's requests, as form bodies. */
+  tokenRequests: URLSearchParams[];
+  /** The ID tokens it issued. */
+  idTokens: string[];
+  /** The Authorization headers the API got. */
+  apiCalls: Array<string | null>;
+  /** Makes the next refresh fail with invalid_grant. */
+  rejectNextRefresh(): void;
+  /** Lifetime of the access tokens it issues, in seconds. */
+  expiresIn: number;
+}
+
+/** Stubs fetch with the provider's token endpoint, and an API that rejects `access-1`. */
+function stubProvider(): Provider {
+  let issued = 0;
+  let reject = false;
+  const provider: Provider = {
+    tokenRequests: [],
+    idTokens: [],
+    apiCalls: [],
+    rejectNextRefresh: () => {
+      reject = true;
+    },
+    expiresIn: 300,
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.href === `${ISSUER}/token`) {
+        const body = new URLSearchParams(String(init?.body ?? ''));
+        provider.tokenRequests.push(body);
+        if (reject && body.get('grant_type') === 'refresh_token') {
+          reject = false;
+          return Response.json({ error: 'invalid_grant' }, { status: 400 });
+        }
+        issued += 1;
+        const id = body.get('grant_type') === 'authorization_code' ? idToken() : undefined;
+        if (id) provider.idTokens.push(id);
+        return Response.json({
+          access_token: `access-${issued}`,
+          token_type: 'Bearer',
+          expires_in: provider.expiresIn,
+          refresh_token: `refresh-${issued}`,
+          ...(id ? { id_token: id } : {}),
+        });
+      }
+      if (url.href.startsWith(API)) {
+        const authorization = new Headers(init?.headers).get('authorization');
+        provider.apiCalls.push(authorization);
+        return authorization === 'Bearer access-1'
+          ? new Response(null, { status: 401 })
+          : Response.json({ ok: true });
+      }
+      throw new Error(`Unexpected request to ${url}`);
+    }),
+  );
+  return provider;
+}
+
+function setup(overrides: Partial<FidesAuthConfig> = {}) {
+  const events: SessionEvent[] = [];
+  const auth = createFidesAuth({
+    oauthConfig: {
+      issuer: ISSUER,
+      clientId: 'web',
+      clientSecret: 'shh',
+      redirectUri: `${APP}/api/auth/callback`,
+      scope: 'openid profile offline_access',
+      serverMetadata: {
+        issuer: ISSUER,
+        authorization_endpoint: `${ISSUER}/authorize`,
+        token_endpoint: `${ISSUER}/token`,
+        end_session_endpoint: `${ISSUER}/logout`,
+      },
+    },
+    secret,
+    logger: { create: () => quiet },
+    onSessionEvent: (event) => events.push(event),
+    ...overrides,
+  });
+  return { auth, events };
+}
+
+/** A new server render: React's cache starts empty. */
+function newRender(): void {
+  render.id += 1;
+  render.cookieCalls = 0;
+}
+
+const post = (path: string) =>
+  new Request(`${APP}${path}`, { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' } });
+
+async function login(auth: FidesAuth): Promise<Response> {
+  const started = await auth.handleOidcLogin(new Request(`${APP}/api/auth/login?returnTo=%2Faccount`));
+  const state = new URL(started.headers.get('location') ?? '').searchParams.get('state');
+  newRender();
+  return auth.handleOidcCallback(new Request(`${APP}/api/auth/callback?code=abc&state=${state}`));
+}
+
+/** The browser's Cookie header for the jar. */
+const cookieHeader = () => [...jar].map(([name, value]) => `${name}=${value}`).join('; ');
+
+/** A request through the proxy, carrying the browser's cookies. */
+const proxied = (path = '/account') => new NextRequest(`${APP}${path}`, { headers: { cookie: cookieHeader() } });
+
+let provider: Provider;
 
 beforeEach(() => {
   jar.clear();
-  currentRequest.cookies = currentRequest.newRequestCookies();
-  vi.clearAllMocks();
+  newRender();
+  provider = stubProvider();
 });
 
 afterEach(() => {
-  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
-describe('split-cookie session storage', () => {
-  it('writes the access token to session_at and everything else to session', async () => {
-    const accessToken = jwtWithExp(3600);
-    await createAndPersistSession(baseSession(accessToken));
+describe('createFidesAuth for Next', () => {
+  it('runs login, the callback, session info and logout on the request cookies', async () => {
+    const { auth, events } = setup();
 
-    expect(jar.has('session')).toBe(true);
-    expect(jar.has('session_at')).toBe(true);
-    // The raw access token must not appear in the main cookie.
-    expect(jar.get('session')).not.toContain(accessToken.split('.')[1]);
+    const done = await login(auth);
+    expect(done.status).toBe(302);
+    expect(done.headers.get('location')).toBe(`${APP}/account?login=success`);
+    expect([...jar.keys()]).toEqual(['__Host-session']);
+    const [exchange] = provider.tokenRequests;
+    expect(exchange?.get('grant_type')).toBe('authorization_code');
+    expect(exchange?.get('code')).toBe('abc');
+    expect(exchange?.get('redirect_uri')).toBe(`${APP}/api/auth/callback`);
+
+    newRender();
+    const session = await auth.readSession();
+    expect(session?.user).toMatchObject({ sub: 'user-1', name: 'Ada' });
+    expect(session?.idp).toEqual({ iss: ISSUER, sub: 'user-1', sid: 'idp-1' });
+
+    const info = await auth.handleSessionInfo(new Request(`${APP}/api/auth/session`));
+    expect(await info.json()).toMatchObject({ authenticated: true, user: { name: 'Ada' } });
+
+    newRender();
+    const out = await auth.handleOidcLogout(post('/api/auth/logout'));
+    const logoutUrl = new URL(out.headers.get('location') ?? '');
+    expect(logoutUrl.origin + logoutUrl.pathname).toBe(`${ISSUER}/logout`);
+    expect(logoutUrl.searchParams.get('post_logout_redirect_uri')).toBe(APP);
+    expect(logoutUrl.searchParams.get('id_token_hint')).toBe(provider.idTokens[0]);
+    expect(jar.size).toBe(0);
+
+    expect(events.map((event) => event.event)).toEqual(['session.created', 'session.cleared']);
   });
 
-  it('round-trips: getCurrentSession reassembles the access token', async () => {
-    const accessToken = jwtWithExp(3600);
-    await createAndPersistSession(baseSession(accessToken));
+  it('reads the session once per render', async () => {
+    const { auth } = setup();
+    await login(auth);
 
-    const session = await getCurrentSession();
-    expect(session?.tokens?.accessToken).toBe(accessToken);
-    expect(session?.tokens?.refreshToken).toBe('refresh-token');
-    expect(session?.user?.email).toBe('ada@example.test');
-    expect(session?.scopes).toEqual(['openid', 'profile']);
+    newRender();
+    await auth.readSession();
+    await auth.tryReadSession();
+    await auth.readSession();
+    expect(render.cookieCalls).toBe(1);
+
+    newRender();
+    await auth.readSession();
+    expect(render.cookieCalls).toBe(1);
   });
 
-  it('keeps the session when the split access token has expired', async () => {
-    // The refresh path recovers this session; expiry must not read as "logged out".
-    const expired = jwtWithExp(-60);
-    await createAndPersistSession(baseSession(expired));
+  it('refreshes through the heartbeat', async () => {
+    const { auth } = setup();
+    await login(auth);
+    const before = jar.get('__Host-session');
 
-    const session = await getCurrentSession();
-    expect(session?.tokens?.accessToken).toBe(expired);
-    expect(session?.tokens?.refreshToken).toBe('refresh-token');
+    newRender();
+    const response = await auth.handleHeartbeat(post('/api/auth/heartbeat'));
+    expect(response.status).toBe(200);
+    expect(provider.tokenRequests.at(-1)?.get('refresh_token')).toBe('refresh-1');
+    expect(jar.get('__Host-session')).not.toBe(before);
+    expect((await auth.getTokens())?.accessToken).toBe('access-2');
   });
 
-  it('omits session_at when the session has no access token', async () => {
-    // Seed a stale access-token cookie to prove it gets cleared.
-    jar.set('session_at', 'stale');
-    await createAndPersistSession(baseSession(undefined));
+  it('creates, updates and clears a session', async () => {
+    const { auth, events } = setup();
+    const created = await auth.createSession({
+      access_token: 'access-0',
+      token_type: 'bearer',
+      expires_in: 300,
+      id_token: idToken(),
+    });
+    expect(created.user?.name).toBe('Ada');
 
-    expect(jar.has('session')).toBe(true);
-    expect(jar.has('session_at')).toBe(false);
+    newRender();
+    await auth.updateSession((session) => ({ ...session, data: { theme: 'dark' } }));
+    newRender();
+    expect((await auth.readSession())?.data).toEqual({ theme: 'dark' });
 
-    const session = await getCurrentSession();
-    expect(session?.tokens?.accessToken).toBeUndefined();
-    expect(session?.tokens?.refreshToken).toBe('refresh-token');
+    await auth.clearSession();
+    expect(jar.size).toBe(0);
+    expect(events.at(-1)).toMatchObject({ event: 'session.cleared', trigger: 'logout' });
   });
 
-  it('clearCurrentSession deletes both cookies', async () => {
-    await createAndPersistSession(baseSession(jwtWithExp(3600)));
-    await clearCurrentSession();
+  it('keeps the session in a store when given one', async () => {
+    const sessionStore = createMemorySessionStore();
+    const { auth } = setup({ sessionStore });
+    await login(auth);
 
-    expect(jar.has('session')).toBe(false);
-    expect(jar.has('session_at')).toBe(false);
+    const handle = jar.get('__Host-session') ?? '';
+    expect(handle).toMatch(/^[0-9a-f]{64}$/);
+    newRender();
+    expect((await auth.readSession())?.user?.name).toBe('Ada');
+
+    await auth.handleOidcLogout(post('/api/auth/logout'));
+    jar.set('__Host-session', handle);
+    newRender();
+    expect(await auth.tryReadSession()).toEqual({ session: null, reason: 'session_not_found' });
   });
 
-  it('still reads a legacy session that holds the access token in the main cookie', async () => {
-    // No session_at — the full session (incl. access token) lives in "session".
-    const accessToken = jwtWithExp(3600);
-    const legacyJwt = await createEncryptedJWT(baseSession(accessToken), secret);
-    jar.set('session', legacyJwt);
+  it('can be created where the redirect URI is not set yet, as in a build', () => {
+    expect(() =>
+      createFidesAuth({
+        oauthConfig: { issuer: ISSUER, clientId: 'web', clientSecret: 'shh', scope: 'openid' },
+        secret,
+      }),
+    ).not.toThrow();
+  });
 
-    const session = await getCurrentSession();
-    expect(session?.tokens?.accessToken).toBe(accessToken);
+  it('exposes the cookie name and the OIDC client', () => {
+    const { auth } = setup();
+    expect(auth.cookieNames).toEqual({ session: '__Host-session' });
+    expect(typeof auth.oidc.authorizationUrl).toBe('function');
   });
 });
 
-describe('tryGetCurrentSession — the reason-carrying read', () => {
-  // Proxies and status routes need the shared vocabulary without hand-rolling a
-  // CookieStore over next/headers.
-  it('reports no_session_cookie for an anonymous request', async () => {
-    expect(await tryGetCurrentSession()).toEqual({
-      session: null,
-      reason: 'no_session_cookie',
+describe('authorizedFetch', () => {
+  it('refreshes once on a 401 and saves the new tokens', async () => {
+    const { auth } = setup();
+    await login(auth);
+
+    newRender();
+    const result = await auth.authorizedFetch(`${API}me`, {
+      allowedBase: API,
+      parse: (response) => response.json() as Promise<{ ok: boolean }>,
     });
+    expect(result).toMatchObject({ data: { ok: true }, refreshed: true });
+    expect(provider.apiCalls).toEqual(['Bearer access-1', 'Bearer access-2']);
+    expect((await auth.getTokens())?.accessToken).toBe('access-2');
   });
 
-  it('reports unreadable_session for a cookie that will not decrypt', async () => {
-    jar.set('session', 'not-a-jwe');
+  it('skips the refresh with refresh: false', async () => {
+    const { auth } = setup();
+    await login(auth);
 
-    const result = await tryGetCurrentSession();
-
-    expect(result.session).toBeNull();
-    expect(result.reason).toBe('unreadable_session');
-  });
-
-  it('returns the session with no reason when the cookies are good', async () => {
-    await createAndPersistSession(baseSession(jwtWithExp(3600)));
-
-    const result = await tryGetCurrentSession();
-
-    expect(result.reason).toBeUndefined();
-    expect(result.session?.user?.email).toBe('ada@example.test');
-  });
-
-  it('agrees with getCurrentSession, which now delegates to it', async () => {
-    await createAndPersistSession(baseSession(jwtWithExp(3600)));
-
-    const [viaTry, viaLegacy] = await Promise.all([
-      tryGetCurrentSession(),
-      getCurrentSession(),
-    ]);
-
-    expect(viaTry.session).toEqual(viaLegacy);
+    newRender();
+    await expect(
+      auth.authorizedFetch(`${API}me`, { allowedBase: API, refresh: false }),
+    ).rejects.toMatchObject({ reason: 'http_error', status: 401 });
+    expect(provider.tokenRequests).toHaveLength(1);
   });
 });
 
-describe('createFidesAuth — bound config', () => {
-  it('uses its own secret, not another instance\'s or SESSION_SECRET', async () => {
-    const other = 'b'.repeat(64);
-    vi.stubEnv('SESSION_SECRET', other);
-    await createAndPersistSession(baseSession(jwtWithExp(3600)));
+describe('refreshInProxy', () => {
+  /** The cookies the proxy forwards to the page, from Next's override header. */
+  function forwardedCookies(response: Response): string | null {
+    return response.headers.get('x-middleware-request-cookie');
+  }
 
-    expect((await tryGetCurrentSession()).session).not.toBeNull();
-    expect((await createFidesAuth({ secret: other, oauthConfig }).tryGetCurrentSession()).reason)
-      .toBe('unreadable_session');
+  it('passes a request without a session cookie straight through', async () => {
+    const { auth } = setup();
+    const response = await auth.refreshInProxy(proxied());
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(provider.tokenRequests).toHaveLength(0);
   });
 
-  it('takes an unset secret at creation and rejects it on first use', async () => {
-    // Next evaluates route modules during the build, often without the secret.
-    const unset = createFidesAuth({ secret: undefined as never, oauthConfig });
-
-    await expect(unset.tryGetCurrentSession()).rejects.toThrow('missing or empty');
-    await expect(unset.createAndPersistSession(baseSession('a'))).rejects.toThrow(
-      'missing or empty',
-    );
+  it('leaves a session alone while its access token is fresh', async () => {
+    const { auth } = setup();
+    await login(auth);
+    const response = await auth.refreshInProxy(proxied());
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(provider.tokenRequests).toHaveLength(1);
   });
 
-  it('passes per-request authorization parameters to the login handler', async () => {
-    const request = new Request('https://app.test/api/auth/login?reauth');
-    const authorizationParameters = () => ({ prompt: 'login' });
+  it('refreshes a session about to expire, for the browser and for the page', async () => {
+    const { auth } = setup();
+    provider.expiresIn = 30;
+    await login(auth);
+    const before = jar.get('__Host-session');
 
-    await auth.handleOidcLogin(request, { authorizationParameters });
+    const response = await auth.refreshInProxy(proxied());
+    expect(provider.tokenRequests.at(-1)?.get('grant_type')).toBe('refresh_token');
 
-    expect(core.handleOidcLogin).toHaveBeenCalledWith(
-      request,
-      expect.objectContaining({ authorizationParameters, oauthConfig, secret }),
-    );
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).toMatch(/^__Host-session=/);
+    expect(setCookie).toMatch(/HttpOnly/i);
+    expect(setCookie).toMatch(/Secure/i);
+    expect(setCookie).toMatch(/Path=\//);
+    expect(setCookie).toMatch(/SameSite=Lax/i);
+    const refreshed = /^__Host-session=([^;]+)/.exec(setCookie)?.[1];
+    expect(refreshed).toBeTruthy();
+    expect(refreshed).not.toBe(before);
+
+    // The page renders with the refreshed cookie, not the one the browser sent.
+    expect(forwardedCookies(response)).toContain(`__Host-session=${refreshed}`);
+    jar.set('__Host-session', refreshed ?? '');
+    newRender();
+    expect((await auth.getTokens())?.accessToken).toBe('access-2');
   });
 
-  it('passes mapSession to the callback handler', async () => {
-    const request = new Request('https://app.test/api/auth/callback/oidc');
-    const mapSession: MapSession = (_tokens, _claims, session) => session;
-
-    await auth.handleOidcCallback(request, { applicationUrl: 'https://app.test', mapSession });
-
-    expect(core.handleOidcCallback).toHaveBeenCalledWith(
-      request,
-      expect.objectContaining({ mapSession, oauthConfig, secret }),
-    );
+  it('takes the refresh window as an option', async () => {
+    const { auth } = setup();
+    await login(auth);
+    const response = await auth.refreshInProxy(proxied(), { refreshWithinSeconds: 600 });
+    expect(response.headers.get('set-cookie')).toMatch(/^__Host-session=/);
   });
 
-  it('passes oauthConfig and secret to every handler', async () => {
-    const request = new Request('https://app.test/api/auth');
+  it('leaves the session as it is when the refresh fails', async () => {
+    const { auth, events } = setup();
+    provider.expiresIn = 30;
+    await login(auth);
+    provider.rejectNextRefresh();
 
-    await auth.handleOidcLogin(request);
-    await auth.handleOidcCallback(request, { applicationUrl: 'https://app.test' });
-    await auth.handleOidcLogout(request, { postLogoutRedirectUri: 'https://app.test/' });
-    await auth.handleHeartbeat(request);
-
-    const bound = expect.objectContaining({ oauthConfig, secret });
-    expect(core.handleOidcLogin).toHaveBeenCalledWith(request, bound);
-    expect(core.handleOidcCallback).toHaveBeenCalledWith(request, bound);
-    expect(core.handleOidcLogout).toHaveBeenCalledWith(request, bound);
-    expect(core.handleHeartbeat).toHaveBeenCalledWith(request, bound);
-    expect(core.handleOidcCallback).toHaveBeenCalledWith(
-      request,
-      expect.objectContaining({ applicationUrl: 'https://app.test' }),
-    );
+    const response = await auth.refreshInProxy(proxied());
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(events.at(-1)).toMatchObject({ event: 'session.refresh_failed', cause: 'invalid_grant' });
   });
 
-  it('passes no persistence without a sessionStore', async () => {
-    const request = new Request('https://app.test/api/auth');
-
-    await auth.handleOidcCallback(request, { applicationUrl: 'https://app.test' });
-    await auth.handleOidcLogout(request, { postLogoutRedirectUri: 'https://app.test/' });
-    await auth.handleHeartbeat(request);
-    await createAndPersistSession(baseSession(jwtWithExp(3600)));
-
-    expect(core.serverPersistence).not.toHaveBeenCalled();
-    for (const handler of [core.handleOidcCallback, core.handleOidcLogout, core.handleHeartbeat]) {
-      expect(handler).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(handler).mock.calls[0]?.[1].persistence).toBeUndefined();
-    }
-    expect(jar.has('session_ref')).toBe(false);
-  });
-
-  it('builds one server persistence on first use and passes it to the handlers', async () => {
-    const sessionStore = core.createMemorySessionStore();
-    const stored = createFidesAuth({ secret, oauthConfig, sessionStore });
-    // Not at creation: module-scope setup may run in a build without the secret.
-    expect(core.serverPersistence).not.toHaveBeenCalled();
-
-    const request = new Request('https://app.test/api/auth');
-    await stored.handleOidcLogin(request);
-    await stored.handleOidcCallback(request, { applicationUrl: 'https://app.test' });
-    await stored.handleOidcLogout(request, { postLogoutRedirectUri: 'https://app.test/' });
-    await stored.handleHeartbeat(request);
-    await stored.tryGetCurrentSession();
-
-    expect(core.serverPersistence).toHaveBeenCalledTimes(1);
-    expect(core.serverPersistence).toHaveBeenCalledWith({ store: sessionStore, secret });
-    const persistence = vi.mocked(core.serverPersistence).mock.results[0]?.value;
-    for (const handler of [core.handleOidcCallback, core.handleOidcLogout, core.handleHeartbeat]) {
-      const config = vi.mocked(handler).mock.calls[0]?.[1];
-      expect(config).toMatchObject({ oauthConfig, secret });
-      expect(config?.persistence).toBe(persistence);
-    }
-    // Login only seals the transaction cookie.
-    expect(vi.mocked(core.handleOidcLogin).mock.calls[0]?.[1]).toMatchObject({ secret });
-    expect(vi.mocked(core.handleOidcLogin).mock.calls[0]?.[1]).not.toHaveProperty('persistence');
-  });
-
-  it('binds authorizedFetch to refresh the cookie session on a 401', async () => {
-    const refresh = vi.mocked(core.tryRefreshSessionInStore).mockResolvedValueOnce({
-      ok: true,
-      session: baseSession('new-token'),
-      rotatedRefreshToken: false,
-    });
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(null, { status: 401 }))
-      .mockResolvedValueOnce(new Response('{}', { status: 200 }));
-    onTestFinished(() => fetchSpy.mockRestore());
-
-    const result = await auth.authorizedFetch(baseSession('old-token'), 'me', {
-      allowedBase: 'https://api.test/v1/',
-    });
-
-    expect(result.refreshed).toBe(true);
-    expect(refresh).toHaveBeenCalledWith(expect.anything(), oauthConfig, secret);
-    const retry = new Headers(fetchSpy.mock.calls[1]?.[1]?.headers);
-    expect(retry.get('Authorization')).toBe('Bearer new-token');
-  });
-
-  describe('authorizedFetch — one refresh per request', () => {
-    const refreshed = {
-      ok: true as const,
-      session: baseSession('new-token'),
-      rotatedRefreshToken: true,
-    };
-
-    /** An API that accepts only the refreshed token. */
-    const stubApi = () => {
-      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) =>
-        new Headers(init?.headers).get('Authorization') === 'Bearer new-token'
-          ? new Response('{}', { status: 200 })
-          : new Response(null, { status: 401 }),
-      );
-      onTestFinished(() => fetchSpy.mockRestore());
-      return fetchSpy;
-    };
-
-    const options = { allowedBase: 'https://api.test/v1/' };
-
-    it('shares one refresh between parallel 401s', async () => {
-      const refresh = vi.mocked(core.tryRefreshSessionInStore).mockResolvedValueOnce(refreshed);
-      const fetchSpy = stubApi();
-      const stale = baseSession('old-token');
-
-      const results = await Promise.all([
-        auth.authorizedFetch(stale, 'a', options),
-        auth.authorizedFetch(stale, 'b', options),
-        auth.authorizedFetch(stale, 'c', options),
-      ]);
-
-      expect(refresh).toHaveBeenCalledTimes(1);
-      expect(fetchSpy).toHaveBeenCalledTimes(6);
-      for (const result of results) {
-        expect(result.refreshed).toBe(true);
-        expect(result.session.tokens?.accessToken).toBe('new-token');
-      }
-    });
-
-    it('skips the refresh with refresh: false, so a 401 is an http_error', async () => {
-      const fetchSpy = stubApi();
-
-      const error = await auth
-        .authorizedFetch(baseSession('old-token'), 'a', { ...options, refresh: false })
-        .catch((e: unknown) => e);
-
-      expect(error).toBeInstanceOf(core.AuthorizedFetchError);
-      expect(error).toMatchObject({ reason: 'http_error', status: 401 });
-      expect(core.tryRefreshSessionInStore).not.toHaveBeenCalled();
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-    });
-
-    it('refreshes again in the next request', async () => {
-      const refresh = vi
-        .mocked(core.tryRefreshSessionInStore)
-        .mockResolvedValueOnce(refreshed)
-        .mockResolvedValueOnce(refreshed);
-      stubApi();
-
-      await auth.authorizedFetch(baseSession('old-token'), 'a', options);
-      currentRequest.cookies = currentRequest.newRequestCookies();
-      await auth.authorizedFetch(baseSession('old-token'), 'a', options);
-
-      expect(refresh).toHaveBeenCalledTimes(2);
-    });
+  it('does nothing for a session without a refresh token', async () => {
+    const { auth } = setup();
+    await auth.createSession({ access_token: 'a', token_type: 'bearer', expires_in: 5, id_token: idToken() });
+    const response = await auth.refreshInProxy(proxied());
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(provider.tokenRequests).toHaveLength(0);
   });
 });

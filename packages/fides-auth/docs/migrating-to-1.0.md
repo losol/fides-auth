@@ -144,3 +144,52 @@ internal. For `hasScope(session, scope)`, check `session.scopes?.includes(scope)
   `correlationId`, `iss`, `subHash` and `idpSidHash`.
 - **Users log in again once.** 1.0 doesn't read 0.x sessions, and deletes their
   cookies the next time it writes a session.
+
+### fides-auth-next
+
+`createFidesAuth` from `@eventuras/fides-auth-next` is the core instance bound to
+`cookies()`. It takes the same config as core's. The options that the handlers
+took per call move to it: `applicationUrl`, `mapSession`, `rolesClaim`,
+`validateReturnTo`, `defaultRedirectPath`, `postLogoutRedirectUri`,
+`sessionDurationDays` and `rateLimit`.
+
+| 0.x | 1.0 |
+|---|---|
+| `getCurrentSession()` | `readSession()` |
+| `tryGetCurrentSession()` | `tryReadSession()` |
+| `refreshCurrentSession()`, `tryRefreshCurrentSession()` | `refreshSession()`, which says why on failure |
+| `createAndPersistSession(session)` | `createSession(tokenResponse)` |
+| `clearCurrentSession(options)` | `clearSession(options)` |
+| `authorizedFetch(session, url, options)` | `authorizedFetch(url, options)`: it reads the tokens itself |
+| `handleOidcLogin(request, { validateReturnTo, authorizationParameters })` | `handleOidcLogin(request, { authorizationParameters })` |
+| `handleOidcCallback(request, { applicationUrl, ... })` | `handleOidcCallback(request)` |
+| `handleOidcLogout(request, { postLogoutRedirectUri, state, logoutHint, ... })` | `handleOidcLogout(request, { state, logoutHint })` |
+| `handleHeartbeat(request)` | `handleHeartbeat(request)` |
+
+New on the instance: `handleSessionInfo`, `getTokens`, `updateSession`,
+`cookieNames`, `oidc` and `refreshInProxy(request)`. `refreshInProxy` goes in
+`proxy.ts`. It refreshes a session about to expire before the page renders,
+which a Server Component can't do itself.
+
+**Gone**
+
+- **The subpaths.** `./auth`, `./cookie-store`, `./request`, `./oidc-login`,
+  `./oidc-callback`, `./oidc-logout` and `./heartbeat-handler`: import from
+  the root.
+- **`./store`.** It re-exported `@eventuras/fides-auth-store` and
+  `@eventuras/fides-auth-react`, which the package no longer depends on. Import
+  from those.
+- **The cookie helpers and constants**, such as `setAuthCookie`,
+  `getSessionCookie` and `ACCESS_TOKEN_COOKIE_NAME`. The instance owns its
+  cookies, and `cookieNames.session` names the session cookie.
+- **The default rate limiter**: `globalGETRateLimit`, `globalPOSTRateLimit` and
+  `TokenBucket`. The handlers rate-limit only through `rateLimit`.
+- **The core re-exports** from `/oauth`, `/logger`, `/session-events`,
+  `/session-refresh`, `/session-validation`, `/silent-login`, `/utils` and
+  `/types`. Import from `@eventuras/fides-auth`. The root re-exports the types
+  an app needs for the instance: `Session`, `Tokens`, `FidesAuthConfig`,
+  `SessionStore` and others.
+- **Logout options.** `allowedMethods` goes, since logout answers only `POST`.
+  `fallbackRedirectUri` goes, since `postLogoutRedirectUri` is the fallback.
+  `includeClientId` goes, and `client_id` is always sent.
+- **The per-request refresh sharing.** The instance shares refreshes itself.
