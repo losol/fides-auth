@@ -53,4 +53,13 @@ jobs:
         run: pnpm --filter @eventuras/fides-auth-next typecheck
 
       - name: Publish to npm
-        run: pnpm --filter @eventuras/fides-auth-next publish --access public --provenance --no-git-checks
+        run: |
+          # A prerelease such as 1.0.0-beta.2 goes out under its own dist-tag
+          # (beta), so `npm install` keeps getting the last stable release.
+          VERSION=$(node -p "require('./packages/fides-auth-next/package.json').version")
+          case "$VERSION" in
+            *-*) DIST_TAG="${VERSION#*-}"; DIST_TAG="${DIST_TAG%%.*}" ;;
+            *) DIST_TAG=latest ;;
+          esac
+          echo "Publishing $VERSION under the dist-tag $DIST_TAG"
+          pnpm --filter @eventuras/fides-auth-next publish --access public --provenance --no-git-checks --tag "$DIST_TAG"
