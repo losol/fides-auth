@@ -365,12 +365,12 @@ With cookie storage a refresh writes cookies, so call it where they can be set.
 Reads and `authorizedFetch` never refresh, so they are safe anywhere. The
 heartbeat endpoint refreshes when the browser asks it to.
 
-#### Server-side sessions
+#### Cookie or store
 
-When a provider's tokens don't fit in three cookies (OpenIddict's encrypted JWE
-tokens, for instance), pass a `sessionStore`. The browser then holds only a
-random handle, and the store keeps the sealed record under the handle's hash.
-Logout deletes the record, so a copied cookie stops working too.
+By default the whole session lives in the cookie, sealed with AES-256-GCM. Pass
+a `sessionStore` and the browser holds only a random handle, while the store
+keeps the sealed record under the handle's hash. Nothing else changes: the
+members, the lifecycle and the session events are the same.
 
 ```typescript
 import { createFidesAuth, createMemorySessionStore } from "@eventuras/fides-auth/server";
@@ -381,6 +381,21 @@ const auth = createFidesAuth({
   sessionStore: createMemorySessionStore(), // or your own SessionStore (Mongo, Redis, …)
 });
 ```
+
+| | Cookie (default) | `sessionStore` |
+|---|---|---|
+| Size | At most three cookies of 4 kB. A session that doesn't fit fails at login with 431 | No limit; the cookie holds a 64-character handle |
+| Sent on every request | The whole sealed session | The handle |
+| Refresh | Writes cookies, so it runs where they can be set: a proxy, a route handler or a Server Action | Keeps the handle and writes no cookie, so it also runs in a Server Component |
+| Concurrent refreshes | Shared within one process | Shared across instances too, when the store implements `withLock` |
+| Logout | Clears the cookie. A copy of it stays valid until `expiresAt`, or until a refresh fails | Deletes the record, so a copied cookie stops working |
+| To run | Nothing | A store every instance shares, with a TTL on `expiresAt` |
+
+Choose the store when the provider's tokens don't fit in three cookies
+(OpenIddict's encrypted JWE tokens, for instance), when logout must end a
+copied cookie, or when you refresh from Server Components. Both seal the
+session with `secret`, so rotating it ends every session either way, and
+moving from one to the other logs users in again once.
 
 See [docs/server-sessions.md](./docs/server-sessions.md) for the store contract.
 
