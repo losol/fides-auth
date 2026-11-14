@@ -252,6 +252,30 @@ A refused URL, a missing token, a non-2xx response (401 included), a timeout or
 a failed `parse` throws an `AuthorizedFetchError` with a `reason`, the status,
 and the URL without its query.
 
+For a non-2xx response the error also says why, where it can, so the caller can
+decide whether to refresh and retry:
+
+- `accessTokenExpired` is true when the token had passed its expiry by this
+  server's clock, and undefined when the provider gave no lifetime.
+- `bearerError` is the `error` from the API's `WWW-Authenticate: Bearer`
+  challenge (RFC 6750). `invalid_token` means the token is expired, revoked or
+  malformed, so a refresh may help; `insufficient_scope` means it won't.
+
+```typescript
+try {
+  return await auth.authorizedFetch(cookies, "users/me", { allowedBase });
+} catch (error) {
+  const refreshMayHelp =
+    error instanceof AuthorizedFetchError &&
+    error.status === 401 &&
+    (error.accessTokenExpired || error.bearerError === "invalid_token");
+  if (refreshMayHelp && (await auth.refreshSession(cookies)).ok) {
+    return auth.authorizedFetch(cookies, "users/me", { allowedBase });
+  }
+  throw error;
+}
+```
+
 ### OAuth — Node.js (`/oauth`)
 
 Full OIDC flows using `openid-client`:

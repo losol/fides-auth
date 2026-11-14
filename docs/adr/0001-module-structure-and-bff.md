@@ -282,7 +282,7 @@ Everything that is the same for every request is set here. A handler call takes 
 | `createSession(cookies, tokenResponse)` | `Session` | Starts a session with a new handle, for a login that doesn't go through the handlers. Runs `mapSession`. |
 | `updateSession(cookies, update)` | `Session \| null` | `update(session)` returns the changed session. Keeps the handle and `expiresAt`. For `user` and `data`; it can't touch the tokens. |
 | `clearSession(cookies, options?)` | `void` | `options.trigger` |
-| `authorizedFetch(cookies, url, options)` | `{ response, data }` | Reads the tokens itself. Never refreshes: a 401 is an `http_error`. |
+| `authorizedFetch(cookies, url, options)` | `{ response, data }` | Reads the tokens itself. Never refreshes: a 401 is an `http_error`, whose `accessTokenExpired` and `bearerError` (from `WWW-Authenticate`) tell the caller whether a refresh may help. |
 | `cookieNames` | the resolved cookie names | for middleware |
 | `oidc` | the instance's `OidcClient` | for protocol calls the instance doesn't wrap |
 

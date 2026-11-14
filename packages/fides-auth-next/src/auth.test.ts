@@ -301,6 +301,7 @@ describe('authorizedFetch and refreshSession', () => {
     await expect(auth.authorizedFetch(`${API}me`, { allowedBase: API })).rejects.toMatchObject({
       reason: 'http_error',
       status: 401,
+      accessTokenExpired: false,
     });
     expect(provider.tokenRequests).toHaveLength(1);
   });

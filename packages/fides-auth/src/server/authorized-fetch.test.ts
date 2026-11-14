@@ -54,6 +54,20 @@ function apiHandler(req: IncomingMessage, res: ServerResponse): void {
       if (req.headers.authorization === 'Bearer new-token') json(res, 200, { hello: 'again' });
       else json(res, 401, { error: 'invalid_token' });
       return;
+    case '/v1/challenge-expired':
+      res
+        .writeHead(401, {
+          'WWW-Authenticate':
+            'Bearer realm="api", error="invalid_token", error_description="The access token expired"',
+        })
+        .end();
+      return;
+    case '/v1/challenge-scope':
+      res.writeHead(403, { 'WWW-Authenticate': 'Bearer error=insufficient_scope, scope="admin"' }).end();
+      return;
+    case '/v1/challenge-odd':
+      res.writeHead(401, { 'WWW-Authenticate': 'Bearer error="<b>invalid token</b>"' }).end();
+      return;
     default:
       json(res, 200, { hello: 'world' });
   }
@@ -459,6 +473,39 @@ describe('authorizedFetch — 401', () => {
     expect(error.reason).toBe('http_error');
     expect(error.status).toBe(401);
     expect(apiSeen).toHaveLength(1);
+  });
+});
+
+describe('authorizedFetch — why a request was refused', () => {
+  it("passes on the API's Bearer error from WWW-Authenticate", async () => {
+    const expired = await failure(authorizedFetch(tokens(), 'challenge-expired', { allowedBase: base }));
+    expect(expired).toMatchObject({ status: 401, bearerError: 'invalid_token' });
+
+    const scope = await failure(authorizedFetch(tokens(), 'challenge-scope', { allowedBase: base }));
+    expect(scope).toMatchObject({ status: 403, bearerError: 'insufficient_scope' });
+  });
+
+  it('keeps only a snake_case code, and nothing without a challenge', async () => {
+    const odd = await failure(authorizedFetch(tokens(), 'challenge-odd', { allowedBase: base }));
+    expect(odd.bearerError).toBeUndefined();
+
+    const plain = await failure(authorizedFetch(tokens(), 'protected', { allowedBase: base }));
+    expect(plain.bearerError).toBeUndefined();
+  });
+
+  it('says whether the access token had expired by this clock', async () => {
+    const at = (accessTokenExpiresAt?: string): Tokens => ({ accessToken: 'old-token', accessTokenExpiresAt });
+
+    const expired = await failure(
+      authorizedFetch(at('2000-01-01T00:00:00.000Z'), 'protected', { allowedBase: base }),
+    );
+    expect(expired.accessTokenExpired).toBe(true);
+
+    const live = await failure(authorizedFetch(at('2099-01-01T00:00:00.000Z'), 'protected', { allowedBase: base }));
+    expect(live.accessTokenExpired).toBe(false);
+
+    const unknown = await failure(authorizedFetch(at(undefined), 'protected', { allowedBase: base }));
+    expect(unknown.accessTokenExpired).toBeUndefined();
   });
 });
 

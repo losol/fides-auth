@@ -166,6 +166,11 @@ A 401 throws an `AuthorizedFetchError` with the reason `http_error`. Pages get
 fresh tokens from `refreshInProxy`; in a Server Action or Route Handler, call
 `refreshSession({ ifExpiresWithin: 60 })` before the request.
 
+The error says why, where it can. `accessTokenExpired` is true when the token
+had passed its expiry by the server's clock. `bearerError` is the API's own
+reason from its `WWW-Authenticate` header: `invalid_token` means a refresh may
+help, and `insufficient_scope` means it won't.
+
 ## Server sessions
 
 By default the session lives in the `__Host-session` cookie, in up to three

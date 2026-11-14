@@ -572,7 +572,7 @@ describe('authorizedFetch', () => {
     try {
       await expect(
         auth.authorizedFetch(cookies, `${api}items`, { allowedBase: api }),
-      ).rejects.toMatchObject({ reason: 'http_error', status: 401 });
+      ).rejects.toMatchObject({ reason: 'http_error', status: 401, accessTokenExpired: false });
       expect(seen).toEqual(['Bearer access-1']);
       expect(oidc.refresh).not.toHaveBeenCalled();
       expect((await auth.getTokens(cookies))?.accessToken).toBe('access-1');

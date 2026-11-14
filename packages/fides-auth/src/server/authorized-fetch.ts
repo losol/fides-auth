@@ -30,6 +30,8 @@ export interface AuthorizedFetchErrorDetails {
   status?: number;
   method?: string;
   url?: string;
+  accessTokenExpired?: boolean;
+  bearerError?: string;
   response?: Response;
   cause?: unknown;
 }
@@ -42,11 +44,24 @@ export class AuthorizedFetchError extends Error {
   readonly method?: string;
   /** Origin and path only. */
   readonly url?: string;
+  /**
+   * For `http_error`: whether the access token had passed its expiry by this
+   * server's clock when the request went out. Undefined when the provider gave
+   * no lifetime. With a 401, true means a refresh will probably help.
+   */
+  readonly accessTokenExpired?: boolean;
+  /**
+   * For `http_error`: the `error` of the API's `Bearer` challenge in
+   * `WWW-Authenticate` (RFC 6750 §3). `invalid_token` means the token is expired,
+   * revoked or malformed, so a refresh may help; `insufficient_scope` means it
+   * won't. Only a snake_case code is kept.
+   */
+  readonly bearerError?: string;
   /** The unread non-2xx response, for `http_error`. */
   declare readonly response?: Response;
 
   constructor(reason: AuthorizedFetchErrorReason, details: AuthorizedFetchErrorDetails = {}) {
-    const { status, method, url, response, cause } = details;
+    const { status, method, url, accessTokenExpired, bearerError, response, cause } = details;
     const target = url ? ` for ${method ?? 'GET'} ${url}` : '';
     super(
       `authorizedFetch ${reason}${status ? ` (${status})` : ''}${target}`,
@@ -57,6 +72,8 @@ export class AuthorizedFetchError extends Error {
     this.status = status;
     this.method = method;
     this.url = url;
+    this.accessTokenExpired = accessTokenExpired;
+    this.bearerError = bearerError;
     // Non-enumerable, so logging the error doesn't print the full URL.
     Object.defineProperty(this, 'response', { value: response, enumerable: false });
   }
@@ -93,9 +110,17 @@ export async function authorizedFetch<T = undefined>(
   const target = resolveAllowedUrl(url, allowedBase);
   const request = { method: (init.method ?? 'GET').toUpperCase(), url: redactUrl(target) };
 
+  const sentAt = Date.now();
   const { response, timeout, unlink } = await send(tokens, target, init, timeoutMs, request);
   if (!response.ok) {
-    throw new AuthorizedFetchError('http_error', { ...request, status: response.status, response });
+    const expiresAt = Date.parse(tokens?.accessTokenExpiresAt ?? '');
+    throw new AuthorizedFetchError('http_error', {
+      ...request,
+      status: response.status,
+      accessTokenExpired: Number.isNaN(expiresAt) ? undefined : expiresAt <= sentAt,
+      bearerError: bearerErrorOf(response.headers.get('www-authenticate')),
+      response,
+    });
   }
 
   try {
@@ -201,6 +226,19 @@ function linkSignals(
   if (sources.some((source) => source.aborted)) onAbort();
   else for (const source of sources) source.addEventListener('abort', onAbort);
   return { signal: controller.signal, unlink };
+}
+
+/**
+ * The `error` of the `Bearer` challenge in a `WWW-Authenticate` header, such as
+ * `invalid_token`. Registered codes are snake_case, and nothing else is kept, so
+ * an API can't put arbitrary text in the error.
+ */
+function bearerErrorOf(header: string | null): string | undefined {
+  const params = header ? /\bBearer\b(.*)$/is.exec(header)?.[1] : undefined;
+  if (!params) return undefined;
+  const match = /(?:^|[\s,])error\s*=\s*(?:"([^"]*)"|([^\s,"]+))/i.exec(params);
+  const code = match?.[1] ?? match?.[2];
+  return code && /^[a-z0-9_]{1,64}$/.test(code) ? code : undefined;
 }
 
 /** Origin and path: never credentials, query or fragment. */

@@ -149,7 +149,8 @@ internal. For `hasScope(session, scope)`, check `session.scopes?.includes(scope)
   `refresh_failed` reason go. Call `refreshSession({ ifExpiresWithin: 60 })`
   first, where cookies can be written. It refreshes only when the access token
   expires within that many seconds, and its result says whether it
-  `refreshed`.
+  `refreshed`. After a 401, the error's `accessTokenExpired` and `bearerError`
+  say whether a refresh is likely to help.
 - **Users log in again once.** 1.0 doesn't read 0.x sessions, and deletes their
   cookies the next time it writes a session.
 
