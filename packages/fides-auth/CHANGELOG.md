@@ -1,5 +1,45 @@
 # @eventuras/fides-auth
 
+## 0.16.0
+
+### Minor Changes
+
+- 2c9a137: The free protocol functions are deprecated in favour of a client from `createOidcClient`
+  (`@eventuras/fides-auth/oidc`): `buildPKCEOptions`, `buildAuthorizationUrl`,
+  `buildAuthorizationUrlWithPAR`, `discoverAndBuildAuthorizationUrl`, `exchangeAuthorizationCode`,
+  `refreshAccessToken`, `clientCredentialsGrant`, `buildOidcLogoutUrl`, `verifyIdToken`,
+  `discoverConfiguration`, `resolveClientAuth`, `buildSilentLoginUrl` and `extractUserFromTokens`, with
+  their option types. So are the global settings `configureLogger`, `configureDiscoveryCache`,
+  `clearDiscoveryCache` and `clearJwksCache`, and `TokenBucket`. Each `@deprecated` tag names the
+  replacement. All of them keep working until 1.0. `docs/migrating-to-1.0.md` has the full table.
+- 39a63cf: New entry `@eventuras/fides-auth/oidc` with `createOidcClient(config, { logger, discoveryTtlMs })`
+  (ADR 0001). A client holds its config, discovery cache, JWKS cache and logger, so two clients share
+  no state, and creating one does no I/O. Its methods are `metadata`, `createAuthorizationRequest`,
+  `authorizationUrl`, `silentLoginUrl`, `exchangeCode`, `refresh`, `clientCredentials`, `logoutUrl` and
+  `verifyIdToken`. The entry also exports the pure helpers `createPkcePair`, `createState`,
+  `defaultScope`, `joinScope`, `userFromClaims`, `checkSilentLoginResult`, `requiresInteractiveLogin`,
+  `getOAuthErrorLogContext` and `classifyRefreshFailure`.
+  
+  `OAuthConfig` accepts `redirectUri` next to `redirect_uri`. The client's config, `OidcClientConfig`,
+  needs a redirect URI only for the operations that use one.
+  
+  The free functions in `/oauth`, `/oidc-discovery`, `/id-token` and `/silent-login` behave as before.
+- 2c9a137: The root entry exports the types shared across layers: `OAuthConfig`, `ClientAuthConfig` and a new
+  `TokenResponse` join `Session`, `Tokens`, `CookieOptions`, `FidesLogger` and `FidesLoggerFactory`.
+  `TokenResponse` has the same shape as openid-client's `TokenEndpointResponse`, so either works where
+  the other is expected. `/server` exports `CookieTooLargeError`.
+  
+  The old subpaths are deprecated, and each `@deprecated` tag names the new home: `/oauth`, `/pkce`,
+  `/id-token`, `/oidc-discovery`, `/oauth-logging` and `/silent-login` (now `/oidc`), and `/types`,
+  `/logger`, `/cookies`, `/utils` and `/rate-limit`. They keep working until 1.0.
+  
+  New: `docs/migrating-to-1.0.md`, with a 0.16 section and an old-to-new table.
+
+### Patch Changes
+
+- af191f5: The type declarations use explicit `.js` extensions on relative imports, so they
+  resolve under `moduleResolution: "node16"` and `"nodenext"`. No API change.
+
 ## 0.15.0
 
 ### Minor Changes

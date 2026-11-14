@@ -1,5 +1,19 @@
 # @eventuras/fides-auth-react
 
+## 0.1.9
+
+### Patch Changes
+
+- af191f5: The type declarations use explicit `.js` extensions on relative imports, so they
+  resolve under `moduleResolution: "node16"` and `"nodenext"`. No API change.
+- Updated dependencies [2c9a137]
+- Updated dependencies [af191f5]
+- Updated dependencies [af191f5]
+- Updated dependencies [39a63cf]
+- Updated dependencies [2c9a137]
+  - @eventuras/fides-auth@0.16.0
+  - @eventuras/fides-auth-store@0.3.1
+
 ## 0.1.8
 
 ### Patch Changes
