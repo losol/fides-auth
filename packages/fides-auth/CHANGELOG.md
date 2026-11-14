@@ -1,5 +1,12 @@
 # @eventuras/fides-auth
 
+## 0.15.1
+
+### Patch Changes
+
+- af191f5: The type declarations use explicit `.js` extensions on relative imports, so they
+  resolve under `moduleResolution: "node16"` and `"nodenext"`. No API change.
+
 ## 0.15.0
 
 ### Minor Changes
