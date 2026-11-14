@@ -1,93 +1,45 @@
-import { useSelector as useStoreSelector } from '@xstate/store-react';
-import type { SessionUser, createAuthStore } from '@eventuras/fides-auth-store';
+import type { AuthState, AuthStore } from '@eventuras/fides-auth/browser';
+import { useSyncExternalStore } from 'react';
+
+/** The store's actions, for components that change the session state. */
+export type AuthStoreActions = Pick<
+  AuthStore,
+  'authSuccess' | 'authFailed' | 'sessionExpired' | 'logout' | 'setError' | 'clearError'
+>;
 
 /**
- * Return type for store-based auth hooks
- */
-export type AuthStoreSelector = {
-  isAuthenticated: boolean;
-  isAdmin: boolean;
-  user: SessionUser | null;
-  error: string | null;
-  lastChecked: Date | null;
-  isInitializing: boolean;
-};
-
-/**
- * Actions for store-based auth
- */
-export type AuthStoreActions = {
-  loginSuccess: (user: SessionUser) => void;
-  logout: () => void;
-  sessionExpired: () => void;
-  authSuccess: (user: SessionUser) => void;
-  authFailed: (error?: string) => void;
-  setError: (error: string) => void;
-  clearError: () => void;
-};
-
-/**
- * Creates React hooks for interacting with the auth store
- *
- * @param store - The XState store instance
- * @returns Object containing useAuthStore hook
+ * Creates the React hooks for one store. Call it once, next to the store, and
+ * export the hooks.
  *
  * @example
- * ```typescript
- * const authStore = createAuthStore({
- *   checkAuthStatus: getAuthStatus,
- * });
+ * ```tsx
+ * export const authStore = createAuthStore();
+ * export const { useAuthStore, useAuthActions } = createAuthStoreHooks(authStore);
  *
- * export const { useAuthStore } = createAuthStoreHooks(authStore);
- *
- * // In component
- * function MyComponent() {
+ * function Greeting() {
  *   const auth = useAuthStore();
- *
- *   if (auth.error) {
- *     toast.error(auth.error);
- *   }
- *
- *   if (auth.isInitializing) {
- *     return <Spinner />;
- *   }
- *
- *   return (
- *     <div>
- *       {auth.isAuthenticated ? `Hello ${auth.user?.name}` : 'Please login'}
- *     </div>
- *   );
+ *   if (auth.isInitializing) return <Spinner />;
+ *   return auth.isAuthenticated ? <p>Hello {auth.user?.name}</p> : <LoginLink />;
  * }
  * ```
  */
-export function createAuthStoreHooks(store: ReturnType<typeof createAuthStore>) {
-  /**
-   * Hook to access the auth store state
-   */
-  // biome-ignore lint/correctness/noComponentHookFactories: the factory is called once at module scope
-  function useAuthStore(): AuthStoreSelector {
-    const snapshot = useStoreSelector(store, (snapshot) => snapshot);
-    return snapshot.context;
-  }
-
-  /**
-   * Hook to get auth store actions
-   */
-  // biome-ignore lint/correctness/noComponentHookFactories: the factory is called once at module scope
-  function useAuthActions(): AuthStoreActions {
-    return {
-      loginSuccess: (user: SessionUser) => store.send({ type: 'loginSuccess', user }),
-      logout: () => store.send({ type: 'logout' }),
-      sessionExpired: () => store.send({ type: 'sessionExpired' }),
-      authSuccess: (user: SessionUser) => store.send({ type: 'authSuccess', user }),
-      authFailed: (error?: string) => store.send({ type: 'authFailed', error }),
-      setError: (error: string) => store.send({ type: 'setError', error }),
-      clearError: () => store.send({ type: 'clearError' }),
-    };
-  }
+export function createAuthStoreHooks(store: AuthStore): {
+  useAuthStore: () => AuthState;
+  useAuthActions: () => AuthStoreActions;
+} {
+  // The methods don't use `this`, so they can be handed out as they are, and
+  // the object stays the same between renders.
+  const actions: AuthStoreActions = {
+    authSuccess: store.authSuccess,
+    authFailed: store.authFailed,
+    sessionExpired: store.sessionExpired,
+    logout: store.logout,
+    setError: store.setError,
+    clearError: store.clearError,
+  };
 
   return {
-    useAuthStore,
-    useAuthActions,
+    useAuthStore: () => useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot),
+    useAuthActions: () => actions,
   };
 }

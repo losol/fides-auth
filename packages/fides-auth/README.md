@@ -77,6 +77,7 @@ Each module is available as a separate entry point for tree-shaking:
 | `@eventuras/fides-auth/logger`             | Universal   | **Deprecated** — types on the root entry              |
 | `@eventuras/fides-auth/types`              | Universal   | **Deprecated** — types on the root entry              |
 | `@eventuras/fides-auth/server`             | Node.js     | `createFidesAuth`: the handlers, sessions and API calls |
+| `@eventuras/fides-auth/browser`            | Browser     | The session store, session monitor and heartbeat       |
 | `@eventuras/fides-auth/providers/vipps`    | Node.js     | Vipps Login identity provider                         |
 
 Deprecated entries keep working until 1.0. [Migrating to 1.0](docs/migrating-to-1.0.md)
@@ -275,6 +276,47 @@ try {
   throw error;
 }
 ```
+
+### Browser (`/browser`)
+
+What runs in the page: a store that knows who is logged in, a monitor that keeps
+it in step with the server, and an optional heartbeat that keeps an active
+user's session alive. It loads nothing from the server side and no third-party
+code. React apps add [`@eventuras/fides-auth-react`](../fides-auth-react) for
+the hooks.
+
+```typescript
+import {
+  createAuthStore,
+  initializeAuth,
+  startSessionMonitor,
+} from "@eventuras/fides-auth/browser";
+
+export const authStore = createAuthStore({ adminRole: "Admin" });
+await initializeAuth(authStore);
+
+authStore.subscribe(() => render(authStore.getSnapshot()));
+
+const stop = startSessionMonitor(authStore, {
+  onSessionExpired: () => showMessage("Your session has expired"),
+});
+```
+
+- **The store** asks `/api/auth/session`, the `handleSessionInfo` route, unless
+  you pass `sessionEndpoint` or your own `checkAuthStatus`. A snapshot has
+  `user`, `isAuthenticated`, `isAdmin`, `error`, `lastChecked` and
+  `isInitializing`, and is a new object on every change. Change it with its
+  methods: `authSuccess(user)`, `authFailed(error?)`, `sessionExpired()`,
+  `logout()`, `setError(error)` and `clearError()`.
+- **The monitor** checks every 30 seconds. When a session the store held is
+  gone, it calls `onSessionExpired` and stops. A visitor who was never logged in
+  just stays logged out, so it can run on every page. It never refreshes.
+- **The heartbeat**, `createHeartbeat`, posts to `handleHeartbeat` shortly
+  before the access token expires, while the user is active. Use it when
+  refreshes should follow user activity; nothing else needs it.
+- `onEvent` on the monitor and the heartbeat gets the client side's
+  [session events](./docs/session-events.md), for forwarding to your own
+  endpoint.
 
 ### OAuth — Node.js (`/oauth`)
 

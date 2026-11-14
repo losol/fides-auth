@@ -23,9 +23,7 @@ const pkg = JSON.parse(readFileSync(new URL('package.json', packageDir), 'utf8')
  */
 const expected: Record<string, string[]> = {
   '.': ['jose'],
-  './activity-tracker': [],
   './cookies': [],
-  './heartbeat': [],
   './logger': [],
   './session-events': [],
   './oauth': ['jose', 'oauth4webapi', 'openid-client'],
@@ -40,6 +38,7 @@ const expected: Record<string, string[]> = {
   './types': [],
   './rate-limit': [],
   './server': ['jose', 'oauth4webapi', 'openid-client'],
+  './browser': [],
   './providers/vipps': ['jose', 'oauth4webapi', 'openid-client'],
 };
 

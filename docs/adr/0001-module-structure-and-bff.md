@@ -86,7 +86,7 @@ Corrections to the starting analysis:
 
 1. **Independence.** The protocol works without sessions, sessions without the server, and the server without Next.
 2. **BFF-ready.** Tokens never reach the browser. The server owns refresh, API calls, CSRF and logout.
-3. **Runtime stated per entry.** Only Web APIs (Fetch, Web Crypto), `/server` included. DOM code lives only in the client package.
+3. **Runtime stated per entry.** Only Web APIs (Fetch, Web Crypto), `/server` included. DOM code lives only in `/browser`.
 4. **Dependency weight.** An entry loads only the dependencies it needs.
 5. **Enforced, not just documented.** Breaking a layer rule fails CI.
 6. **Stable 1.0 contracts.** Settle now what consumers implement, call or store: the session shape, the `createFidesAuth` instance, `SessionStore`, `CookieStore`, cookie names and the handlers' HTTP behaviour. Features can come in 1.x.
@@ -122,9 +122,9 @@ The library began as encrypted cookies and grew the BFF model afterwards. We ask
 
 - **The session the app sees carries no tokens** (finding 16). See §4, "Session and tokens".
 - **No module state** (finding 17). The logger and the caches live on an instance. See §1 and §4, "Instance state".
-- **A small public surface** (driver 7). Five entries instead of one per layer. See §1.
+- **A small public surface** (driver 7). Six entries instead of one per layer. See §1.
 - **One session model, whatever stores it** (findings 15 and 21). The record, its lifecycle and its rules are written once. Where the sealed record is kept is a detail behind a narrow seam. See §4, "The session model".
-- **One client package.** `fides-auth-client` replaces `fides-auth-store` and `fides-auth-react`. See §1.
+- **The browser side in core.** The session store, the session monitor, heartbeat and the activity tracker live in core's `/browser`. `fides-auth-react` keeps only the hooks, and `fides-auth-store` ends. See §1.
 - **Nothing needs a heartbeat.** A check-session endpoint, a refresh the caller asks for and, in Next, a refresh in the proxy do its work. The heartbeat stays as an option. See §4, "Keeping a session fresh".
 
 **Considered and not adopted:**
@@ -138,14 +138,15 @@ The library began as encrypted cookies and grew the BFF model afterwards. We ask
 
 ### 1. Module map
 
-`@eventuras/fides-auth` has five entries:
+`@eventuras/fides-auth` has six entries:
 
 | Entry | Runtime | Third-party deps | Contents |
 |---|---|---|---|
 | `.` | types only | none | cross-layer and wire types |
 | `/oidc` | universal | openid-client, jose | `createOidcClient`: discovery, the authorization request (URL, PAR, `prompt=none`), code exchange, refresh, client credentials, the logout URL and ID token verification. Plus the pure helpers: PKCE, scope, claims and error classification. |
 | `/server` | Fetch API: Node, edge, Bun, Deno | via `/oidc` | `createFidesAuth`, the `SessionStore` and `CookieStore` contracts, the memory store and the error classes |
-| `/session-events` | universal | none | the event vocabulary that the server and the client package share |
+| `/browser` | browser | none | the session store, the session monitor, heartbeat and the activity tracker |
+| `/session-events` | universal | none | the event vocabulary that the server and `/browser` share |
 | `/providers/*` | universal | openid-client | provider clients |
 
 Removed from core: `/oauth`, `/oidc-discovery`, `/oauth-logging`, `/oauth-browser`, `/silent-login`, `/session-refresh`, `/session-validation`, `/session-cookies`, `/utils`, `/types`, `/rate-limit`, `/heartbeat`, `/activity-tracker`, `/logger`, `/cookies`, `/pkce` and `/id-token`.
@@ -158,24 +159,25 @@ Inside the package, the source tree is split into layers. They are not public en
 | `src/protocol/` | the OIDC client and the pure protocol helpers | `/oidc` |
 | `src/session/` | the session record: build, map, update, expire and seal | `/server` |
 | `src/server/` | the factory, handlers, the session lifecycle and its two storages, login transaction, `authorizedFetch`, CSRF and returnTo guards | `/server` |
+| `src/browser/` | the session store, the session monitor, heartbeat and the activity tracker | `/browser` |
 | `src/providers/` | provider clients | `/providers/*` |
 
 Other packages:
 
 | Package | Runtime | Role |
 |---|---|---|
-| `@eventuras/fides-auth-client` | browser | New. Auth state, the session monitor, heartbeat and the activity tracker, with the React hooks under `./react`. Replaces `fides-auth-store` and `fides-auth-react`. |
-| `fides-auth-store`, `fides-auth-react` | browser | End at their last 0.x, which is deprecated on npm at 1.0. |
+| `@eventuras/fides-auth-react` | browser | The React hooks over core's `/browser`: `createAuthStoreHooks`, `useSessionMonitor` and `useHeartbeat`. |
+| `fides-auth-store` | browser | Ends at its last 0.x, which is deprecated on npm at 1.0. Its store is in core's `/browser`. |
 | `@eventuras/fides-auth-next` | Next server | one entry: core `createFidesAuth` bound to `cookies()` and React `cache()` |
 
 Where this departs from the starting point:
 
-- **Five entries, not one per layer.** `/discovery`, `/authorize`, `/token` and `/logout` would all load `openid-client` and are used together, so splitting them saves no weight and leaves four paths to keep stable. A layer can get its own entry in 1.x when a consumer needs it.
+- **Six entries, not one per layer.** `/discovery`, `/authorize`, `/token` and `/logout` would all load `openid-client` and are used together, so splitting them saves no weight and leaves four paths to keep stable. A layer can get its own entry in 1.x when a consumer needs it.
 - **One OIDC client object, not functions that take the config.** `createOidcClient(config)` holds the config, the discovery and JWKS caches and the logger. This is what removes the module state. Creating one does no I/O; discovery runs on first use. "OIDC client" is the specification's own term for the relying party, so it doesn't read as the browser side the way a bare `/client` would.
 - **The root `.` holds the cross-layer types,** including a `TokenResponse` that `openid-client`'s `TokenEndpointResponse` satisfies. Every layer then imports types from the bottom of the graph, which removes both cycles at the source.
 - **The session layer is pure and internal.** It has no network and no `openid-client`. It gets `updateSession`, the merge half of today's `refreshSession`; the I/O half moves to the server layer. It isn't a public entry in 1.0. This gives up some of "every part usable on its own": nobody builds or seals a session without the server today, and the layer rules keep it ready to publish.
 - **returnTo validation sits in the server layer.** Only the handlers redirect.
-- **One client package, and heartbeat moves to it.** The store, the monitor and the hooks are small and always used together, and React is an optional peer of `./react`. The new package costs one publish workflow and one trusted publisher, and retires two.
+- **The browser side in core, one thin package per framework.** Core uses Web APIs only, so it runs in the page too. The store, the monitor, heartbeat and the activity tracker live in core's `/browser`, which loads nothing from the server side, and an app on any framework can use them as they are. `fides-auth-react` adds only the hooks, as `fides-auth-next` adds only the Next binding. This adds no package; `fides-auth-store` ends, and `fides-auth-react` goes on to 1.0 under the same name.
 
 ### 2. Dependency rules
 
@@ -186,15 +188,16 @@ Where this departs from the starting point:
 | session | shared | `jose` |
 | server | shared, protocol, session | none (Web APIs only) |
 | providers | shared, protocol | `openid-client` |
+| browser | shared | none |
 | `fides-auth-next` | core `.` (types), `/server` | `next`, `react` |
-| `fides-auth-client` | core `.` (types), `/session-events` | its own |
+| `fides-auth-react` | core `.` (types), `/browser` | `react` |
 
 Enforcement, in `biome.json` and two tests:
 
-- **Layer imports.** `style/noRestrictedImports` is set per layer through `overrides`. Patterns match the layer folders, so protocol code can't import `**/server/**`. Bare specifiers are matched too, so `openid-client` is denied in shared, session, server and the client package. Patterns match specifiers as written; the exact globs get verified in the PR that adds them.
+- **Layer imports.** `style/noRestrictedImports` is set per layer through `overrides`. Patterns match the layer folders, so protocol code can't import `**/server/**`. Bare specifiers are matched too, so `openid-client` is denied in shared, session, server and browser. Patterns match specifiers as written; the exact globs get verified in the PR that adds them.
 - **Cycles.** `suspicious/noImportCycles` is on with `ignoreTypes: false`.
 - **Node APIs.** The Node ban covers all of `src/`, and the `server/**` exemption goes.
-- **Dependency weight.** A test imports each entry in a plain Node ESM process and checks which modules load. `.` and `/session-events` load no third-party module, and `/oidc` loads nothing from `server/`.
+- **Dependency weight.** A test imports each entry in a plain Node ESM process and checks which modules load. `.`, `/session-events` and `/browser` load no third-party module, and `/oidc` loads nothing from `server/`.
 - **No module state.** A test creates two OIDC clients and checks that they share neither a cache nor a logger.
 - **One session model.** One test suite runs the whole lifecycle against both storages. A rule that holds for one must hold for the other, apart from the differences listed in §4.
 
@@ -208,8 +211,9 @@ The table lists export names only. *(was …)* marks a rename or a move. Names t
 | `/oidc` | `createOidcClient`, `OidcClient`; pure helpers: `createPkcePair`, `createState`, `defaultScope`, `joinScope`, `userFromClaims` *(was `extractUserFromTokens`)*, `checkSilentLoginResult`, `requiresInteractiveLogin`, `getOAuthErrorLogContext`, `classifyRefreshFailure` |
 | `/server` | `createFidesAuth`, `FidesAuth`; `CookieStore`; `SessionStore`, `StoredSession`, `createMemorySessionStore`; `MapSession`; `AuthorizedFetchError`, `CookieTooLargeError`, `SessionSecretError`. In 1.x: `createFetchCookieStore` |
 | `/session-events` | `SESSION_EVENT`, `SessionEvent`, `SessionRejectedReason`, `RefreshFailureCause`, `isSessionRejectedReason`, `SessionClientEvent` |
+| `/browser` | `createAuthStore`, `initializeAuth`, `checkAuth`, `startSessionMonitor`, `createHeartbeat`, `createActivityTracker`, `DEFAULT_ACTIVITY_EVENTS`; types |
 | `fides-auth-next` | `createFidesAuth`, `nextCookieStore`, types |
-| `fides-auth-client` | `createAuthStore`, `initializeAuth`, `checkAuth`, `startSessionMonitor`, `createHeartbeat`, `createActivityTracker`; `./react`: `createAuthStoreHooks`, `useSessionMonitor`, `useHeartbeat` |
+| `fides-auth-react` | `createAuthStoreHooks`, `useSessionMonitor`, `useHeartbeat` |
 
 The OIDC client:
 
@@ -348,7 +352,7 @@ Both use the same cookie name. What the storages can't make equal is stated, not
 
 Nothing in 1.0 needs a heartbeat. Three things do its work:
 
-- **Check session.** `handleSessionInfo` answers whether there is a session, who the user is and when the access token expires (RFC 10017 §6.1.2.1). It only reads. It never refreshes, so a tab left open doesn't keep a session alive at the provider. The client package's session monitor polls it by default.
+- **Check session.** `handleSessionInfo` answers whether there is a session, who the user is and when the access token expires (RFC 10017 §6.1.2.1). It only reads. It never refreshes, so a tab left open doesn't keep a session alive at the provider. The session monitor in `/browser` polls it by default.
 - **Refresh when asked.** `refreshSession(cookies, { ifExpiresWithin: 60 })` refreshes a session whose access token is about to expire, and does nothing otherwise. The caller calls it where cookies can be written, such as a Server Action. Reads and `authorizedFetch` never refresh, so they are safe anywhere, a Next server component included.
 - **Refresh ahead, in Next.** A server component can't set cookies. `refreshInProxy(request)` runs in `proxy.ts` and refreshes a session that is about to expire before the page renders. It sets the new cookies on the response and on the forwarded request. A failed refresh leaves the session as it is: with cookie storage, ending it there could undo a refresh that another instance completed with the same refresh token.
 
@@ -373,9 +377,9 @@ The heartbeat endpoint and its client stay, for apps that want refresh tied to u
 | Cookie names | One session cookie name for both storages, with numbered chunks in cookie storage. Every library cookie gets the `__Host-` prefix when `Secure`; see the cookie rule below. `SameSite` stays `Lax`. | Renaming cookies after 1.0 would log everyone out again. |
 | CSRF | One guard for every state-changing endpoint that a cookie authenticates: logout, heartbeat and proxy. A request passes when `Sec-Fetch-Site` is `same-origin` or `none`. Without that header, it passes when `Origin` equals `applicationUrl`'s origin. A request with neither header isn't from a browser and passes. The guard can also require a custom header. 1.0 is same-origin only. Exempt: login and callback (top-level navigations), and back-channel logout (server-to-server, with a signed token). | Turning it on for heartbeat changes behaviour. |
 | returnTo | One `validateReturnTo: (returnTo) => string \| null`, set on the factory, for both login and callback. | It's a breaking signature change. |
-| HTTP behaviour | The table below. | Client code and the client package depend on it. |
-| Packaging | Core, `fides-auth-next` and `fides-auth-client` release 1.0 together. Core is a `peerDependency` (`^1.0.0`) of the other two, so an app has one copy. `engines` is Node 22 or later. | A peer range and an engine floor can only tighten at a major. |
-| Client store | `fides-auth-client` has its own store: `getSnapshot`, `subscribe`, and a method per action, such as `authSuccess(user)`, in place of `send({ type })`. `./react` reads it with React's `useSyncExternalStore`. `@xstate/store` and `@xstate/store-react` go. The store is a context with a handful of events and no state machine, so a library adds little, and `createAuthStore` returning the XState store makes XState's majors ours. | Only a major can take a dependency out of the public API. |
+| HTTP behaviour | The table below. | Client code and `/browser` depend on it. |
+| Packaging | Core, `fides-auth-next` and `fides-auth-react` release 1.0 together. Core is a `peerDependency` (`^1.0.0`) of the other two, so an app has one copy. `engines` is Node 22 or later. | A peer range and an engine floor can only tighten at a major. |
+| Client store | The store in core's `/browser` is the library's own: `getSnapshot`, `subscribe`, and a method per action, such as `authSuccess(user)`, in place of `send({ type })`. `fides-auth-react` reads it with React's `useSyncExternalStore`. `@xstate/store` and `@xstate/store-react` go. The store is a context with a handful of events and no state machine, so a library adds little, and `createAuthStore` returning the XState store makes XState's majors ours. | Only a major can take a dependency out of the public API. |
 | Refresh | Only when the caller asks: `refreshSession(cookies, { ifExpiresWithin })`, `refreshInProxy` in Next, and the heartbeat endpoint. Reads and `authorizedFetch` never refresh. | Implicit refresh must know whether its result can be saved, or it loses a rotated refresh token, and Next can't tell a server component from a Server Action. |
 
 What the handlers answer:
@@ -436,7 +440,7 @@ Set `sessionStore` when:
 - Sessions end when they say they do, in both storages.
 - Unbundled runtimes load only what an entry needs.
 - Next consumers get server sessions and the BFF features.
-- An app is kept logged in without client code, and there is one client package instead of two.
+- An app is kept logged in without client code, and the browser side needs no package beyond the React hooks.
 - Consumers upgrade once. The deprecations in 0.16 show what goes, and the migration doc lists the replacements.
 - The lint rules keep the layers from eroding.
 
@@ -445,7 +449,7 @@ Set `sessionStore` when:
 - Every existing consumer has to update imports and call sites once. This is more than a path change: protocol calls become methods on a client, and server calls become members of the instance.
 - The server side changes in one upgrade, with no release where the old and new APIs work side by side.
 - Users log in again once when an app moves to 1.0, and again if it rolls back to 0.16.
-- The new client package needs a publish workflow and a trusted publisher.
+- `fides-auth-store` users move to core's `/browser`, and its last 0.x has to be deprecated on npm by hand.
 - The README needs a rewrite.
 - The session code is rewritten, not moved: the lifecycle, the storage seam and cookie chunking are new.
 - A cookie session with one corrupt part is now unreadable, where today it could come back without its access token.
@@ -463,9 +467,9 @@ Set `sessionStore` when:
 | 4 | The free `/server` functions are no longer exported: the handlers, the session helpers, the persistences and the login transaction. `createFidesAuth` is the way in, and the handler options that don't vary per request move to it. | The migration doc maps each one to an instance member |
 | 5 | `Session` has no `tokens`. `user.sub` is required, and `user.name` is optional. | `getTokens`. Sessions from 0.x aren't read, so users log in again once. |
 | 6 | Sessions have an absolute lifetime in both storages, and `session_expired` joins `SessionRejectedReason`. | `sessionDurationDays` |
-| 7 | `configureLogger`, `configureDiscoveryCache`, `clearDiscoveryCache` and `clearJwksCache` go. `fides-auth-store`'s `configureAuthLogger` goes with them; the client package logs through `@eventuras/logger`. `logSessionEvent` and `newSessionId` become internal. | Deprecated in 0.16: `logger` and `discoveryTtlMs` on the client, and `logger` on the factory |
+| 7 | `configureLogger`, `configureDiscoveryCache`, `clearDiscoveryCache` and `clearJwksCache` go. `fides-auth-store`'s `configureAuthLogger` goes with them; `/browser` takes a `logger` factory, as the factory and the OIDC client do. `logSessionEvent` and `newSessionId` become internal. | Deprecated in 0.16: `logger` and `discoveryTtlMs` on the client, and `logger` on the factory |
 | 8 | `CookieStore` has no `delete`, and `set` always gets options. An adapter that still has `delete` keeps compiling. | none needed |
-| 9 | `/heartbeat` and `/activity-tracker` move to `fides-auth-client`. | The migration doc |
+| 9 | `/heartbeat` and `/activity-tracker` move to `/browser`. | The migration doc |
 | 10 | `/rate-limit` and `TokenBucket` leave core and the Next root. Next's default limiter (`globalGETRateLimit`, `globalPOSTRateLimit`) goes, so Next handlers no longer rate-limit unless `rateLimit` is set. | `/rate-limit` deprecated in 0.16; `rateLimit` documented |
 | 11 | `/oauth-browser` is removed (deprecated since #114). | none |
 | 12 | `/utils` is removed. `encrypt`, `decrypt`, `sha256`, `sha512`, `toHex` and `generateToken` have no place in the new surface; the rest become internal. Some consumers call them directly. | Deprecated in 0.16. The migration doc gives the Web Crypto equivalents. |
@@ -475,8 +479,8 @@ Set `sessionStore` when:
 | 16 | `fides-auth-next` keeps one entry. The per-handler subpaths, `./auth`, `./store`, `./request`, `./cookie-store`, the cookie helpers and the core re-exports go. Its instance gets the member names in §4. It no longer depends on the store and react packages. | The migration doc |
 | 17 | `Session.sid`, `StoredSession.sid` and the `sid` key in session events become `correlationId`. | Sessions from 0.x aren't read |
 | 18 | `createFidesAuth` throws when `clientAuth` is `'none'`. | The changeset |
-| 19 | Core becomes a peer dependency of `fides-auth-next` and `fides-auth-client`, and all three need Node 22. | Install core next to them |
-| 20 | `fides-auth-store` and `fides-auth-react` are replaced by `fides-auth-client`, with the hooks under `./react`. | Their last 0.x is deprecated on npm at 1.0 |
+| 19 | Core becomes a peer dependency of `fides-auth-next` and `fides-auth-react`, and all three need Node 22. | Install core next to them |
+| 20 | `fides-auth-store` ends; its store is in core's `/browser`. `fides-auth-react` keeps the hooks, on that store. | The last 0.x of `fides-auth-store` is deprecated on npm at 1.0 |
 | 21 | The client store has a method per action instead of `send({ type })`, and no XState dependency. | The migration doc |
 | 22 | `authorizedFetch` doesn't refresh on a 401, and loses its `refresh` option and the `refresh_failed` reason. Call `refreshSession({ ifExpiresWithin })` first. | The migration doc |
 
@@ -521,15 +525,15 @@ The work, as PRs in beta. The numbers in brackets are rows in the breaking-chang
    - `fides-auth-next` is rebuilt on the core factory, with `sessionStore` and `refreshInProxy`. Its old subpaths, member names and default limiter go.
    - Then the free `/server` functions go, with `LegacySession`, `CookieStore.delete` and `StoredSession.sid`.
 4. **The client side (9, 20, 21).**
-   - `fides-auth-client`, with the store, the session monitor, heartbeat and the activity tracker, and the hooks under `./react`.
-   - The store is the package's own, with no XState dependency.
+   - Core's `/browser`, with the store, the session monitor, heartbeat and the activity tracker. `/heartbeat` and `/activity-tracker` go.
+   - The store is the library's own, with no XState dependency.
    - `handleSessionInfo` becomes the monitor's default.
-   - Core's `/heartbeat` and `/activity-tracker` go.
-   - `fides-auth-store` and `fides-auth-react` get no 1.0. Their last 0.x is deprecated on npm, and their publish workflows are removed.
+   - `fides-auth-react` is rebuilt on `/browser` and goes on to 1.0.
+   - `fides-auth-store` gets no 1.0. Its package and publish workflow leave the repo, and its last 0.x is deprecated on npm.
 5. **Removal and packaging (1, 2, 3, 7, 10, 11, 12, 19).**
    - What 0.16 deprecated goes: the old subpaths, the free protocol functions, the global settings, `/oauth-browser`, `/utils` and `/rate-limit`.
    - The root becomes types-only.
-   - Core becomes a peer dependency of `fides-auth-next` and `fides-auth-client`, and `engines` moves to Node 22.
+   - Core becomes a peer dependency of `fides-auth-next` and `fides-auth-react`, and `engines` moves to Node 22.
 6. **Docs.** The README rewrite, and a 1.0 section in the migration doc.
 
 **1.x: add.** Ship each as its own minor: back-channel logout, then the API proxy, the Fetch cookie store and the BFF guide. Secret rotation and a sliding lifetime follow when a consumer needs them. Once the old cookies' `Max-Age` has passed, a 1.x stops deleting them.

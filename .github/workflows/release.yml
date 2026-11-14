@@ -86,8 +86,6 @@ jobs:
                 gh workflow run fides-auth-publish.yml -f "tag=${TAG}" ;;
               @eventuras/fides-auth-next)
                 gh workflow run fides-auth-next-publish.yml -f "tag=${TAG}" ;;
-              @eventuras/fides-auth-store)
-                gh workflow run fides-auth-store-publish.yml -f "tag=${TAG}" ;;
               @eventuras/fides-auth-react)
                 gh workflow run fides-auth-react-publish.yml -f "tag=${TAG}" ;;
               *)

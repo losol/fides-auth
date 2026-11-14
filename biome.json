@@ -48,7 +48,6 @@
     {
       "includes": [
         "packages/fides-auth/src/**",
-        "packages/fides-auth-store/src/**",
         "packages/fides-auth-react/src/**"
       ],
       "linter": {
@@ -192,6 +191,34 @@
       }
     },
     {
+      "includes": ["packages/fides-auth/src/browser/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["node:*"],
+                    "message": "Node built-ins don't run in browsers or edge runtimes."
+                  },
+                  {
+                    "group": ["../*", "../protocol/**", "../session/**", "../server/**", "../providers/**"],
+                    "message": "browser may import only shared and browser (ADR 0001 §2)."
+                  },
+                  {
+                    "group": ["jose", "jose/**", "openid-client", "openid-client/**"],
+                    "message": "browser runs in the page and loads no third-party code (ADR 0001 §2)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["packages/fides-auth/src/providers/**"],
       "linter": {
         "rules": {
@@ -235,6 +262,30 @@
                   {
                     "group": ["./*", "./server/**", "./providers/**"],
                     "message": "/oidc may import only shared, protocol and session, so it loads nothing from server (ADR 0001 §2)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/fides-auth/src/browser.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["node:*"],
+                    "message": "Node built-ins don't run in browsers or edge runtimes."
+                  },
+                  {
+                    "group": ["./*", "./protocol/**", "./session/**", "./server/**", "./providers/**"],
+                    "message": "/browser may import only shared and browser, so it loads nothing from the server side (ADR 0001 §2)."
                   }
                 ]
               }
