@@ -384,7 +384,9 @@ Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
 #### Sessions
 
 A session lasts `sessionDurationSeconds` from login, 12 hours unless you say
-otherwise, and refreshes don't extend it. With a session at the provider, the
+otherwise, and refreshes don't extend it. Read `expiresAt` from the session each
+time rather than computing it from `createdAt`, since a later version may let a
+session be extended. With a session at the provider, the
 login after that is a redirect without a password.
 It is sealed with AES-256-GCM into the `__Host-session` cookie, in up to three
 chunks (`session` over plain http). A `Session` has `correlationId`,
