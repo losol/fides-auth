@@ -5,10 +5,11 @@
 import { UnsecuredJWT } from 'jose';
 import { describe, expect, it } from 'vitest';
 
-import type { TokenResponse } from '../shared/types.js';
+import type { Session, TokenResponse } from '../shared/types.js';
 import {
   createRecord,
   isExpired,
+  isSameSubject,
   keepIdentity,
   openRecord,
   refreshRecord,
@@ -134,7 +135,7 @@ describe('refreshRecord', () => {
     const refreshed = refreshRecord(
       record,
       { access_token: 'access-2', token_type: 'bearer', expires_in: 60, refresh_token: 'refresh-2' },
-      now + 1000,
+      { now: now + 1000 },
     );
     expect(refreshed.session).toBe(record.session);
     expect(refreshed.tokens).toEqual({
@@ -151,6 +152,74 @@ describe('refreshRecord', () => {
     expect(refreshed.tokens.refreshToken).toBe('refresh-1');
     expect(refreshed.tokens.accessTokenExpiresAt).toBeUndefined();
     expect(refreshed.tokens.accessTokenIssuedAt).toBeUndefined();
+  });
+
+  /** A refresh response whose ID token has these claims on top of the login's iss and sub. */
+  function withIdToken(claims: Record<string, unknown>): TokenResponse {
+    return {
+      access_token: 'access-2',
+      token_type: 'bearer',
+      id_token: idToken({ iss: 'https://idp.example.test', sub: 'user-1', ...claims }),
+    };
+  }
+
+  it('updates the user from a new ID token, as at login', () => {
+    const refreshed = refreshRecord(record, withIdToken({ name: 'Ada L.', roles: ['viewer'] }));
+    expect(refreshed.session.user).toEqual({
+      sub: 'user-1',
+      name: 'Ada L.',
+      email: 'ada@example.test',
+      roles: ['viewer'],
+    });
+    expect(refreshed.session.correlationId).toBe(record.session.correlationId);
+  });
+
+  it('takes the roles away when the new ID token has none', () => {
+    expect(refreshRecord(record, withIdToken({})).session.user?.roles).toEqual([]);
+  });
+
+  it('reads the roles from rolesClaim', () => {
+    const refreshed = refreshRecord(record, withIdToken({ groups: ['staff'] }), { rolesClaim: 'groups' });
+    expect(refreshed.session.user?.roles).toEqual(['staff']);
+  });
+
+  it('keeps sub, data and the fields mapSession added', () => {
+    const mapped = {
+      ...record,
+      session: {
+        ...record.session,
+        user: { ...record.session.user!, sub: 'internal-7', team: 'blue' } as NonNullable<Session['user']>,
+        data: { theme: 'dark' },
+      },
+    };
+    const refreshed = refreshRecord(mapped, withIdToken({ roles: ['viewer'] }));
+    expect(refreshed.session.user).toMatchObject({ sub: 'internal-7', team: 'blue', roles: ['viewer'] });
+    expect(refreshed.session.data).toEqual({ theme: 'dark' });
+  });
+
+  it('leaves a session without a user as it is', () => {
+    const anonymous = createRecord(tokens({ id_token: undefined }), { sessionDurationDays: 1, now });
+    expect(refreshRecord(anonymous, withIdToken({ roles: ['viewer'] })).session).toBe(anonymous.session);
+  });
+});
+
+describe('isSameSubject', () => {
+  const record = createRecord(tokens(), { sessionDurationDays: 30, now });
+  const refresh = (claims: Record<string, unknown>): TokenResponse => ({
+    access_token: 'access-2',
+    token_type: 'bearer',
+    id_token: idToken(claims),
+  });
+
+  it('accepts an ID token with the login\'s iss and sub, or none at all', () => {
+    expect(isSameSubject(record, refresh({ iss: 'https://idp.example.test', sub: 'user-1' }))).toBe(true);
+    expect(isSameSubject(record, { access_token: 'access-2', token_type: 'bearer' })).toBe(true);
+  });
+
+  it('refuses an ID token for another sub or from another issuer', () => {
+    expect(isSameSubject(record, refresh({ iss: 'https://idp.example.test', sub: 'user-2' }))).toBe(false);
+    expect(isSameSubject(record, refresh({ iss: 'https://other.example.test', sub: 'user-1' }))).toBe(false);
+    expect(isSameSubject(record, refresh({ iss: 'https://idp.example.test' }))).toBe(false);
   });
 });
 

@@ -28,6 +28,7 @@ import {
   claimsOf,
   createRecord,
   isExpired,
+  isSameSubject,
   keepIdentity,
   type MapRecordSession,
   openRecord,
@@ -230,7 +231,20 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       return { ok: false, reason: 'refresh_failed', cause, correlationId };
     }
 
-    const updated = refreshRecord(current, tokens);
+    if (!isSameSubject(current, tokens)) {
+      // The provider answered for someone else. Saving that would hand this
+      // session another user's tokens.
+      emit({
+        event: SESSION_EVENT.REFRESH_FAILED,
+        correlationId,
+        cause: 'idp_error',
+        accessTokenExpiresAt: current.tokens.accessTokenExpiresAt,
+        error: { message: "The refreshed ID token's iss or sub differs from the session's" },
+      });
+      return { ok: false, reason: 'refresh_failed', cause: 'idp_error', correlationId };
+    }
+
+    const updated = refreshRecord(current, tokens, { rolesClaim });
     const rotatedRefreshToken = updated.tokens.refreshToken !== current.tokens.refreshToken;
     const written = await save(cookies, updated, true);
     if (!written.saved) {

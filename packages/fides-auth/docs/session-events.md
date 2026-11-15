@@ -61,7 +61,7 @@ concludes there is "nothing in the logs".
 | --------------- | ----- | ------------------------------------------------------------- | ------- |
 | `invalid_grant` | info  | The provider says the refresh token is dead.                   | Over    |
 | `transport`     | warn  | The provider was never reached — DNS, TCP, TLS, timeout.       | Probably fine |
-| `idp_error`     | error | The provider answered with an error or something unparseable.  | Probably fine |
+| `idp_error`     | error | The provider answered with an error or something unparseable, or with an ID token for another user. | Probably fine |
 | `store`         | error | The session store failed, or `withLock` couldn't take the lock. | Probably fine |
 
 Only `invalid_grant` ends a session. The heartbeat endpoint answers `401` for it
