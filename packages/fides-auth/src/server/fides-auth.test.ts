@@ -608,6 +608,103 @@ describe('callback failures', () => {
   });
 });
 
+describe('a callback opened again', () => {
+  const callback = (state = 'state-1') => get(`/api/auth/callback?code=abc&state=${state}`);
+
+  it('redirects a logged-in browser home without a login param, and fails nothing', async () => {
+    const onLoginError = vi.fn();
+    const { auth, cookies } = setup({ onLoginError });
+    expect(location(await login(auth, cookies)).searchParams.get('login')).toBe('success');
+
+    const again = await auth.handleOidcCallback(callback(), cookies);
+    expect(again.status).toBe(302);
+    expect(location(again).toString()).toBe(`${APP}/`);
+    expect(oidc.exchangeCode).toHaveBeenCalledTimes(1);
+    expect(onLoginError).not.toHaveBeenCalled();
+    expect(await auth.readSession(cookies)).not.toBeNull();
+  });
+
+  it('goes to defaultRedirectPath', async () => {
+    const { auth, cookies } = setup({ defaultRedirectPath: '/start' });
+    await login(auth, cookies);
+    const again = await auth.handleOidcCallback(callback(), cookies);
+    expect(location(again).toString()).toBe(`${APP}/start`);
+  });
+
+  it('does the same with a sessionStore', async () => {
+    const onLoginError = vi.fn();
+    const { auth, cookies } = setup({ sessionStore: createMemorySessionStore(), onLoginError });
+    await login(auth, cookies);
+    const again = await auth.handleOidcCallback(callback(), cookies);
+    expect(location(again).toString()).toBe(`${APP}/`);
+    expect(onLoginError).not.toHaveBeenCalled();
+    expect(await auth.readSession(cookies)).not.toBeNull();
+  });
+
+  it('redirects a callback that carries a provider error the same way', async () => {
+    const { auth, cookies } = setup();
+    await login(auth, cookies);
+    const again = await auth.handleOidcCallback(get('/api/auth/callback?error=access_denied&state=state-1'), cookies);
+    expect(location(again).toString()).toBe(`${APP}/`);
+  });
+
+  it('is still an expired login for a browser without a session', async () => {
+    const onLoginError = vi.fn();
+    const { auth, cookies } = setup({ onLoginError });
+    await login(auth, cookies);
+
+    await auth.clearSession(cookies);
+    const again = await auth.handleOidcCallback(callback(), cookies);
+    expect(location(again).toString()).toBe(`${APP}/?login=error&error=login_expired`);
+    expect(onLoginError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'login_expired' }),
+      expect.any(Request),
+    );
+
+    const fresh = cookieJar();
+    const other = await auth.handleOidcCallback(callback(), fresh.cookies);
+    expect(location(other).toString()).toBe(`${APP}/?login=error&error=login_expired`);
+  });
+
+  it('is an expired login when a login that took too long meets no session', async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-11-14T12:00:00Z'), toFake: ['Date'] });
+    try {
+      const { auth, cookies } = setup();
+      const started = await auth.handleOidcLogin(get('/api/auth/login'), cookies);
+      const state = location(started).searchParams.get('state') ?? '';
+      vi.setSystemTime(Date.parse('2026-11-14T12:11:00Z'));
+      const response = await auth.handleOidcCallback(callback(state), cookies);
+      expect(location(response).toString()).toBe(`${APP}/?login=error&error=login_expired`);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('redirects home when the transaction has expired but the session is live', async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-11-14T12:00:00Z'), toFake: ['Date'] });
+    try {
+      const { auth, cookies } = setup();
+      await login(auth, cookies);
+      const started = await auth.handleOidcLogin(get('/api/auth/login'), cookies);
+      const state = location(started).searchParams.get('state') ?? '';
+      vi.setSystemTime(Date.parse('2026-11-14T12:11:00Z'));
+      const response = await auth.handleOidcCallback(callback(state), cookies);
+      expect(location(response).toString()).toBe(`${APP}/`);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is an expired login when the session cannot be read', async () => {
+    const store = createMemorySessionStore();
+    const { auth, cookies } = setup({ sessionStore: store });
+    await login(auth, cookies);
+    vi.spyOn(store, 'get').mockRejectedValue(new Error('store down'));
+    const again = await auth.handleOidcCallback(callback(), cookies);
+    expect(location(again).toString()).toBe(`${APP}/?login=error&error=login_expired`);
+  });
+});
+
 describe('guards', () => {
   const endpoints = [
     ['handleOidcLogout', '/api/auth/logout'],
