@@ -313,8 +313,13 @@ export interface FidesAuth<TData = Record<string, unknown>> {
    * Changes the user or data. Null when there is no session. It waits its
    * turn after a refresh or another update of the session, under the store's
    * lock where there is one, and `update` gets the session as it is then. So
-   * `update` must not refresh or update the same session itself: that call
-   * would wait for this one.
+   * `update` must not refresh, update or end the same session itself: that
+   * call would wait for this one, and is refused with a TypeError.
+   *
+   * It rejects with what the store threw when the store can't be locked, read
+   * or written. A refresh reports that as `cause: 'store'`, since it is asked
+   * for on the way to something else; an update is the caller's own write, and
+   * null would say there is no session.
    */
   updateSession(
     cookies: CookieStore,

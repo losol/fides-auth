@@ -524,7 +524,9 @@ sends them unless told otherwise: read them from `tokens.access_token` in both
 functions. `mapRefresh` can't fail the refresh, since the provider has spent
 the old refresh token by then. If it throws, the error is logged and the
 session is saved as the refresh left it. It runs under the store's lock, so it
-must not refresh or update the same session itself.
+must not refresh, update or end the same session itself. Such a call is
+refused with a TypeError, in `mapRefresh` and in the function you give
+`updateSession` alike.
 
 #### Keeping the session fresh
 

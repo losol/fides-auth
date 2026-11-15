@@ -368,6 +368,93 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
     });
   });
 
+  describe('a call for the session from inside its own update or mapRefresh', () => {
+    it('is refused at once, where it used to wait for itself', async () => {
+      const { lifecycle, cookies, refreshTokens } = setup();
+      await lifecycle.create(cookies, tokens(1));
+
+      const attempts: Array<[string, () => Promise<unknown>]> = [
+        ['A refresh', () => lifecycle.refresh(cookies)],
+        ['An update', () => lifecycle.update(cookies, (session) => session)],
+        ['An end of the session', () => lifecycle.end(cookies)],
+      ];
+      for (const [name, nested] of attempts) {
+        const updating = lifecycle.update(cookies, async (session) => {
+          await nested();
+          return { ...session, data: { reached: true } };
+        });
+        await expect(updating).rejects.toThrow(TypeError);
+        await expect(updating).rejects.toThrow(`${name} was called from inside updateSession`);
+      }
+      expect(refreshTokens).not.toHaveBeenCalled();
+
+      // Nothing is left waiting: the session is as it was, and the next calls go through.
+      expect((await lifecycle.read(cookies)).record?.session.data).toBeUndefined();
+      expect(await lifecycle.update(cookies, (session) => ({ ...session, data: { ok: true } }))).not.toBeNull();
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: true });
+    });
+
+    it('lets the update finish when its function handles the refusal', async () => {
+      const { lifecycle, cookies } = setup();
+      await lifecycle.create(cookies, tokens(1));
+
+      let refusal: unknown;
+      const updated = await lifecycle.update(cookies, async (session) => {
+        refusal = await lifecycle.refresh(cookies).catch((error: unknown) => error);
+        return { ...session, data: { theme: 'dark' } };
+      });
+      expect(refusal).toBeInstanceOf(TypeError);
+      expect(updated?.session.data).toEqual({ theme: 'dark' });
+    });
+
+    it('is refused inside mapRefresh too, which is logged while the refresh goes through', async () => {
+      const error = vi.fn();
+      let lifecycle: ReturnType<typeof setup>['lifecycle'] | undefined;
+      const made = setup({
+        logger: { ...quiet, error },
+        mapRefresh: async (_tokens, _claims, session) => {
+          await lifecycle?.update(made.cookies, (current) => current);
+          return session;
+        },
+      });
+      lifecycle = made.lifecycle;
+      await lifecycle.create(made.cookies, tokens(1));
+
+      expect(await lifecycle.refresh(made.cookies)).toMatchObject({ ok: true, rotatedRefreshToken: true });
+      expect(error).toHaveBeenCalledWith(
+        expect.objectContaining({ error: expect.any(TypeError) }),
+        expect.stringContaining('mapRefresh'),
+      );
+      expect((await lifecycle.read(made.cookies)).record?.tokens.refreshToken).toBe('refresh-2');
+    });
+
+    it('does not refuse what the function left running after it returned', async () => {
+      const { lifecycle, cookies } = setup();
+      await lifecycle.create(cookies, tokens(1));
+
+      let later: Promise<unknown> = Promise.resolve();
+      await lifecycle.update(cookies, (session) => {
+        // Not awaited: it refreshes once the update is done.
+        later = new Promise((resolve) => setTimeout(resolve, 10)).then(() => lifecycle.refresh(cookies));
+        return session;
+      });
+      expect(await later).toMatchObject({ ok: true });
+    });
+
+    it('does not refuse a call for another session', async () => {
+      const { lifecycle, cookies } = setup();
+      const other = cookieJar();
+      await lifecycle.create(cookies, tokens(1));
+      await lifecycle.create(other.cookies, tokens(1));
+
+      const updated = await lifecycle.update(cookies, async (session) => {
+        expect(await lifecycle.refresh(other.cookies)).toMatchObject({ ok: true });
+        return { ...session, data: { done: true } };
+      });
+      expect(updated?.session.data).toEqual({ done: true });
+    });
+  });
+
   it('rule 3: mapSession at login can change the user and data, not the identity', async () => {
     const { lifecycle, cookies } = setup({
       mapSession: async (_tokens, claims, session) => ({
@@ -701,6 +788,32 @@ describe('the session lifecycle, store storage only', () => {
     const { record } = await lifecycle.read(cookies);
     expect(record?.tokens.refreshToken).toBe('refresh-2');
     expect(record?.session.data).toEqual({ theme: 'dark' });
+  });
+
+  it('reports a store that can\'t lock as a failed refresh, and rejects an update with what the store threw', async () => {
+    const base = setup();
+    const down = new Error('lock timeout');
+    let failing = false;
+    const store: SessionStore = {
+      ...base.store,
+      withLock: (key, fn) => (failing ? Promise.reject(down) : (base.store.withLock?.(key, fn) ?? fn())),
+    };
+    const lifecycle = createSessionLifecycle({
+      storage: storeStorage({ store, secure: true }),
+      secret,
+      refreshTokens: base.refreshTokens,
+      logger: quiet,
+    });
+    const created = await lifecycle.create(base.cookies, tokens(1));
+    failing = true;
+
+    // A refresh is asked for on the way to something else, so it answers.
+    expect(await lifecycle.refresh(base.cookies)).toMatchObject({ ok: false, reason: 'refresh_failed', cause: 'store' });
+    // An update is the caller's own write: that it didn't happen is an error, not "no session".
+    await expect(lifecycle.update(base.cookies, (session) => ({ ...session, data: { a: 1 } }))).rejects.toBe(down);
+
+    failing = false;
+    expect((await lifecycle.read(base.cookies)).record).toEqual(created);
   });
 
   describe('a refresh the provider refuses for good', () => {

@@ -120,8 +120,13 @@ export interface SessionLifecycle {
    * Changes the user, scopes or data. Null when there is no session to change.
    * It takes its turn after a refresh or an update of the session that is
    * running, under the store's lock where there is one, and `update` gets the
-   * session as it is then. So `update` must not refresh or update the same
-   * session: that call would wait for this one.
+   * session as it is then. So `update` must not refresh, update or end the
+   * same session: that call would wait for this one. Where the runtime can
+   * tell, it rejects with a TypeError at once.
+   *
+   * Unlike a refresh, which reports a store that fails as `cause: 'store'`, an
+   * update rejects with what the store threw: nothing was changed, and that is
+   * for the caller to know.
    */
   update(
     cookies: CookieStore,
@@ -151,6 +156,34 @@ export interface SessionLifecycle {
     match: { iss?: string; sub?: string; sid?: string },
     options?: { trigger?: SessionClearedTrigger },
   ): Promise<SessionRecord[]>;
+}
+
+/** A call the app's own function is running inside: an update, or a `mapRefresh`. */
+interface Inside {
+  what: 'updateSession' | 'mapRefresh';
+  /** False once the function has returned: what it left running is no longer inside it. */
+  active: boolean;
+}
+
+/** The part of Node's `AsyncLocalStorage` that is used here. */
+interface AsyncContext<T> {
+  getStore(): T | undefined;
+  run<R>(store: T, fn: () => R): R;
+}
+
+/**
+ * Tells a call made from inside the app's function from one that only
+ * overlaps it. Node, Deno, Bun and Workers with Node compatibility have
+ * `AsyncLocalStorage`. It is looked up at run time, never imported, so the
+ * module loads where there is none: such a call then waits for itself, as
+ * the doc comments warn.
+ */
+function asyncContext<T>(): AsyncContext<T> | undefined {
+  const runtime = globalThis as { process?: { getBuiltinModule?(id: string): unknown } };
+  const hooks = runtime.process?.getBuiltinModule?.('node:async_hooks') as
+    | { AsyncLocalStorage?: new () => AsyncContext<T> }
+    | undefined;
+  return hooks?.AsyncLocalStorage ? new hooks.AsyncLocalStorage() : undefined;
 }
 
 const LOOKUP_KEY_INFO = 'fides-auth session lookup v1';
@@ -230,6 +263,37 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
   let lookupKeyPromise: Promise<CryptoKey> | undefined;
   // By correlation id: the end of the last refresh or update queued for a session.
   const turns = new Map<string, Promise<void>>();
+
+  // By correlation id, for the call that is running now: the app's functions it is inside.
+  const inside = asyncContext<ReadonlyMap<string, Inside>>();
+
+  /** Runs the app's function for a session, so that a call it makes for the same session can be told. */
+  async function within<T>(correlationId: string, what: Inside['what'], fn: () => T | Promise<T>): Promise<T> {
+    if (!inside) return fn();
+    const mark: Inside = { what, active: true };
+    const marks = new Map(inside.getStore()).set(correlationId, mark);
+    try {
+      return await inside.run(marks, fn);
+    } finally {
+      mark.active = false;
+    }
+  }
+
+  /**
+   * A refresh, an update or an end of a session, asked for by the function
+   * that is updating or mapping that same session, would wait for the turn or
+   * the lock its caller holds, and so for ever.
+   *
+   * @throws TypeError when the call comes from inside such a function.
+   */
+  function notFromInside(correlationId: string | undefined, calling: string): void {
+    const mark = correlationId === undefined ? undefined : inside?.getStore()?.get(correlationId);
+    if (!mark?.active) return;
+    throw new TypeError(
+      `${calling} was called from inside ${mark.what} for the same session. ` +
+        `It would wait for that ${mark.what} to finish, which waits for it: do it before or after instead`,
+    );
+  }
 
   /**
    * Runs `fn` when the refreshes and updates of this session that were asked
@@ -427,7 +491,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     let updated = refreshRecord(current, tokens, { rolesClaim });
     if (mapRefresh) {
       try {
-        const mapped = await mapRefresh(tokens, claimsOf(tokens), updated.session);
+        const refreshed = updated.session;
+        const mapped = await within(correlationId, 'mapRefresh', () =>
+          mapRefresh(tokens, claimsOf(tokens), refreshed),
+        );
         updated = { ...updated, session: keepIdentity(updated.session, mapped) };
       } catch (error) {
         // The old refresh token is spent. Failing here would lose the new
@@ -489,6 +556,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       if (!first.record) return { ok: false, reason: first.reason };
       const current = first.record;
       const correlationId = current.session.correlationId;
+      notFromInside(correlationId, 'A refresh');
       const refreshToken = current.tokens.refreshToken;
       if (!refreshToken) return { ok: false, reason: 'no_refresh_token', correlationId };
 
@@ -544,6 +612,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       const first = await read(cookies);
       if (!first.record) return null;
       const { correlationId } = first.record.session;
+      notFromInside(correlationId, 'An update');
 
       const change = async (): Promise<SessionRecord | null> => {
         // Read again: a refresh may have saved new tokens while this waited.
@@ -553,7 +622,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         // and this one still carries the cookie from before it.
         const refreshed = refreshedAfter(latest);
         const current = refreshed ?? latest;
-        const changed = await update(current.session);
+        const changed = await within(correlationId, 'updateSession', () => update(current.session));
         const updated = { ...current, session: keepIdentity(current.session, changed) };
         const written = await save(cookies, updated, 'update');
         if (!written.saved) return null;
@@ -569,6 +638,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     async end(cookies, { trigger } = {}) {
       // Read first, so the event names the session it ended.
       const current = (await read(cookies).catch(() => undefined))?.record ?? undefined;
+      notFromInside(current?.session.correlationId, 'An end of the session');
 
       // A refresh of this session still running here would bring back tokens
       // after the end, and under cookie storage save the session again. Wait
@@ -628,6 +698,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
           continue;
         }
 
+        notFromInside(entry.correlationId, 'An end of the session');
         // As in `end`: the tokens a running refresh brings back are the ones ended.
         const running = entry.correlationId ? inflight.get(entry.correlationId) : undefined;
         if (running) await running.catch(() => undefined);
