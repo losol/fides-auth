@@ -44,7 +44,7 @@ of an app is a confidential client.
 | `sessionDurationDays` | 30 | How long a session lasts from login. Refreshes don't extend it. |
 | `applicationUrl` | the redirect URI's origin | The app's public origin, for the same-origin check and redirects. |
 | `mapSession` | none | Changes the session built at login, e.g. to add `data`. |
-| `rolesClaim` | `'roles'` | The ID token claim that holds the user's roles. |
+| `rolesClaim` | `'roles'` | The ID token claim that holds the user's roles, at login and on every refresh that brings an ID token. |
 | `validateReturnTo` | a path on this origin | Turns `?returnTo=` into a safe path, or null. |
 | `defaultRedirectPath` | `'/'` | Where a login without a return path lands. |
 | `postLogoutRedirectUri` | `applicationUrl` | Where the provider sends the user after logout. |

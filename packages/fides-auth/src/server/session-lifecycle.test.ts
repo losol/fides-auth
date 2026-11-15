@@ -181,6 +181,23 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
     expect(created.session.data).toEqual({ tenant: 't1' });
   });
 
+  it('rule 3: a refresh with an ID token for someone else fails and saves nothing', async () => {
+    const { lifecycle, cookies, refreshTokens, events } = setup();
+    const created = await lifecycle.create(cookies, tokens(1));
+    refreshTokens.mockResolvedValueOnce(
+      tokens(2, { id_token: new UnsecuredJWT({ iss: 'https://idp.test', sub: 'user-2' }).encode() }),
+    );
+
+    expect(await lifecycle.refresh(cookies)).toEqual({
+      ok: false,
+      reason: 'refresh_failed',
+      cause: 'idp_error',
+      correlationId: created.session.correlationId,
+    });
+    expect((await lifecycle.read(cookies)).record).toEqual(created);
+    expect(events.at(-1)).toMatchObject({ event: 'session.refresh_failed', cause: 'idp_error' });
+  });
+
   it('rule 4: a session that does not open is unreadable, and is never read in part', async () => {
     const { lifecycle, cookies, jar } = setup();
     await lifecycle.create(cookies, tokens(1));

@@ -64,6 +64,19 @@ function stringClaim(claims: JWTPayload, name: string): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
+/** The user an ID token describes, as at login. Undefined without a `sub`. */
+function userOf(claims: JWTPayload, rolesClaim: string | undefined): Session['user'] {
+  const sub = stringClaim(claims, 'sub');
+  if (!sub) return undefined;
+  const { roles } = userFromClaims(claims, rolesClaim);
+  const user: NonNullable<Session['user']> = { sub, roles };
+  const name = stringClaim(claims, 'name');
+  const email = stringClaim(claims, 'email');
+  if (name) user.name = name;
+  if (email) user.email = email;
+  return user;
+}
+
 /** The decoded, unverified ID token claims. Undefined without an ID token. */
 export function claimsOf(tokens: TokenResponse): JWTPayload | undefined {
   return tokens.id_token ? decodeJwt(tokens.id_token) : undefined;
@@ -87,15 +100,7 @@ export function createRecord(tokens: TokenResponse, options: CreateRecordOptions
   const sub = claims && stringClaim(claims, 'sub');
   const iss = claims && stringClaim(claims, 'iss');
 
-  let user: Session['user'];
-  if (claims && sub) {
-    const { roles } = userFromClaims(claims, options.rolesClaim);
-    user = { sub, roles };
-    const name = stringClaim(claims, 'name');
-    const email = stringClaim(claims, 'email');
-    if (name) user.name = name;
-    if (email) user.email = email;
-  }
+  const user = claims && userOf(claims, options.rolesClaim);
 
   const session: Session = {
     correlationId: newSessionId(),
@@ -133,18 +138,45 @@ export function keepIdentity(original: Session, changed: Session): Session {
   };
 }
 
+/** Options for {@link refreshRecord}. */
+export interface RefreshRecordOptions {
+  /** @default 'roles' */
+  rolesClaim?: string;
+  /** Milliseconds since the epoch. */
+  now?: number;
+}
+
 /**
- * The record after a refresh: new tokens, the same session. A provider that
+ * Whether a refresh's ID token is for the session's own user: OIDC Core §12.2
+ * requires the `iss` and `sub` of the ID token from login. True without an ID
+ * token, or for a session that has no IdP session to compare with.
+ */
+export function isSameSubject(record: SessionRecord, tokens: TokenResponse): boolean {
+  const claims = claimsOf(tokens);
+  const { idp } = record.session;
+  if (!claims || !idp) return true;
+  return stringClaim(claims, 'sub') === idp.sub && stringClaim(claims, 'iss') === idp.iss;
+}
+
+/**
+ * The record after a refresh: new tokens, the same identity. A provider that
  * doesn't rotate the refresh token, or sends no new ID token, keeps the old one.
+ *
+ * A new ID token updates the user as at login: the roles follow `rolesClaim`,
+ * the name and email change when the token carries them, and `sub` and the
+ * fields `mapSession` added stay. Check {@link isSameSubject} first.
  */
 export function refreshRecord(
   record: SessionRecord,
   tokens: TokenResponse,
-  now = Date.now(),
+  { rolesClaim, now = Date.now() }: RefreshRecordOptions = {},
 ): SessionRecord {
+  const { user, idp } = record.session;
+  const claims = claimsOf(tokens);
+  const fresh = claims && user && idp ? userOf(claims, rolesClaim) : undefined;
   return {
     v: 1,
-    session: record.session,
+    session: fresh && user ? { ...record.session, user: { ...user, ...fresh, sub: user.sub } } : record.session,
     tokens: {
       ...record.tokens,
       accessToken: tokens.access_token,

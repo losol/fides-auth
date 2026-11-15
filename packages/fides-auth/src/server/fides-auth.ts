@@ -47,7 +47,8 @@ import type { SessionStore } from './session-store.js';
  * Changes the session built at login, e.g. to add `data` or look the user up.
  * `claims` are decoded from the ID token, not verified, and undefined without
  * one. The correlation id, the timestamps and the IdP session are kept
- * whatever it returns.
+ * whatever it returns. It runs at login only: a refresh that brings an ID
+ * token updates the user's roles, name and email from it, and keeps the rest.
  */
 export type MapSession = MapRecordSession;
 
@@ -68,7 +69,8 @@ export interface FidesAuthConfig {
   /** Changes the session built at login. */
   mapSession?: MapSession;
   /**
-   * The ID token claim that holds the user's roles.
+   * The ID token claim that holds the user's roles, read at login and on every
+   * refresh that brings an ID token.
    * @default 'roles'
    */
   rolesClaim?: string;

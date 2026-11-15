@@ -609,6 +609,17 @@ describe('session members', () => {
     });
   });
 
+  it('takes the user from the ID token a refresh brings, so lost roles go', async () => {
+    const { auth, cookies } = setup();
+    await login(auth, cookies);
+    expect((await auth.readSession(cookies))?.user?.roles).toEqual(['admin']);
+
+    const demoted = new UnsecuredJWT({ iss: 'https://idp.test', sub: 'user-1', name: 'Ada', roles: [] }).encode();
+    oidc.refresh.mockResolvedValueOnce(tokens(2, { id_token: demoted }));
+    await auth.refreshSession(cookies);
+    expect((await auth.readSession(cookies))?.user).toEqual({ sub: 'user-1', name: 'Ada', roles: [] });
+  });
+
   it('answers the heartbeat with 503, not a throw, when the store lock fails', async () => {
     const store = {
       ...createMemorySessionStore(),
