@@ -1,6 +1,6 @@
 {
   "name": "@eventuras/fides-auth",
-  "version": "1.0.0-beta.2",
+  "version": "1.0.0-beta.3",
   "description": "Framework-agnostic OAuth/OIDC authentication library with PKCE, session management, and pluggable logging",
   "keywords": [
     "oauth",

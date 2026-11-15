@@ -1,5 +1,42 @@
 # @eventuras/fides-auth-next
 
+## 1.0.0-beta.3
+
+### Patch Changes
+
+- b1721c1: A login that fails always redirects to `defaultRedirectPath` with `?login=error&error=<code>`. A callback
+  without a live login answered 400 with English text, a failed code exchange 500, and a session too large for
+  the cookies 431; they now carry `login_expired`, `login_failed` and `session_too_large`. `handleOidcLogin` no
+  longer throws when the login can't be started, because the provider can't be reached say: it redirects with
+  `login_unavailable`. `onLoginError` answers a failed login in another way.
+- 83860bd: `mapRefresh` changes the session a refresh leaves, the way `mapSession` does at login. What `mapSession` put
+  in `data` from the ID token claims stayed as it was at login; with `mapRefresh` it can follow each refresh. It
+  is also where roles that only the access token carries are set again. It can't fail the refresh: if it throws,
+  the error is logged and the session is saved as the refresh left it.
+- bb88bc5: A refresh that ends a stored session, because the provider refused it for good, deletes the session cookie
+  too, where cookies can be set. The browser kept sending a handle that found no session, and a proxy that
+  checks for the cookie took the user for signed in.
+- 094b74d: `rolesClaim` can be a function of the ID token claims, for roles that aren't in a top-level claim, such as
+  Keycloak's `realm_access.roles`. Roles that `mapSession` read from such a claim were gone after the first
+  refresh. `rolesClaim: false` leaves `user.roles` to `mapSession`, and a refresh then keeps them. A login where
+  `mapSession` sets roles that the next refresh would replace logs a warning, once.
+- 993e12b: `storeFields` values may now be lists of strings, for roles say, as well as strings, numbers, booleans and null. A store's `set` gets `context.reason`, one of `'login'`, `'refresh'` and `'update'`, so an adapter can tell a refresh from an `updateSession` and stamp when a session was last refreshed. `StoreSetReason` is exported.
+- 9d3b85b: `updateSession` could undo a refresh. An update that overlapped a refresh saved the session it had read before
+  it, with the refresh token the refresh had just spent, so the next refresh failed with `invalid_grant`. A
+  refresh and an update of one session now take turns, in the process and under the store's lock, and each starts
+  from what the other saved.
+- Updated dependencies [99c0422]
+- Updated dependencies [124b84d]
+- Updated dependencies [b1721c1]
+- Updated dependencies [83860bd]
+- Updated dependencies [bb88bc5]
+- Updated dependencies [094b74d]
+- Updated dependencies [4c57abb]
+- Updated dependencies [993e12b]
+- Updated dependencies [9d3b85b]
+- Updated dependencies [08548be]
+  - @eventuras/fides-auth@1.0.0-beta.3
+
 ## 1.0.0-beta.2
 
 ### Minor Changes
