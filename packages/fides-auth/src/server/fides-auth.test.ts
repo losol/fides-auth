@@ -640,9 +640,10 @@ describe('guards', () => {
   it('rate limits every handler', async () => {
     const rateLimit = vi.fn(() => false);
     const { auth, cookies } = setup({ rateLimit });
-    expect((await auth.handleOidcLogin(get('/api/auth/login'), cookies)).status).toBe(429);
-    expect((await auth.handleOidcCallback(get('/api/auth/callback?code=a&state=b'), cookies)).status).toBe(429);
-    expect((await auth.handleOidcLogout(post('/api/auth/logout'), cookies)).status).toBe(429);
+    const refused = (response: Response) => response.status === 302 && location(response).searchParams.has('error');
+    expect(refused(await auth.handleOidcLogin(get('/api/auth/login'), cookies))).toBe(true);
+    expect(refused(await auth.handleOidcCallback(get('/api/auth/callback?code=a&state=b'), cookies))).toBe(true);
+    expect(refused(await auth.handleOidcLogout(post('/api/auth/logout'), cookies))).toBe(true);
     expect((await auth.handleHeartbeat(post('/api/auth/heartbeat'), cookies)).status).toBe(429);
     expect(rateLimit).toHaveBeenCalledTimes(4);
     expect(oidc.createAuthorizationRequest).not.toHaveBeenCalled();
@@ -664,6 +665,112 @@ describe('guards', () => {
     const response = await auth.handleSessionInfo(post('/api/auth/session'), cookies);
     expect(response.status).toBe(405);
     expect(response.headers.get('allow')).toBe('GET, HEAD');
+  });
+});
+
+describe('logout failures', () => {
+  const limited = () => false;
+
+  it('sends a rate-limited login to onLoginError, and its Response is the answer', async () => {
+    const onLoginError = vi.fn(() => new Response('slow down', { status: 429 }));
+    const { auth, cookies } = setup({ rateLimit: limited, onLoginError });
+    const response = await auth.handleOidcLogin(get('/api/auth/login'), cookies);
+    expect(response.status).toBe(429);
+    expect(onLoginError).toHaveBeenCalledWith({ code: 'rate_limited', stage: 'login' }, expect.any(Request));
+  });
+
+  it('redirects a rate-limited login by default', async () => {
+    const { auth, cookies } = setup({ rateLimit: limited });
+    const response = await auth.handleOidcLogin(get('/api/auth/login'), cookies);
+    expect(location(response).toString()).toBe(`${APP}/?login=error&error=rate_limited`);
+  });
+
+  it('sends a rate-limited callback to onLoginError, and its Response is the answer', async () => {
+    const onLoginError = vi.fn(() => new Response('slow down', { status: 429 }));
+    const { auth, cookies } = setup({ rateLimit: limited, onLoginError });
+    const response = await auth.handleOidcCallback(get('/api/auth/callback?code=a&state=b'), cookies);
+    expect(response.status).toBe(429);
+    expect(onLoginError).toHaveBeenCalledWith({ code: 'rate_limited', stage: 'callback' }, expect.any(Request));
+  });
+
+  it('redirects a rate-limited callback by default', async () => {
+    const { auth, cookies } = setup({ rateLimit: limited });
+    const response = await auth.handleOidcCallback(get('/api/auth/callback?code=a&state=b'), cookies);
+    expect(location(response).toString()).toBe(`${APP}/?login=error&error=rate_limited`);
+  });
+
+  it('redirects a rate-limited logout and keeps the session', async () => {
+    let allowed = true;
+    const { auth, cookies } = setup({ rateLimit: () => allowed });
+    await login(auth, cookies);
+    allowed = false;
+    const response = await auth.handleOidcLogout(post('/api/auth/logout'), cookies);
+    expect(location(response).toString()).toBe(`${APP}/?logout=error&error=rate_limited`);
+    expect(await auth.readSession(cookies)).not.toBeNull();
+  });
+
+  it('gives a rate-limited logout to onLogoutError, and its Response is the answer', async () => {
+    let allowed = true;
+    const onLogoutError = vi.fn(() => new Response('slow down', { status: 429 }));
+    const { auth, cookies } = setup({ rateLimit: () => allowed, onLogoutError });
+    await login(auth, cookies);
+    allowed = false;
+    const response = await auth.handleOidcLogout(post('/api/auth/logout'), cookies);
+    expect(response.status).toBe(429);
+    expect(onLogoutError).toHaveBeenCalledWith({ code: 'rate_limited' }, expect.any(Request));
+    expect(await auth.readSession(cookies)).not.toBeNull();
+  });
+
+  describe('when the session cannot be ended', () => {
+    const broken = new Error('store is down');
+    function brokenStore() {
+      const store = createMemorySessionStore();
+      return {
+        ...store,
+        delete: () => {
+          throw broken;
+        },
+      };
+    }
+
+    it('redirects with logout_failed and does not go to the provider', async () => {
+      const { auth, cookies } = setup({ sessionStore: brokenStore() });
+      await login(auth, cookies);
+      const response = await auth.handleOidcLogout(post('/api/auth/logout'), cookies);
+      expect(location(response).toString()).toBe(`${APP}/?logout=error&error=logout_failed`);
+      expect(oidc.logoutUrl).not.toHaveBeenCalled();
+    });
+
+    it('gives onLogoutError the code and what was thrown', async () => {
+      const onLogoutError = vi.fn(() => new Response('try again', { status: 500 }));
+      const { auth, cookies } = setup({ sessionStore: brokenStore(), onLogoutError });
+      await login(auth, cookies);
+      const response = await auth.handleOidcLogout(post('/api/auth/logout'), cookies);
+      expect(response.status).toBe(500);
+      expect(onLogoutError).toHaveBeenCalledWith({ code: 'logout_failed', cause: broken }, expect.any(Request));
+      expect(oidc.logoutUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  it('redirects all the same when onLogoutError throws', async () => {
+    const { auth, cookies } = setup({
+      rateLimit: limited,
+      onLogoutError: () => {
+        throw new Error('broken error page');
+      },
+    });
+    const response = await auth.handleOidcLogout(post('/api/auth/logout'), cookies);
+    expect(location(response).toString()).toBe(`${APP}/?logout=error&error=rate_limited`);
+  });
+
+  it('may return nothing, whether it is async or not', () => {
+    // For the compiler: a handler that only logs or reports.
+    setup({ onLogoutError: (error) => void error.code });
+    setup({
+      onLogoutError: async (error) => {
+        await Promise.resolve(error.code);
+      },
+    });
   });
 });
 

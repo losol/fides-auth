@@ -52,8 +52,9 @@ of an app is a confidential client.
 | `defaultRedirectPath` | `'/'` | Where a login without a return path lands. |
 | `loginSuccessParam` | `true` | Adds `?login=success` to the return path after a login. False leaves the path as it was. |
 | `onLoginError` | none | `(error, request) => Response \| undefined`. Answers a failed login in place of the redirect. |
+| `onLogoutError` | none | `(error, request) => Response \| undefined`. Answers a failed logout in place of the redirect to `?logout=error&error=<code>`. |
 | `postLogoutRedirectUri` | `applicationUrl` | Where the provider sends the user after logout. |
-| `rateLimit` | none | `(request) => boolean`. The handlers answer 429 when it returns false. |
+| `rateLimit` | none | `(request) => boolean`. False refuses the request: the heartbeat answers 429, and a login or a logout fails with `rate_limited`. |
 | `logger` | JSON lines on the console | A `FidesLoggerFactory`. |
 | `onSessionEvent` | none | Gets every session event. See [session events](../fides-auth/docs/session-events.md). |
 

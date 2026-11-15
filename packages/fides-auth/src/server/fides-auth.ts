@@ -76,6 +76,7 @@ export type MapSession<TData = Record<string, unknown>> = (
  *   provider won't exchange.
  * - `login_unavailable`: the login couldn't be started, most often because
  *   the provider couldn't be reached.
+ * - `rate_limited`: `rateLimit` refused the request.
  * - `idp_error`, or the provider's own code when it has the shape of one,
  *   such as `access_denied` when the user cancels.
  */
@@ -85,6 +86,7 @@ export type LoginErrorCode =
   | 'session_too_large'
   | 'login_failed'
   | 'login_unavailable'
+  | 'rate_limited'
   | 'idp_error'
   | (string & {});
 
@@ -93,6 +95,16 @@ export interface LoginError {
   code: LoginErrorCode;
   /** Where it failed: when the login started, or at the provider's redirect back. */
   stage: 'login' | 'callback';
+  /** What was thrown, when something was. For logs, not for the user. */
+  cause?: unknown;
+}
+
+/** Why a logout failed: `logout_failed` when the session couldn't be ended, `rate_limited` when `rateLimit` refused the request. */
+export type LogoutErrorCode = 'logout_failed' | 'rate_limited';
+
+/** A logout that failed, as `onLogoutError` gets it. The user is still logged in. */
+export interface LogoutError {
+  code: LogoutErrorCode;
   /** What was thrown, when something was. For logs, not for the user. */
   cause?: unknown;
 }
@@ -188,9 +200,22 @@ export interface FidesAuthConfig<TData = Record<string, unknown>> {
     error: LoginError,
     request: Request,
   ) => Response | undefined | void | Promise<Response | undefined> | Promise<void>;
+  /**
+   * Called when a logout fails, which leaves the user logged in. Return a
+   * Response to answer with it. Without one, the user is sent to
+   * `defaultRedirectPath` with `?logout=error&error=<code>`.
+   */
+  onLogoutError?: (
+    error: LogoutError,
+    request: Request,
+  ) => Response | undefined | void | Promise<Response | undefined> | Promise<void>;
   /** Where the provider sends the user after logout. Defaults to `applicationUrl`. */
   postLogoutRedirectUri?: string;
-  /** Answers false to make a handler respond 429. */
+  /**
+   * Answers false to refuse a request. The heartbeat then answers 429. A
+   * login or a logout is answered as one that failed, with the code
+   * `rate_limited`.
+   */
   rateLimit?: (request: Request) => boolean | Promise<boolean>;
   /** Creates the loggers. Defaults to JSON lines on the console. */
   logger?: FidesLoggerFactory;
@@ -260,6 +285,9 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   /**
    * `POST`. Ends the session, revokes its refresh token where the provider has
    * a revocation endpoint, and redirects to the provider's end-session endpoint.
+   * A logout that fails leaves the user logged in and is answered with what
+   * `onLogoutError` returns, or else a redirect to `defaultRedirectPath` with
+   * `?logout=error&error=<code>`, a {@link LogoutErrorCode}.
    */
   handleOidcLogout(
     request: Request,
@@ -401,7 +429,6 @@ function methodNotAllowed(allow: string): Response {
   return new Response(null, { status: 405, headers: { Allow: allow } });
 }
 
-const tooManyRequests = () => new Response('Too many requests', { status: 429 });
 const forbidden = () => new Response('Forbidden', { status: 403 });
 
 /**
@@ -522,6 +549,20 @@ export function createFidesAuth<TData = Record<string, unknown>>(
     return loginError(failure.code);
   }
 
+  /** Answers a failed logout: with what `onLogoutError` returns, or else the redirect with the code. */
+  async function logoutFailed(request: Request, failure: LogoutError, logger: FidesLogger): Promise<Response> {
+    try {
+      const response = await config.onLogoutError?.(failure, request);
+      if (response instanceof Response) return response;
+    } catch (error) {
+      logger.error({ error }, 'onLogoutError threw');
+    }
+    const url = new URL(defaultRedirectPath, settings().applicationUrl);
+    url.searchParams.set('logout', 'error');
+    url.searchParams.set('error', failure.code);
+    return redirect(url);
+  }
+
   /** The session with `data` as the app typed it: what it holds is what the app put there. */
   const typed = (session: Session): Session<TData> => session as Session<TData>;
 
@@ -577,7 +618,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       const { txCookie } = settings();
       if (await limited(request)) {
         log.login.warn('Rate limit exceeded');
-        return tooManyRequests();
+        return loginFailed(request, { code: 'rate_limited', stage: 'login' }, log.login);
       }
 
       const raw = new URL(request.url).searchParams.get('returnTo');
@@ -614,7 +655,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       const { applicationUrl, txCookie, lifecycle } = settings();
       if (await limited(request)) {
         log.callback.warn('Rate limit exceeded');
-        return tooManyRequests();
+        return loginFailed(request, { code: 'rate_limited', stage: 'callback' }, log.callback);
       }
 
       const currentUrl = new URL(request.url);
@@ -693,7 +734,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       }
       if (await limited(request)) {
         log.logout.warn('Rate limit exceeded');
-        return tooManyRequests();
+        return logoutFailed(request, { code: 'rate_limited' }, log.logout);
       }
 
       // A bad secret is a config error, not a session to end quietly.
@@ -705,7 +746,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         // Never send the user to the provider with the local session half ended:
         // they would come back looking logged in.
         log.logout.error({ error }, 'Failed to end the session');
-        return new Response('Logout failed', { status: 500 });
+        return logoutFailed(request, { code: 'logout_failed', cause: error }, log.logout);
       }
       await revokeRefreshToken(ended, log.logout);
 
