@@ -45,7 +45,7 @@ import {
 import type { CookieStore } from './cookie-store.js';
 import { assertSessionSecret, type SessionSecret } from './session-secret.js';
 import type { LookupFields, SaveResult, SessionStorage } from './session-storage.js';
-import type { SessionMatch, StoreFields } from './session-store.js';
+import type { SessionMatch, StoreFields, StoreSetReason } from './session-store.js';
 
 export type ReadRecordResult =
   | { record: SessionRecord; reason?: undefined }
@@ -266,7 +266,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
   async function save(
     cookies: CookieStore,
     record: SessionRecord,
-    continuation: boolean,
+    reason: StoreSetReason,
   ): Promise<SaveResult> {
     return storage.save(cookies, {
       sealed: await sealRecord(record, secret),
@@ -274,7 +274,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       correlationId: record.session.correlationId,
       lookup: await lookupFields(record),
       fields: storage.mode === 'server' ? options.storeFields?.(record.session) : undefined,
-      continuation,
+      continuation: reason !== 'login',
+      reason,
     });
   }
 
@@ -354,7 +355,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
     const updated = refreshRecord(current, tokens, { rolesClaim });
     const rotatedRefreshToken = updated.tokens.refreshToken !== current.tokens.refreshToken;
-    const written = await save(cookies, updated, true);
+    const written = await save(cookies, updated, 'refresh');
     if (!written.saved) {
       logger.info({ correlationId }, 'Session ended during refresh; not saved');
       return { ok: false, reason: 'session_not_found', correlationId };
@@ -381,7 +382,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         const mapped = await mapSession(tokens, claimsOf(tokens), record.session);
         record = { ...record, session: keepIdentity(record.session, mapped) };
       }
-      const written = await save(cookies, record, false);
+      const written = await save(cookies, record, 'login');
       emit({
         event: SESSION_EVENT.CREATED,
         correlationId: record.session.correlationId,
@@ -411,7 +412,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       // this response carries the new cookies too.
       const already = refreshedAfter(current);
       if (already) {
-        await save(cookies, already, true);
+        await save(cookies, already, 'refresh');
         return alreadyRefreshed(current, already);
       }
 
@@ -452,7 +453,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       if (!current.record) return null;
       const changed = await update(current.record.session);
       const updated = { ...current.record, session: keepIdentity(current.record.session, changed) };
-      const written = await save(cookies, updated, true);
+      const written = await save(cookies, updated, 'update');
       return written.saved ? updated : null;
     },
 

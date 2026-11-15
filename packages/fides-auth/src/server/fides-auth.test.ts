@@ -18,7 +18,7 @@ import type { CookieStore } from './cookie-store.js';
 import { fetchCookieStore } from './fetch-cookie-store.js';
 import { createFidesAuth, type FidesAuth, type FidesAuthConfig } from './fides-auth.js';
 import { SessionSecretError } from './session-secret.js';
-import { createMemorySessionStore } from './session-store.js';
+import { createMemorySessionStore, type StoreFields } from './session-store.js';
 
 const secret = 'a'.repeat(64);
 const APP = 'https://app.test';
@@ -796,7 +796,7 @@ describe('session members', () => {
     });
     await login(auth, cookies);
     expect(set.mock.calls[0]?.[1].fields).toEqual({ userId: 'user-1' });
-    expect(set.mock.calls[0]?.[2]).toEqual({ continuation: false });
+    expect(set.mock.calls[0]?.[2]).toEqual({ continuation: false, reason: 'login' });
   });
 
   describe('readSessionWithTokens', () => {
@@ -1077,5 +1077,34 @@ describe('typed session data', () => {
     const session = await auth.readSession(cookies);
     expectTypeOf(session).toEqualTypeOf<Session | null>();
     expectTypeOf(session?.data).toEqualTypeOf<Record<string, unknown> | undefined>();
+  });
+});
+
+describe('the reason a store gets', () => {
+  it('is login, refresh and update, and storeFields may hold a list of strings', async () => {
+    const store = createMemorySessionStore();
+    const set = vi.spyOn(store, 'set');
+    const { auth, cookies } = setup({
+      sessionStore: store,
+      storeFields: (session) => ({ roles: session.user?.roles ?? [] }),
+    });
+    await login(auth, cookies);
+    await auth.refreshSession(cookies);
+    await auth.updateSession(cookies, (current) => current);
+
+    expect(set.mock.calls.map(([, , context]) => context)).toEqual([
+      { continuation: false, reason: 'login' },
+      { continuation: true, reason: 'refresh' },
+      { continuation: true, reason: 'update' },
+    ]);
+    expect(set.mock.calls[0]?.[1].fields).toEqual({ roles: ['admin'] });
+  });
+
+  it('types storeFields values as scalars or lists of strings', () => {
+    const lists: StoreFields = { roles: ['admin'], userId: 'u', active: true, team: null, n: 1 };
+    expectTypeOf(lists).toMatchTypeOf<StoreFields>();
+    // @ts-expect-error a nested object is not a field value
+    const nested: StoreFields = { profile: { name: 'Ada' } };
+    expect(nested).toBeDefined();
   });
 });

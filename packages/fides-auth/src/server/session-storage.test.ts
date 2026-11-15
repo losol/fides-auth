@@ -40,7 +40,7 @@ function cookieJar(initial: Record<string, string> = {}) {
 const inAnHour = () => new Date(Date.now() + 3_600_000).toISOString();
 
 function request(sealed: string, extra: Partial<SaveRequest> = {}): SaveRequest {
-  return { sealed, expiresAt: inAnHour(), correlationId: 'c1', continuation: false, ...extra };
+  return { sealed, expiresAt: inAnHour(), correlationId: 'c1', continuation: false, reason: 'login', ...extra };
 }
 
 describe('cookieStorage', () => {
@@ -201,7 +201,7 @@ describe('storeStorage', () => {
     const { cookies, jar, storage } = setup();
     await storage.save(cookies, request('first'));
     const handle = jar.get('__Host-session');
-    expect(await storage.save(cookies, request('second', { continuation: true }))).toEqual({
+    expect(await storage.save(cookies, request('second', { continuation: true, reason: 'refresh' }))).toEqual({
       saved: true,
     });
 
@@ -215,7 +215,7 @@ describe('storeStorage', () => {
     const handle = jar.get('__Host-session') ?? '';
     await store.delete(await sha256(handle));
 
-    expect(await storage.save(cookies, request('late', { continuation: true }))).toEqual({
+    expect(await storage.save(cookies, request('late', { continuation: true, reason: 'refresh' }))).toEqual({
       saved: false,
     });
     expect(await store.get(await sha256(handle))).toBeNull();
