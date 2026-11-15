@@ -368,7 +368,7 @@ confidential client.
 | `getTokens` | The tokens, which the session doesn't carry. |
 | `readSessionWithTokens` | The session and its tokens in one read, or why there is none. |
 | `refreshSession(cookies, { ifExpiresWithin? })` | Refreshes the tokens, or only when the access token is about to expire. |
-| `createSession`, `updateSession` | |
+| `createSession`, `updateSession` | Starts a session from a token response, and changes its user or data. An update waits its turn after a refresh, so neither undoes the other. |
 | `clearSession(cookies, { trigger? })` | Ends the session and revokes its refresh token, without the redirect. |
 | `endUserSessions({ sub, iss? })` | Ends every session of one user, wherever they are signed in, and revokes their refresh tokens. Needs a `sessionStore` with `findMatching`. |
 | `authorizedFetch(cookies, url, options)` | Calls an API with the access token. Never refreshes. |
