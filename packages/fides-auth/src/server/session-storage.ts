@@ -19,7 +19,7 @@ import {
 import type { SessionPersistenceMode } from '../shared/session-events.js';
 import { generateToken, sha256 } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
-import type { SessionMatch, SessionStore, StoredSession, StoreFields } from './session-store.js';
+import type { SessionMatch, SessionStore, StoredSession, StoreFields, StoreSetReason } from './session-store.js';
 
 /** Cookie storage cuts a sealed record into at most this many cookies. */
 export const MAX_CHUNKS = 3;
@@ -77,6 +77,8 @@ export interface SaveRequest {
    * starts a new session: store storage mints a new handle.
    */
   continuation: boolean;
+  /** Why the record is written. Passed to the store; cookie storage ignores it. */
+  reason: StoreSetReason;
 }
 
 /** A session found by its lookup fields, without its cookie. */
@@ -262,7 +264,7 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
         if (current === null || current === 'invalid' || !(await store.get(current.key))) {
           return { saved: false };
         }
-        await store.set(current.key, record(request), { continuation: true });
+        await store.set(current.key, record(request), { continuation: true, reason: request.reason });
         await deleteLegacy(cookies, secure);
         return { saved: true };
       }
@@ -271,7 +273,7 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
       // (session fixation) never becomes a logged-in one.
       if (current && current !== 'invalid') await store.delete(current.key);
       const handle = generateToken(32);
-      await store.set(await sha256(handle), record(request), { continuation: false });
+      await store.set(await sha256(handle), record(request), { continuation: false, reason: request.reason });
       const options = cookieOptions(secure, secondsLeft(request.expiresAt));
       await cookies.set(name, handle, options);
       await deletePresent(cookies, otherChunks, options);

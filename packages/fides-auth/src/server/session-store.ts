@@ -6,9 +6,10 @@
 
 /**
  * Plain fields an app keeps next to a session, from `storeFields` in the
- * config: its own user id, say, to list or count who is signed in.
+ * config: its own user id, say, to list or count who is signed in. A value is
+ * a scalar or a list of strings, for roles say.
  */
-export type StoreFields = Record<string, string | number | boolean | null>;
+export type StoreFields = Record<string, string | number | boolean | null | string[]>;
 
 /** One persisted session, as the store sees it. */
 export interface StoredSession {
@@ -34,13 +35,24 @@ export interface StoredSession {
   fields?: StoreFields;
 }
 
+/** Why a record is written: a new session, a token refresh, or an app update. */
+export type StoreSetReason = 'login' | 'refresh' | 'update';
+
 /** What a `set` is for, so an adapter can insert or update. */
 export interface StoreSetContext {
   /**
    * True for a refresh or an update of a session the store already has. False
-   * for a new session, which always comes with a new key.
+   * for a new session, which always comes with a new key. It is
+   * `reason !== 'login'`.
    */
   continuation: boolean;
+  /**
+   * Why the record is written: `'login'` for a new session, `'refresh'` when
+   * the tokens were refreshed, `'update'` when the app changed the session
+   * with `updateSession`. An adapter can use it to stamp when a session was
+   * last refreshed.
+   */
+  reason: StoreSetReason;
 }
 
 /**

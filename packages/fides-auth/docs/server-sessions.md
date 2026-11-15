@@ -36,7 +36,7 @@ don't extend it. The handle cookie expires with it.
 ```ts
 interface SessionStore {
   get(key: string): StoredSession | null | undefined | Promise<StoredSession | null | undefined>;
-  set(key: string, record: StoredSession, context: { continuation: boolean }): void | Promise<void>;
+  set(key: string, record: StoredSession, context: StoreSetContext): void | Promise<void>;
   delete(key: string): void | Promise<void>;
   withLock?<T>(key: string, fn: () => Promise<T>): Promise<T>;
   findMatching?(match: SessionMatch): StoredSessionEntry[] | Promise<StoredSessionEntry[]>;
@@ -49,7 +49,12 @@ interface StoredSession {
   iss?: string;           // the ID token's issuer
   subHash?: string;       // HMAC of the ID token's sub, never sub itself
   idpSidHash?: string;    // HMAC of the ID token's sid claim
-  fields?: Record<string, string | number | boolean | null>; // from storeFields
+  fields?: Record<string, string | number | boolean | null | string[]>; // from storeFields
+}
+
+interface StoreSetContext {
+  continuation: boolean; // false for a new session, true for a refresh or an update
+  reason: "login" | "refresh" | "update";
 }
 
 interface SessionMatch { iss: string; subHash?: string; idpSidHash?: string }
@@ -61,7 +66,10 @@ library sets: `iss`, `subHash` and `idpSidHash` are what finds a user's sessions
 for [`endUserSessions`](#ending-a-users-sessions) and for back-channel logout.
 `set` gets `continuation: false` for a new session, which always comes with a
 new key, and `true` for a refresh or an update of one the store has, so an
-adapter can insert or update. On the library's side:
+adapter can insert or update. `reason` says why the record is written:
+`'login'` for a new session, `'refresh'` when the tokens were refreshed, and
+`'update'` when the app changed the session with `updateSession`. On the
+library's side:
 
 - `data` is sealed before `set` and opened after `get`. A store dump alone
   yields no tokens.
@@ -111,6 +119,17 @@ export const sessionStore: SessionStore = {
 };
 ```
 
+An adapter can use `reason` to record when a session was last refreshed:
+
+```ts
+async set(key, record, { reason }) {
+  await db.sessions.save(key, {
+    ...record,
+    ...(reason === "refresh" && { refreshedAt: new Date() }),
+  });
+},
+```
+
 ## Your own fields
 
 A store sees a sealed record and hashes, so it can't tell whose session a
@@ -129,6 +148,8 @@ export const auth = createFidesAuth<{ userId: string }>({
 });
 ```
 
+A value is a string, number, boolean or null, or a list of strings, for roles
+say: `storeFields: (session) => ({ roles: session.user?.roles ?? [] })`.
 The store gets them as `record.fields` on every `set`, so they follow the
 session through refreshes and `updateSession`. Index them to list or count who
 is signed in. They aren't sealed: return only what the store may show, and

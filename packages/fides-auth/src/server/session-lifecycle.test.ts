@@ -603,7 +603,7 @@ describe('the session lifecycle, store storage only', () => {
     refreshTokens.mockImplementationOnce(async () => {
       const stored = await store.get(key);
       const rotated = { ...created, tokens: { ...created.tokens, accessToken: 'other', refreshToken: 'refresh-x' } };
-      await store.set(key, { ...stored!, data: await sealRecord(rotated, secret) }, { continuation: true });
+      await store.set(key, { ...stored!, data: await sealRecord(rotated, secret) }, { continuation: true, reason: 'refresh' });
       throw invalidGrant();
     });
 
@@ -629,9 +629,9 @@ describe('the session lifecycle, store storage only', () => {
     await lifecycle.update(cookies, (session) => ({ ...session, data: { team: 'blue' } }));
 
     expect(set.mock.calls.map(([, record, context]) => [record.fields, context])).toEqual([
-      [{ name: 'Ada', team: null }, { continuation: false }],
-      [{ name: 'Ada', team: null }, { continuation: true }],
-      [{ name: 'Ada', team: 'blue' }, { continuation: true }],
+      [{ name: 'Ada', team: null }, { continuation: false, reason: 'login' }],
+      [{ name: 'Ada', team: null }, { continuation: true, reason: 'refresh' }],
+      [{ name: 'Ada', team: 'blue' }, { continuation: true, reason: 'update' }],
     ]);
     // One key throughout: a refresh and an update keep the handle.
     expect(new Set(set.mock.calls.map(([key]) => key)).size).toBe(1);

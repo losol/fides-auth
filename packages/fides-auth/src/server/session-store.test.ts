@@ -8,7 +8,7 @@ describe('createMemorySessionStore', () => {
   it('stores, returns and deletes records', async () => {
     const store = createMemorySessionStore();
 
-    await store.set('k', { data: 'd', expiresAt: future, correlationId: 's' }, { continuation: false });
+    await store.set('k', { data: 'd', expiresAt: future, correlationId: 's' }, { continuation: false, reason: 'login' });
     expect(await store.get('k')).toEqual({ data: 'd', expiresAt: future, correlationId: 's' });
 
     await store.delete('k');
@@ -18,14 +18,14 @@ describe('createMemorySessionStore', () => {
 
   it('drops an expired record on read', async () => {
     const store = createMemorySessionStore();
-    await store.set('k', { data: 'd', expiresAt: '2000-01-01T00:00:00.000Z' }, { continuation: false });
+    await store.set('k', { data: 'd', expiresAt: '2000-01-01T00:00:00.000Z' }, { continuation: false, reason: 'login' });
 
     expect(await store.get('k')).toBeNull();
   });
 
   it('findMatching returns the records that match every key given', async () => {
     const store = createMemorySessionStore();
-    const fresh = { continuation: false };
+    const fresh = { continuation: false, reason: 'login' };
     const record = (iss: string, subHash: string, idpSidHash: string) => ({
       data: 'd',
       expiresAt: future,

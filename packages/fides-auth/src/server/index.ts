@@ -27,4 +27,5 @@ export {
   type StoredSessionEntry,
   type StoreFields,
   type StoreSetContext,
+  type StoreSetReason,
 } from './session-store.js';
