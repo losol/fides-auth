@@ -353,6 +353,14 @@ const auth = createFidesAuth({
 `claims` is undefined and the session has no `user`. Extra fields make the
 session bigger; large ones need a `sessionStore`.
 
+`mapSession` runs at login only. A refresh that brings an ID token updates
+`user` from it the same way, so roles taken away at the provider go with the
+next refresh: the roles follow `rolesClaim`, replacing any `mapSession` set,
+the name and email change when the token carries them, and `sub` and the
+fields `mapSession` added stay. `data` doesn't change. An ID token for another
+`iss` or `sub` than at login fails the refresh with `cause: 'idp_error'`, and
+nothing is saved.
+
 #### Keeping the session fresh
 
 Nothing refreshes unless you ask. `refreshSession(cookies)` refreshes at once;
