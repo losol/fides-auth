@@ -13,6 +13,8 @@ export {
   type FidesReadResult,
   type FidesRefreshResult,
   type FidesSessionWithTokens,
+  type LoginError,
+  type LoginErrorCode,
   type MapSession,
   type RefreshSessionOptions,
 } from './fides-auth.js';

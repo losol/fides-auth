@@ -61,6 +61,39 @@ export type MapSession<TData = Record<string, unknown>> = (
   session: Session<TData>,
 ) => Session<TData> | Promise<Session<TData>>;
 
+/**
+ * Why a login failed, as the `error` parameter of the redirect carries it:
+ *
+ * - `login_expired`: the callback found no login to finish. The login took
+ *   too long, was finished already, or its cookie never arrived.
+ * - `invalid_callback`: the callback didn't match the login it belongs to.
+ * - `session_too_large`: the session doesn't fit in the cookies. A
+ *   `sessionStore` is the fix.
+ * - `login_failed`: anything else at the callback, such as a code the
+ *   provider won't exchange.
+ * - `login_unavailable`: the login couldn't be started, most often because
+ *   the provider couldn't be reached.
+ * - `idp_error`, or the provider's own code when it has the shape of one,
+ *   such as `access_denied` when the user cancels.
+ */
+export type LoginErrorCode =
+  | 'login_expired'
+  | 'invalid_callback'
+  | 'session_too_large'
+  | 'login_failed'
+  | 'login_unavailable'
+  | 'idp_error'
+  | (string & {});
+
+/** A login that failed, as `onLoginError` gets it. */
+export interface LoginError {
+  code: LoginErrorCode;
+  /** Where it failed: when the login started, or at the provider's redirect back. */
+  stage: 'login' | 'callback';
+  /** What was thrown, when something was. For logs, not for the user. */
+  cause?: unknown;
+}
+
 export interface FidesAuthConfig<TData = Record<string, unknown>> {
   /** The provider and client. A BFF is a confidential client, so `clientAuth: 'none'` throws. */
   oauthConfig: OidcClientConfig;
@@ -114,6 +147,8 @@ export interface FidesAuthConfig<TData = Record<string, unknown>> {
   validateReturnTo?: (returnTo: string) => string | null;
   /**
    * Where a login without a return path lands, and where a failed one is sent.
+   * A page that starts a login for users without a session must not do so
+   * when the URL has `login=error`, or a login that keeps failing goes in circles.
    * @default '/'
    */
   defaultRedirectPath?: string;
@@ -125,6 +160,16 @@ export interface FidesAuthConfig<TData = Record<string, unknown>> {
    * @default true
    */
   loginSuccessParam?: boolean;
+  /**
+   * Called when a login fails, at its start or at the callback. Return a
+   * Response to answer with it, an error page of the app's own say. Without
+   * one, the user is sent to `defaultRedirectPath` with
+   * `?login=error&error=<code>`.
+   */
+  onLoginError?: (
+    error: LoginError,
+    request: Request,
+  ) => Response | undefined | void | Promise<Response | undefined> | Promise<void>;
   /** Where the provider sends the user after logout. Defaults to `applicationUrl`. */
   postLogoutRedirectUri?: string;
   /** Answers false to make a handler respond 429. */
@@ -176,7 +221,11 @@ export type FidesAuthorizedFetchOptions<T> = AuthorizedFetchOptions<T>;
  * same in everything the instance hands out.
  */
 export interface FidesAuth<TData = Record<string, unknown>> {
-  /** `GET`, with an optional `?returnTo=`. Redirects to the provider. */
+  /**
+   * `GET`, with an optional `?returnTo=`. Redirects to the provider. A login
+   * that can't be started, because the provider can't be reached say, is
+   * answered as a failed one: see `handleOidcCallback`.
+   */
   handleOidcLogin(
     request: Request,
     cookies: CookieStore,
@@ -185,6 +234,9 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   /**
    * The provider's redirect back. Starts the session and redirects to the
    * return path, with `?login=success` unless `loginSuccessParam` is false.
+   * A login that fails is answered with what `onLoginError` returns, or else
+   * redirects to `defaultRedirectPath` with `?login=error&error=<code>`, a
+   * {@link LoginErrorCode}. It never answers with text of its own.
    */
   handleOidcCallback(request: Request, cookies: CookieStore): Promise<Response>;
   /**
@@ -425,6 +477,17 @@ export function createFidesAuth<TData = Record<string, unknown>>(
     return redirect(url);
   }
 
+  /** Answers a failed login: with what `onLoginError` returns, or else the redirect with the code. */
+  async function loginFailed(request: Request, failure: LoginError, logger: FidesLogger): Promise<Response> {
+    try {
+      const response = await config.onLoginError?.(failure, request);
+      if (response instanceof Response) return response;
+    } catch (error) {
+      logger.error({ error }, 'onLoginError threw');
+    }
+    return loginError(failure.code);
+  }
+
   /** The session with `data` as the app typed it: what it holds is what the app put there. */
   const typed = (session: Session): Session<TData> => session as Session<TData>;
 
@@ -485,19 +548,27 @@ export function createFidesAuth<TData = Record<string, unknown>>(
 
       const raw = new URL(request.url).searchParams.get('returnTo');
       const returnTo = raw ? validateReturnTo(raw) : null;
-      const authRequest = await oidc.createAuthorizationRequest({
-        parameters: options.authorizationParameters,
-      });
-      const url = await oidc.authorizationUrl(authRequest);
-
-      const transaction = createTransaction(authRequest, { returnTo, logger: log.login });
+      let url: URL;
       try {
-        await persistTransaction(cookies, transaction, secret, txCookie);
+        const authRequest = await oidc.createAuthorizationRequest({
+          parameters: options.authorizationParameters,
+        });
+        url = await oidc.authorizationUrl(authRequest);
+
+        const transaction = createTransaction(authRequest, { returnTo, logger: log.login });
+        try {
+          await persistTransaction(cookies, transaction, secret, txCookie);
+        } catch (error) {
+          // Too big for a cookie: still log in, just without the way back.
+          if (!(error instanceof CookieTooLargeError) || !transaction.returnTo) throw error;
+          log.login.warn({ size: error.size }, 'Login transaction too large; dropped returnTo');
+          await persistTransaction(cookies, { ...transaction, returnTo: undefined }, secret, txCookie);
+        }
       } catch (error) {
-        // Too big for a cookie: still log in, just without the way back.
-        if (!(error instanceof CookieTooLargeError) || !transaction.returnTo) throw error;
-        log.login.warn({ size: error.size }, 'Login transaction too large; dropped returnTo');
-        await persistTransaction(cookies, { ...transaction, returnTo: undefined }, secret, txCookie);
+        // Most often the provider's metadata couldn't be read. The user gets
+        // the same answer as for a login that failed at the callback.
+        log.login.error({ error }, 'Could not start the login');
+        return loginFailed(request, { code: 'login_unavailable', stage: 'login', cause: error }, log.login);
       }
 
       log.login.info('Redirecting to OIDC provider for login');
@@ -516,12 +587,8 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       const state = currentUrl.searchParams.get('state');
       const idpError = currentUrl.searchParams.get('error') ?? undefined;
 
-      // A cancel after the login ended still redirects, but with a fixed code:
-      // without a live transaction nothing in the query is trusted.
-      const loginEnded = (): Response =>
-        idpError === undefined
-          ? new Response('Please restart the login process.', { status: 400 })
-          : loginError('login_expired');
+      const failed = (code: LoginErrorCode, cause?: unknown): Promise<Response> =>
+        loginFailed(request, { code, stage: 'callback', cause }, log.callback);
 
       try {
         // The public callback URL. Behind a TLS-terminating proxy the request
@@ -532,8 +599,9 @@ export function createFidesAuth<TData = Record<string, unknown>>(
 
         const transaction = state ? await readTransaction(cookies, state, secret, { ...txCookie, logger: log.callback }) : null;
         if (!transaction) {
+          // The code is fixed: without a live transaction nothing in the query is trusted.
           log.callback.warn({ error: idpError }, 'Missing login transaction');
-          return loginEnded();
+          return await failed('login_expired');
         }
         validateCallback(currentUrl.searchParams, transaction);
 
@@ -559,12 +627,10 @@ export function createFidesAuth<TData = Record<string, unknown>>(
               'Identity provider returned an error',
             );
             const code = error.idpError ?? '';
-            return loginError(IDP_ERROR_CODE.test(code) ? code : 'idp_error');
+            return await failed(IDP_ERROR_CODE.test(code) ? code : 'idp_error', error);
           }
           log.callback.warn({ reason: error.reason, error: idpError }, 'Rejected OIDC callback');
-          return error.reason === 'transaction_expired'
-            ? loginEnded()
-            : new Response('Please restart the login process.', { status: 400 });
+          return await failed(error.reason === 'transaction_expired' ? 'login_expired' : 'invalid_callback', error);
         }
         if (error instanceof CookieTooLargeError) {
           // The session doesn't fit in three cookies. A sessionStore is the fix.
@@ -572,14 +638,10 @@ export function createFidesAuth<TData = Record<string, unknown>>(
             { error, cookieName: error.cookieName, size: error.size },
             'Session cookie too large to store',
           );
-          return new Response('The session is too large to store. Please contact support.', {
-            status: 431,
-          });
+          return await failed('session_too_large', error);
         }
         log.callback.error({ error }, 'OIDC callback error');
-        return new Response('An unexpected error occurred. Please restart the login process.', {
-          status: 500,
-        });
+        return await failed('login_failed', error);
       } finally {
         // The login transaction is spent whatever the outcome.
         if (state) await clearTransaction(cookies, state, secret, txCookie);

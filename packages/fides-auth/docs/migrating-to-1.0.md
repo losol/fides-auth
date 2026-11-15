@@ -222,6 +222,10 @@ one writes JSON lines to the console.
   whether a refresh is likely to help.
 - **Logout and heartbeat answer only a same-origin `POST`.** Anything else gets
   403, or 405 for another method.
+- **A login that fails always redirects**, to `defaultRedirectPath` with
+  `?login=error&error=<code>`. 0.x answered some failures with a status and
+  English text. A page that sends users without a session to the login must
+  leave a URL with `login=error` alone. `onLoginError` answers in another way.
 - **Next has no default rate limiter.** The handlers rate-limit only through
   `rateLimit`.
 - **`createFidesAuth` throws on `clientAuth: 'none'`.** The server side of an

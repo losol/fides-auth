@@ -16,7 +16,7 @@ import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { createRecord, sealRecord } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
 import { fetchCookieStore } from './fetch-cookie-store.js';
-import { createFidesAuth, type FidesAuth, type FidesAuthConfig } from './fides-auth.js';
+import { createFidesAuth, type FidesAuth, type FidesAuthConfig, type LoginError } from './fides-auth.js';
 import { SessionSecretError } from './session-secret.js';
 import { createMemorySessionStore, type StoreFields } from './session-store.js';
 
@@ -405,11 +405,41 @@ describe('return paths', () => {
 });
 
 describe('callback failures', () => {
-  it('asks for a new login without a transaction', async () => {
+  it('sends a callback without a transaction home as an expired login', async () => {
     const { auth, cookies } = setup();
     const response = await auth.handleOidcCallback(get('/api/auth/callback?code=abc&state=nope'), cookies);
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(302);
+    expect(location(response).toString()).toBe(`${APP}/?login=error&error=login_expired`);
     expect(oidc.exchangeCode).not.toHaveBeenCalled();
+  });
+
+  it('sends a callback without a state home as an expired login', async () => {
+    const { auth, cookies } = setup();
+    const response = await auth.handleOidcCallback(get('/api/auth/callback?code=abc'), cookies);
+    expect(location(response).toString()).toBe(`${APP}/?login=error&error=login_expired`);
+  });
+
+  it('sends a login that took too long home as an expired login', async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-11-14T12:00:00Z'), toFake: ['Date'] });
+    try {
+      const { auth, cookies } = setup();
+      const started = await auth.handleOidcLogin(get('/api/auth/login'), cookies);
+      const state = location(started).searchParams.get('state');
+      vi.setSystemTime(Date.parse('2026-11-14T12:11:00Z'));
+      const response = await auth.handleOidcCallback(get(`/api/auth/callback?code=abc&state=${state}`), cookies);
+      expect(location(response).toString()).toBe(`${APP}/?login=error&error=login_expired`);
+      expect(oidc.exchangeCode).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends a callback with neither a code nor an error home as an invalid callback', async () => {
+    const { auth, cookies } = setup();
+    const started = await auth.handleOidcLogin(get('/api/auth/login'), cookies);
+    const state = location(started).searchParams.get('state');
+    const response = await auth.handleOidcCallback(get(`/api/auth/callback?state=${state}`), cookies);
+    expect(location(response).toString()).toBe(`${APP}/?login=error&error=invalid_callback`);
   });
 
   it('sends a cancel without a transaction home with a fixed code', async () => {
@@ -444,18 +474,108 @@ describe('callback failures', () => {
     expect(location(response).searchParams.get('error')).toBe('idp_error');
   });
 
-  it('answers 500 when the code exchange fails, and spends the transaction', async () => {
-    const { auth, cookies, jar } = setup();
+  it('sends the user home when the code exchange fails, and spends the transaction', async () => {
+    const { auth, cookies, jar } = setup({ defaultRedirectPath: '/start' });
     oidc.exchangeCode.mockRejectedValueOnce(oauthError('invalid_grant'));
     const response = await login(auth, cookies);
-    expect(response.status).toBe(500);
+    expect(location(response).toString()).toBe(`${APP}/start?login=error&error=login_failed`);
     expect(jar.size).toBe(0);
   });
 
-  it('answers 431 when the session does not fit in the cookies', async () => {
+  it('sends the user home when the session does not fit in the cookies', async () => {
     const { auth, cookies } = setup();
     oidc.exchangeCode.mockResolvedValueOnce(tokens(1, { access_token: 'x'.repeat(20_000) }));
-    expect((await login(auth, cookies)).status).toBe(431);
+    const response = await login(auth, cookies);
+    expect(location(response).toString()).toBe(`${APP}/?login=error&error=session_too_large`);
+  });
+
+  it('sends the user home when the login cannot be started', async () => {
+    const { auth, cookies, jar } = setup();
+    oidc.createAuthorizationRequest.mockRejectedValueOnce(new TypeError('fetch failed'));
+    const response = await auth.handleOidcLogin(get('/api/auth/login?returnTo=/reports'), cookies);
+    expect(response.status).toBe(302);
+    expect(location(response).toString()).toBe(`${APP}/?login=error&error=login_unavailable`);
+    expect(jar.size).toBe(0);
+
+    oidc.authorizationUrl.mockRejectedValueOnce(new Error('PAR failed'));
+    const second = await auth.handleOidcLogin(get('/api/auth/login'), cookies);
+    expect(location(second).searchParams.get('error')).toBe('login_unavailable');
+    expect(jar.size).toBe(0);
+  });
+
+  describe('with onLoginError', () => {
+    it('answers with the response it returns, at the callback and at the start', async () => {
+      const seen: Array<[LoginError, string]> = [];
+      const { auth, cookies } = setup({
+        onLoginError: (error, request) => {
+          seen.push([error, new URL(request.url).pathname]);
+          return new Response(`Innlogging feilet: ${error.code}`, { status: 400 });
+        },
+      });
+
+      const lost = await auth.handleOidcCallback(get('/api/auth/callback?code=abc&state=nope'), cookies);
+      expect(lost.status).toBe(400);
+      expect(await lost.text()).toBe('Innlogging feilet: login_expired');
+
+      const down = new TypeError('fetch failed');
+      oidc.createAuthorizationRequest.mockRejectedValueOnce(down);
+      const unavailable = await auth.handleOidcLogin(get('/api/auth/login'), cookies);
+      expect(await unavailable.text()).toBe('Innlogging feilet: login_unavailable');
+
+      const refused = oauthError('invalid_grant');
+      oidc.exchangeCode.mockRejectedValueOnce(refused);
+      expect(await (await login(auth, cookies)).text()).toBe('Innlogging feilet: login_failed');
+
+      expect(seen).toEqual([
+        [{ code: 'login_expired', stage: 'callback', cause: undefined }, '/api/auth/callback'],
+        [{ code: 'login_unavailable', stage: 'login', cause: down }, '/api/auth/login'],
+        [{ code: 'login_failed', stage: 'callback', cause: refused }, '/api/auth/callback'],
+      ]);
+    });
+
+    it('gets a cancelled login with the provider\'s code', async () => {
+      const onLoginError = vi.fn();
+      const { auth, cookies } = setup({ onLoginError });
+      const started = await auth.handleOidcLogin(get('/api/auth/login'), cookies);
+      const state = location(started).searchParams.get('state');
+      const response = await auth.handleOidcCallback(
+        get(`/api/auth/callback?error=access_denied&state=${state}`),
+        cookies,
+      );
+      expect(onLoginError).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'access_denied', stage: 'callback' }),
+        expect.any(Request),
+      );
+      // It returned nothing, so the redirect stands.
+      expect(location(response).toString()).toBe(`${APP}/?login=error&error=access_denied`);
+    });
+
+    it('redirects all the same when it throws', async () => {
+      const { auth, cookies } = setup({
+        onLoginError: () => {
+          throw new Error('broken error page');
+        },
+      });
+      const response = await auth.handleOidcCallback(get('/api/auth/callback?code=abc&state=nope'), cookies);
+      expect(location(response).toString()).toBe(`${APP}/?login=error&error=login_expired`);
+    });
+
+    it('may return nothing, whether it is async or not', () => {
+      // For the compiler: a handler that only logs or reports.
+      setup({ onLoginError: (error) => void error.code });
+      setup({
+        onLoginError: async (error) => {
+          await Promise.resolve(error.code);
+        },
+      });
+    });
+
+    it('is not called for a login that succeeds', async () => {
+      const onLoginError = vi.fn();
+      const { auth, cookies } = setup({ onLoginError });
+      expect(location(await login(auth, cookies)).searchParams.get('login')).toBe('success');
+      expect(onLoginError).not.toHaveBeenCalled();
+    });
   });
 });
 
