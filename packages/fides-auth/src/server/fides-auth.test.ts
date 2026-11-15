@@ -1020,6 +1020,84 @@ describe('over Request and Response, with fetchCookieStore', () => {
   });
 });
 
+describe('roles', () => {
+  const realmRoles = (claims: Record<string, unknown>) =>
+    (claims.realm_access as { roles?: string[] } | undefined)?.roles;
+  const withRealmRoles = (n: number, roles: string[]) =>
+    tokens(n, {
+      id_token: new UnsecuredJWT({ iss: 'https://idp.test', sub: 'user-1', realm_access: { roles } }).encode(),
+    });
+
+  it('reads a nested claim through a rolesClaim function, at login and at every refresh', async () => {
+    const { auth, cookies } = setup({ rolesClaim: realmRoles });
+    oidc.exchangeCode.mockResolvedValueOnce(withRealmRoles(1, ['admin']));
+    await login(auth, cookies);
+    expect((await auth.readSession(cookies))?.user?.roles).toEqual(['admin']);
+
+    oidc.refresh.mockResolvedValueOnce(withRealmRoles(2, ['admin']));
+    await auth.refreshSession(cookies);
+    expect((await auth.readSession(cookies))?.user?.roles).toEqual(['admin']);
+
+    oidc.refresh.mockResolvedValueOnce(withRealmRoles(3, []));
+    await auth.refreshSession(cookies);
+    expect((await auth.readSession(cookies))?.user?.roles).toEqual([]);
+  });
+
+  it('keeps the roles mapSession set through a refresh, with rolesClaim false', async () => {
+    const { auth, cookies } = setup({
+      rolesClaim: false,
+      mapSession: (_tokens, claims, session) => ({
+        ...session,
+        user: session.user && { ...session.user, roles: realmRoles(claims ?? {}) ?? [] },
+      }),
+    });
+    oidc.exchangeCode.mockResolvedValueOnce(withRealmRoles(1, ['admin']));
+    await login(auth, cookies);
+    oidc.refresh.mockResolvedValueOnce(withRealmRoles(2, ['admin']));
+    expect(await auth.refreshSession(cookies)).toMatchObject({ ok: true, refreshed: true });
+    expect((await auth.readSession(cookies))?.user?.roles).toEqual(['admin']);
+  });
+
+  describe('roles that mapSession set while rolesClaim reads them too', () => {
+    function warned(overrides: Partial<FidesAuthConfig>) {
+      const warn = vi.fn();
+      const made = setup({ logger: { create: () => ({ ...quiet, warn }) }, ...overrides });
+      return { ...made, warn };
+    }
+    const fromRealm: FidesAuthConfig['mapSession'] = (_tokens, claims, session) => ({
+      ...session,
+      user: session.user && { ...session.user, roles: realmRoles(claims ?? {}) ?? [] },
+    });
+
+    it('are gone after a refresh, which the first such login warns about, once', async () => {
+      const { auth, cookies, warn } = warned({ mapSession: fromRealm });
+      oidc.exchangeCode.mockResolvedValue(withRealmRoles(1, ['admin']));
+      await login(auth, cookies);
+      await login(auth, cookieJar().cookies);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        { correlationId: (await auth.readSession(cookies))?.correlationId },
+        expect.stringContaining('rolesClaim'),
+      );
+
+      oidc.refresh.mockResolvedValueOnce(withRealmRoles(2, ['admin']));
+      await auth.refreshSession(cookies);
+      expect((await auth.readSession(cookies))?.user?.roles).toEqual([]);
+    });
+
+    it('bring no warning when mapSession leaves the roles alone, or rolesClaim is false', async () => {
+      const untouched = warned({ mapSession: (_tokens, _claims, session) => ({ ...session, data: { a: 1 } }) });
+      await login(untouched.auth, untouched.cookies);
+      expect(untouched.warn).not.toHaveBeenCalled();
+
+      const handsOff = warned({ rolesClaim: false, mapSession: fromRealm });
+      oidc.exchangeCode.mockResolvedValueOnce(withRealmRoles(1, ['admin']));
+      await login(handsOff.auth, handsOff.cookies);
+      expect(handsOff.warn).not.toHaveBeenCalled();
+    });
+  });
+});
+
 describe('typed session data', () => {
   interface AppData {
     tenant: string;

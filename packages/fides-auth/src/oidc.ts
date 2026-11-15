@@ -19,7 +19,7 @@ export type { RevokeOptions } from './protocol/revocation.js';
 
 export { createPkcePair, createState, type PkcePair } from './protocol/pkce.js';
 export { defaultScope, joinScope } from './protocol/scope.js';
-export { userFromClaims, type OidcUserInfo } from './session/user-claims.js';
+export { userFromClaims, type OidcUserInfo, type RolesClaim } from './session/user-claims.js';
 export {
   checkSilentLoginResult,
   requiresInteractiveLogin,

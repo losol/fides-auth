@@ -35,7 +35,7 @@ export interface SessionUser {
   sub: string;
   name?: string;
   email?: string;
-  /** From the claim that `rolesClaim` names. */
+  /** From the ID token, as `rolesClaim` says. With `rolesClaim: false`, what `mapSession` set. */
   roles?: string[];
 }
 

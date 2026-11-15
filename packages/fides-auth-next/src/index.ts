@@ -16,6 +16,7 @@ export type {
   FidesSessionWithTokens,
   MapSession,
   RefreshSessionOptions,
+  RolesClaim,
   SessionMatch,
   SessionStore,
   StoredSession,

@@ -42,6 +42,7 @@ import {
   sealRecord,
   type SessionRecord,
 } from '../session/record.js';
+import type { RolesClaim } from '../session/user-claims.js';
 import type { CookieStore } from './cookie-store.js';
 import { assertSessionSecret, type SessionSecret } from './session-secret.js';
 import type { LookupFields, SaveResult, SessionStorage } from './session-storage.js';
@@ -67,8 +68,8 @@ export interface SessionLifecycleOptions {
   secret: SessionSecret;
   /** @default 43200, which is 12 hours */
   sessionDurationSeconds?: number;
-  /** @default 'roles' */
-  rolesClaim?: string;
+  /** Where the roles are in the ID token. False leaves them to `mapSession`. @default 'roles' */
+  rolesClaim?: RolesClaim | false;
   mapSession?: MapRecordSession;
   /** Plain fields to keep next to a stored session. Store storage only. */
   storeFields?(session: Session): StoreFields;
@@ -237,6 +238,27 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     return entry.record;
   }
 
+  let warnedAboutRoles = false;
+
+  /**
+   * `mapSession` runs at login only, and a refresh that brings an ID token
+   * reads the roles from `rolesClaim` again. Roles that `mapSession` set are
+   * gone then, which shows only after the first refresh. Say so at the first
+   * login that shows it.
+   */
+  function checkMappedRoles(built: Session, mapped: Session): void {
+    if (warnedAboutRoles || rolesClaim === false || !built.user || !built.idp) return;
+    const before = built.user.roles ?? [];
+    const after = mapped.user?.roles ?? [];
+    if (after.length === before.length && after.every((role, i) => role === before[i])) return;
+    warnedAboutRoles = true;
+    logger.warn(
+      { correlationId: built.correlationId },
+      'mapSession changed user.roles, but a refresh that brings an ID token reads them from rolesClaim again. ' +
+        'Make rolesClaim a function to read them from the claims, or false to keep what mapSession set',
+    );
+  }
+
   function emit(event: SessionEvent): void {
     logSessionEvent(logger, event);
     try {
@@ -379,6 +401,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       let record = createRecord(tokens, { sessionDurationSeconds, rolesClaim });
       if (mapSession) {
         const mapped = await mapSession(tokens, claimsOf(tokens), record.session);
+        checkMappedRoles(record.session, mapped);
         record = { ...record, session: keepIdentity(record.session, mapped) };
       }
       const written = await save(cookies, record, false);
