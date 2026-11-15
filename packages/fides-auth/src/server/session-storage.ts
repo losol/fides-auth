@@ -19,7 +19,7 @@ import {
 import type { SessionPersistenceMode } from '../shared/session-events.js';
 import { generateToken, sha256 } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
-import type { SessionStore, StoredSession } from './session-store.js';
+import type { SessionMatch, SessionStore, StoredSession, StoreFields } from './session-store.js';
 
 /** Cookie storage cuts a sealed record into at most this many cookies. */
 export const MAX_CHUNKS = 3;
@@ -70,11 +70,26 @@ export interface SaveRequest {
   expiresAt: string;
   correlationId: string;
   lookup?: LookupFields;
+  /** What the app's `storeFields` returned, kept in the clear next to the record. Store storage only. */
+  fields?: StoreFields;
   /**
    * True for a refresh or an update, which keep the session's identity. False
    * starts a new session: store storage mints a new handle.
    */
   continuation: boolean;
+}
+
+/** A session found by its lookup fields, without its cookie. */
+export interface FoundSession {
+  /** The sealed record as the search saw it. */
+  sealed: string;
+  correlationId?: string;
+  /**
+   * Deletes the record, under the store's lock when it has one, and returns
+   * the sealed record as it was just before: a refresh on any instance either
+   * saved first or finds the record gone. Null when it was already gone.
+   */
+  remove(): Promise<string | null>;
 }
 
 export interface SaveResult {
@@ -92,6 +107,8 @@ export interface SessionStorage {
   remove(cookies: CookieStore): Promise<void>;
   /** Runs `fn` holding the store's lock on this session. Only store storage has one. */
   lock?<T>(cookies: CookieStore, fn: () => Promise<T>): Promise<T>;
+  /** The sessions that match. Only store storage, and only over a store that can search. */
+  findMatching?(match: SessionMatch): Promise<FoundSession[]>;
 }
 
 /** The longest value a cookie called `name` can hold: `name=value` must stay below the limit. */
@@ -210,11 +227,11 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
     return { handle, key: await sha256(handle) };
   }
 
-  function record({ sealed, expiresAt, correlationId, lookup }: SaveRequest): StoredSession {
-    return { data: sealed, expiresAt, correlationId, ...lookup };
+  function record({ sealed, expiresAt, correlationId, lookup, fields }: SaveRequest): StoredSession {
+    return { data: sealed, expiresAt, correlationId, ...lookup, ...(fields && { fields }) };
   }
 
-  return {
+  const storage: SessionStorage = {
     mode: 'server',
 
     async load(cookies) {
@@ -234,7 +251,7 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
         if (current === null || current === 'invalid' || !(await store.get(current.key))) {
           return { saved: false };
         }
-        await store.set(current.key, record(request));
+        await store.set(current.key, record(request), { continuation: true });
         await deleteLegacy(cookies, secure);
         return { saved: true };
       }
@@ -243,7 +260,7 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
       // (session fixation) never becomes a logged-in one.
       if (current && current !== 'invalid') await store.delete(current.key);
       const handle = generateToken(32);
-      await store.set(await sha256(handle), record(request));
+      await store.set(await sha256(handle), record(request), { continuation: false });
       const options = cookieOptions(secure, secondsLeft(request.expiresAt));
       await cookies.set(name, handle, options);
       await deletePresent(cookies, otherChunks, options);
@@ -265,4 +282,23 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
       return store.withLock(current.key, fn);
     },
   };
+
+  if (store.findMatching) {
+    storage.findMatching = async (match) => {
+      const entries = (await store.findMatching?.(match)) ?? [];
+      return entries.map(({ key, record: found }) => ({
+        sealed: found.data,
+        correlationId: found.correlationId,
+        async remove() {
+          const take = async () => {
+            const latest = await store.get(key);
+            await store.delete(key);
+            return latest?.data ?? null;
+          };
+          return store.withLock ? store.withLock(key, take) : take();
+        },
+      }));
+    };
+  }
+  return storage;
 }

@@ -341,11 +341,12 @@ confidential client.
 | `refreshSession(cookies, { ifExpiresWithin? })` | Refreshes the tokens, or only when the access token is about to expire. |
 | `createSession`, `updateSession` | |
 | `clearSession(cookies, { trigger? })` | Ends the session and revokes its refresh token, without the redirect. |
+| `endUserSessions({ sub, iss? })` | Ends every session of one user, wherever they are signed in, and revokes their refresh tokens. Needs a `sessionStore` with `findMatching`. |
 | `authorizedFetch(cookies, url, options)` | Calls an API with the access token. Never refreshes. |
 | `cookieNames`, `oidc` | The session cookie's name, and the instance's OIDC client. |
 
 Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
-`sessionDurationDays` (30), `applicationUrl` (the redirect URI's origin),
+`storeFields`, `sessionDurationDays` (30), `applicationUrl` (the redirect URI's origin),
 `mapSession`, `rolesClaim` (`roles`), `validateReturnTo`, `defaultRedirectPath`
 (`/`), `postLogoutRedirectUri` (`applicationUrl`), `rateLimit`, `logger` and
 `onSessionEvent`.
@@ -431,6 +432,7 @@ const auth = createFidesAuth({
 | Refresh | Writes cookies, so it runs where they can be set: a proxy, a route handler or a Server Action | Keeps the handle and writes no cookie, so it also runs in a Server Component |
 | Concurrent refreshes | Shared within one process. A request sent before the new cookies arrived holds the old refresh token | Shared across instances too, when the store implements `withLock` |
 | Logout | Clears the cookie and revokes the refresh token. A copy of the cookie still reads as a session, and its access token works until it expires | Deletes the record, so a copied cookie stops working |
+| Ending a user's sessions elsewhere | No | `endUserSessions`, when the store implements `findMatching` |
 | To run | Nothing | A store every instance shares, with a TTL on `expiresAt` |
 
 A refresh that is running when the user logs out finishes first, and the
@@ -442,7 +444,8 @@ back.
 
 Choose the store when the provider's tokens don't fit in three cookies
 (OpenIddict's encrypted JWE tokens, for instance), when logout must end a
-copied cookie, or when you refresh from Server Components. Both seal the
+copied cookie, when you need to sign a user out everywhere, or when you
+refresh from Server Components. Both seal the
 session with `secret`, so rotating it ends every session either way, and
 moving from one to the other logs users in again once.
 

@@ -282,6 +282,18 @@ describe('createFidesAuth for Next', () => {
     expect(await auth.tryReadSession()).toEqual({ session: null, reason: 'session_not_found' });
   });
 
+  it('ends a user\'s stored sessions without their cookies', async () => {
+    const { auth } = setup({ sessionStore: createMemorySessionStore() });
+    await login(auth);
+    newRender();
+    expect(await auth.readSession()).not.toBeNull();
+
+    expect(await auth.endUserSessions({ sub: 'user-2' })).toBe(0);
+    expect(await auth.endUserSessions({ sub: 'user-1' })).toBe(1);
+    newRender();
+    expect(await auth.tryReadSession()).toEqual({ session: null, reason: 'session_not_found' });
+  });
+
   it('can be created where the redirect URI is not set yet, as in a build', () => {
     expect(() =>
       createFidesAuth({

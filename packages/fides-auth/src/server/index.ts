@@ -19,6 +19,10 @@ export { AuthorizedFetchError, type AuthorizedFetchErrorReason } from './authori
 
 export {
   createMemorySessionStore,
+  type SessionMatch,
   type SessionStore,
   type StoredSession,
+  type StoredSessionEntry,
+  type StoreFields,
+  type StoreSetContext,
 } from './session-store.js';

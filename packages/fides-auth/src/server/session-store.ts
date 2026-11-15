@@ -4,6 +4,12 @@
 // by a hash of the handle the browser holds. Database adapters (Mongo, Redis, …)
 // belong in consumers; this package ships only the in-memory one.
 
+/**
+ * Plain fields an app keeps next to a session, from `storeFields` in the
+ * config: its own user id, say, to list or count who is signed in.
+ */
+export type StoreFields = Record<string, string | number | boolean | null>;
+
 /** One persisted session, as the store sees it. */
 export interface StoredSession {
   /** The session, encrypted under the session secret. Opaque to the store. */
@@ -21,6 +27,37 @@ export interface StoredSession {
   subHash?: string;
   /** HMAC-SHA-256 of the ID token's `sid` claim, under the same key. */
   idpSidHash?: string;
+  /**
+   * What `storeFields` returned for this session, in the clear. Absent
+   * without `storeFields`. Written again on every save, so it follows the session.
+   */
+  fields?: StoreFields;
+}
+
+/** What a `set` is for, so an adapter can insert or update. */
+export interface StoreSetContext {
+  /**
+   * True for a refresh or an update of a session the store already has. False
+   * for a new session, which always comes with a new key.
+   */
+  continuation: boolean;
+}
+
+/**
+ * Which sessions {@link SessionStore.findMatching} looks for. A record must
+ * match every key that is given, each against the field of the same name. A
+ * key that isn't compared is left out, never set to undefined.
+ */
+export interface SessionMatch {
+  iss: string;
+  subHash?: string;
+  idpSidHash?: string;
+}
+
+/** A record {@link SessionStore.findMatching} found, with the key it is stored under. */
+export interface StoredSessionEntry {
+  key: string;
+  record: StoredSession;
 }
 
 /**
@@ -32,8 +69,8 @@ export interface StoredSession {
 export interface SessionStore {
   /** Returns the record, or null/undefined when there is none. May return an expired record. */
   get(key: string): StoredSession | null | undefined | Promise<StoredSession | null | undefined>;
-  /** Creates or replaces the record. */
-  set(key: string, record: StoredSession): void | Promise<void>;
+  /** Creates or replaces the record. `context` says whether the session is new. */
+  set(key: string, record: StoredSession, context: StoreSetContext): void | Promise<void>;
   /** Removes the record. Deleting a missing key is not an error. */
   delete(key: string): void | Promise<void>;
   /**
@@ -45,6 +82,12 @@ export interface SessionStore {
    * with `cause: 'store'`, which the heartbeat answers with 503.
    */
   withLock?<T>(key: string, fn: () => Promise<T>): Promise<T>;
+  /**
+   * Optional: the records whose lookup fields match, for ending a user's
+   * sessions without their cookies (`endUserSessions`). The library computes
+   * the hashes; compare them as plain strings. May return expired records.
+   */
+  findMatching?(match: SessionMatch): StoredSessionEntry[] | Promise<StoredSessionEntry[]>;
 }
 
 /**
@@ -70,6 +113,14 @@ export function createMemorySessionStore(): SessionStore {
     },
     delete(key) {
       records.delete(key);
+    },
+    findMatching({ iss, subHash, idpSidHash }) {
+      return Array.from(records, ([key, record]) => ({ key, record })).filter(
+        ({ record }) =>
+          record.iss === iss &&
+          (subHash === undefined || record.subHash === subHash) &&
+          (idpSidHash === undefined || record.idpSidHash === idpSidHash),
+      );
     },
     withLock(key, fn) {
       // One promise chain per key. The chain never rejects, so a failed holder

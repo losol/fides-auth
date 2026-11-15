@@ -7,9 +7,10 @@ and refresh tokens (JWE). Once fides-auth seals them again, the session no
 longer fits, and the callback answers 431.
 
 A `SessionStore` is the opt-in fix: the session lives in a store you provide,
-and the browser holds one small cookie with a random handle. It also buys three
+and the browser holds one small cookie with a random handle. It also buys four
 things a cookie can't offer: real revocation, one refresh per session across
-instances, and a cookie that is worthless without the store.
+instances, a cookie that is worthless without the store, and ending a user's
+sessions wherever they are signed in.
 
 ## Wiring
 
@@ -35,9 +36,10 @@ don't extend it. The handle cookie expires with it.
 ```ts
 interface SessionStore {
   get(key: string): StoredSession | null | undefined | Promise<StoredSession | null | undefined>;
-  set(key: string, record: StoredSession): void | Promise<void>;
+  set(key: string, record: StoredSession, context: { continuation: boolean }): void | Promise<void>;
   delete(key: string): void | Promise<void>;
   withLock?<T>(key: string, fn: () => Promise<T>): Promise<T>;
+  findMatching?(match: SessionMatch): StoredSessionEntry[] | Promise<StoredSessionEntry[]>;
 }
 
 interface StoredSession {
@@ -47,12 +49,19 @@ interface StoredSession {
   iss?: string;           // the ID token's issuer
   subHash?: string;       // HMAC of the ID token's sub, never sub itself
   idpSidHash?: string;    // HMAC of the ID token's sid claim
+  fields?: Record<string, string | number | boolean | null>; // from storeFields
 }
+
+interface SessionMatch { iss: string; subHash?: string; idpSidHash?: string }
+interface StoredSessionEntry { key: string; record: StoredSession }
 ```
 
 Keys are `SHA-256(handle)` as hex, never the handle itself. Save every field the
-library sets: `iss`, `subHash` and `idpSidHash` are what finds a user's sessions
-for back-channel logout. On the library's side:
+library sets: `iss`, `subHash` and `idpSidHash` are what finds a user's sessions,
+for [`endUserSessions`](#ending-a-users-sessions) and for back-channel logout.
+`set` gets `continuation: false` for a new session, which always comes with a
+new key, and `true` for a refresh or an update of one the store has, so an
+adapter can insert or update. On the library's side:
 
 - `data` is sealed before `set` and opened after `get`. A store dump alone
   yields no tokens.
@@ -89,8 +98,65 @@ export const sessionStore: SessionStore = {
   async delete(key) {
     await sessions.deleteOne({ _id: key });
   },
+  async findMatching(match) {
+    // `match` holds only the keys to compare: iss, and subHash or idpSidHash.
+    const docs = await sessions.find(match).toArray();
+    return docs.map(({ _id, expiresAt, ...record }) => ({
+      key: _id,
+      record: { ...record, expiresAt: expiresAt.toISOString() },
+    }));
+  },
 };
 ```
+
+## Your own fields
+
+A store sees a sealed record and hashes, so it can't tell whose session a
+record is. `storeFields` puts fields of your choice next to it, in the clear:
+
+```ts
+export const auth = createFidesAuth({
+  oauthConfig,
+  secret,
+  sessionStore,
+  mapSession: async (tokens, claims, session) => ({
+    ...session,
+    data: { userId: await userIdFor(claims?.sub) },
+  }),
+  storeFields: (session) => ({ userId: (session.data?.userId as string | undefined) ?? null }),
+});
+```
+
+The store gets them as `record.fields` on every `set`, so they follow the
+session through refreshes and `updateSession`. Index them to list or count who
+is signed in. They aren't sealed: return only what the store may show, and
+never a token. Without a `sessionStore`, `storeFields` does nothing.
+
+## Ending a user's sessions
+
+`endUserSessions` ends every session of one user without their cookies, for
+"sign out everywhere" or when an account is closed:
+
+```ts
+const ended = await auth.endUserSessions({ sub }); // how many it ended
+```
+
+`sub` is the provider's, from the ID token: `session.idp.sub`, which stays the
+same whatever `mapSession` does to `user`. `iss` defaults to the provider's
+issuer. The instance hashes `sub`, asks the store's `findMatching` for the
+records, and for each one:
+
+- checks the sealed record's own `iss` and `sub` against the request, so a
+  search that returns too much can't end someone else's session;
+- waits for a refresh of it still running in this process, and deletes it under
+  `withLock`, like a logout;
+- revokes the refresh token it held last, where the provider has a
+  `revocation_endpoint`.
+
+The browsers keep their handle cookies, which then read as `session_not_found`.
+It needs a store with `findMatching` and throws a `TypeError` without one,
+cookie sessions included, rather than answer that it ended nobody's. Index
+`iss` with `subHash` for it.
 
 ## Refresh under concurrency
 
@@ -145,6 +211,10 @@ can't be set, such as a Next.js Server Component.
   one pointed at. Only a refresh or an update keeps the handle.
 - **Revocation.** Logout and `clearSession` delete the record before the
   cookie. From then on a copied cookie reads as `session_not_found`.
+- **Plain fields.** `iss`, the two hashes, `correlationId` and whatever
+  `storeFields` returns are stored in the clear. The hashes are HMACs under a
+  key derived from `secret`, so a store dump doesn't give up `sub`; your own
+  fields are as readable as you make them.
 - **At rest.** Records are sealed with the same secret as cookie sessions.
   Rotating the secret ends stored sessions (`unreadable_session`), as it ends
   cookie ones.

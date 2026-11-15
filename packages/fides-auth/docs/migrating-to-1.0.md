@@ -62,7 +62,9 @@ optional. The tokens aren't on it: use `getTokens`. `LegacySession` and
 `CreateSessionOptions` are gone.
 
 **A custom `SessionStore`** saves the new `StoredSession` fields:
-`correlationId`, `iss`, `subHash` and `idpSidHash`. `sid` is gone.
+`correlationId`, `iss`, `subHash`, `idpSidHash` and `fields`. `sid` is gone.
+`set` gets a third argument, `{ continuation }`, and an optional `findMatching`
+lets `endUserSessions` end a user's sessions.
 
 ## Next.js
 
