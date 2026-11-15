@@ -1,5 +1,31 @@
 # @eventuras/fides-auth
 
+## 1.0.0-beta.4
+
+### Minor Changes
+
+- 02fe7c7: `endUserSessions({ sub })` finds the sessions by `sub` alone and no longer needs the issuer. Since beta.3 it
+  fell back to `oauthConfig.issuer` when the provider couldn't be reached, and ended nothing, without an error,
+  when the config spelled the issuer another way than the ID tokens do. It now asks the provider for nothing.
+  `iss` is still an option, to narrow it to one provider, and must then be the ID token's `iss` to the letter.
+  
+  For a custom `SessionStore`: `SessionMatch.iss` is optional, and `findMatching` must treat a missing `iss` as
+  "any issuer". An adapter that hands the match to its query as it is needs no change, but an index for it
+  should start with `subHash`, not `iss`.
+- e82c781: A rate-limited login now goes through `onLoginError` with the code `rate_limited`, and redirects like any other failed login. A logout that fails, because of the rate limit or because the session couldn't be ended, redirects to `defaultRedirectPath` with `?logout=error&error=<code>` instead of answering with text. The new `onLogoutError` option answers it in another way.
+
+### Patch Changes
+
+- 6cc8008: A login callback opened again by a browser that is already logged in, with the back button or a reload, now redirects to `defaultRedirectPath` instead of failing with `login_expired`. A browser without a session still gets `login_expired`.
+- 3ced1af: When a refresh ends a stored session, every request that was waiting for it has its session cookie deleted,
+  not only the one that asked the provider. Requests that shared the refresh in the same process kept the cookie,
+  and so did a request on another instance that waited for the store's lock and then found the record gone.
+- a67081d: A function given to `updateSession`, or a `mapRefresh`, that refreshed, updated or ended the same session
+  waited for itself and never returned. Such a call is now refused with a TypeError at once, on runtimes with
+  `AsyncLocalStorage` (Node, Deno, Bun, Workers with Node compatibility). The docs also say what `updateSession`
+  does when the store fails: it rejects with what the store threw, where `refreshSession` answers
+  `cause: 'store'`.
+
 ## 1.0.0-beta.3
 
 ### Minor Changes
