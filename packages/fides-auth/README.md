@@ -377,7 +377,7 @@ confidential client.
 Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
 `storeFields`, `sessionDurationSeconds` (12 hours), `refreshGraceSeconds` (10),
 `applicationUrl` (the redirect URI's origin),
-`mapSession`, `rolesClaim` (`roles`), `validateReturnTo`, `defaultRedirectPath`
+`mapSession`, `mapRefresh`, `rolesClaim` (`roles`), `validateReturnTo`, `defaultRedirectPath`
 (`/`), `postLogoutRedirectUri` (`applicationUrl`), `rateLimit`, `logger`,
 `onSessionEvent` and `loginSuccessParam` (true).
 
@@ -496,7 +496,34 @@ Set the roles in `mapSession` only together with `rolesClaim: false`, for roles
 that don't come from the ID token: your own database, say. The library then
 never sets `user.roles`, and a refresh keeps them as they are. Under any other
 `rolesClaim`, roles that `mapSession` set are replaced at the first refresh
-that brings an ID token. The first login that shows this logs a warning.
+that brings an ID token, unless `mapRefresh` sets them again. The first login
+that shows this logs a warning.
+
+What `mapSession` put in `data` stays as it was at login. To have it follow
+the provider, pass `mapRefresh`. It has the shape of `mapSession` and runs at
+each refresh, with that refresh's token response, the claims of its ID token
+and the session after the library's own changes:
+
+```typescript
+const auth = createFidesAuth<AppData>({
+  oauthConfig,
+  secret,
+  mapSession: (tokens, claims, session) => ({
+    ...session,
+    data: { tenant: String(claims?.tenant) },
+  }),
+  // A refresh without an ID token has no claims to follow.
+  mapRefresh: (tokens, claims, session) =>
+    claims ? { ...session, data: { tenant: String(claims.tenant) } } : session,
+});
+```
+
+It is also the place for roles that only the access token carries, as Keycloak
+sends them unless told otherwise: read them from `tokens.access_token` in both
+functions. `mapRefresh` can't fail the refresh, since the provider has spent
+the old refresh token by then. If it throws, the error is logged and the
+session is saved as the refresh left it. It runs under the store's lock, so it
+must not refresh or update the same session itself.
 
 #### Keeping the session fresh
 

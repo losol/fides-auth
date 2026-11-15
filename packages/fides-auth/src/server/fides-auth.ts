@@ -53,6 +53,9 @@ import type { SessionStore, StoreFields } from './session-store.js';
  * So roles set here last only with `rolesClaim: false`; to read them from
  * another claim, make `rolesClaim` a function.
  *
+ * `mapRefresh` has the same shape and runs at each refresh, with the session
+ * as the refresh left it.
+ *
  * `TData` is the type of `session.data`, from `createFidesAuth<TData>`.
  */
 export type MapSession<TData = Record<string, unknown>> = (
@@ -128,6 +131,21 @@ export interface FidesAuthConfig<TData = Record<string, unknown>> {
   applicationUrl?: string;
   /** Changes the session built at login. */
   mapSession?: MapSession<TData>;
+  /**
+   * Changes the session a refresh leaves, the way `mapSession` does at login:
+   * to follow claims you keep in `data`, or roles that aren't in the ID token.
+   * It runs each time the provider is asked for new tokens and answers, with
+   * that token response, the claims of its ID token, undefined when it has
+   * none, and the session after the library's own changes to the user and the
+   * scopes. The correlation id, the timestamps and the IdP session are kept
+   * whatever it returns.
+   *
+   * It can't fail the refresh: the provider has spent the old refresh token
+   * by then. If it throws, the error is logged and the session is saved as
+   * the refresh left it. It runs under the store's lock, so it must not
+   * refresh or update the same session itself.
+   */
+  mapRefresh?: MapSession<TData>;
   /**
    * Where the user's roles are in the ID token, read at login and on every
    * refresh that brings an ID token: the name of a top-level claim, or a
@@ -433,6 +451,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         rolesClaim: config.rolesClaim,
         // The lifecycle doesn't know what `data` holds; the type is the app's own.
         mapSession: config.mapSession as MapRecordSession | undefined,
+        mapRefresh: config.mapRefresh as MapRecordSession | undefined,
         storeFields: config.storeFields as ((session: Session) => StoreFields) | undefined,
         refreshGraceSeconds,
         refreshTokens: (refreshToken) => oidc.refresh(refreshToken),
