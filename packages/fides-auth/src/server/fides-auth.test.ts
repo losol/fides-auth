@@ -1269,6 +1269,70 @@ describe('roles', () => {
   });
 });
 
+describe('mapRefresh', () => {
+  interface AppData {
+    tenant: string;
+  }
+  const withTenant = (n: number, tenant: string) =>
+    tokens(n, {
+      id_token: new UnsecuredJWT({ iss: 'https://idp.test', sub: 'user-1', name: 'Ada', tenant }).encode(),
+    });
+
+  it('lets data follow the claims of each refresh, typed like mapSession', async () => {
+    const { auth, cookies } = setup<AppData>({
+      mapSession: (_tokens, claims, session) => ({ ...session, data: { tenant: String(claims?.tenant) } }),
+      mapRefresh: (_tokens, claims, session) =>
+        // A refresh without an ID token has no claims to follow.
+        claims ? { ...session, data: { tenant: String(claims.tenant) } } : session,
+    });
+    oidc.exchangeCode.mockResolvedValueOnce(withTenant(1, 'acme'));
+    await login(auth, cookies);
+    expect((await auth.readSession(cookies))?.data).toEqual({ tenant: 'acme' });
+
+    oidc.refresh.mockResolvedValueOnce(withTenant(2, 'globex'));
+    const refreshed = await auth.refreshSession(cookies);
+    expect(refreshed).toMatchObject({ ok: true, session: { data: { tenant: 'globex' } } });
+    if (refreshed.ok) expectTypeOf(refreshed.session.data).toEqualTypeOf<AppData | undefined>();
+
+    oidc.refresh.mockResolvedValueOnce(tokens(3, { id_token: undefined }));
+    await auth.refreshSession(cookies);
+    expect((await auth.readSession(cookies))?.data).toEqual({ tenant: 'globex' });
+  });
+
+  it('keeps roles that are not in the ID token, set at login and again at each refresh, without a warning', async () => {
+    // Roles that only the access token carries, as Keycloak sends them unless told otherwise.
+    const rolesOf = (accessToken: string) => (accessToken === 'access-1' ? ['admin'] : ['admin', 'editor']);
+    const warn = vi.fn();
+    const { auth, cookies } = setup({
+      logger: { create: () => ({ ...quiet, warn }) },
+      mapSession: (response, _claims, session) => ({
+        ...session,
+        user: session.user && { ...session.user, roles: rolesOf(response.access_token) },
+      }),
+      mapRefresh: (response, _claims, session) => ({
+        ...session,
+        user: session.user && { ...session.user, roles: rolesOf(response.access_token) },
+      }),
+    });
+    oidc.exchangeCode.mockResolvedValueOnce(withTenant(1, 'acme'));
+    await login(auth, cookies);
+    expect((await auth.readSession(cookies))?.user?.roles).toEqual(['admin']);
+
+    oidc.refresh.mockResolvedValueOnce(withTenant(2, 'acme'));
+    await auth.refreshSession(cookies);
+    expect((await auth.readSession(cookies))?.user?.roles).toEqual(['admin', 'editor']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('also runs for the heartbeat\'s refresh', async () => {
+    const mapRefresh = vi.fn<NonNullable<FidesAuthConfig['mapRefresh']>>((_tokens, _claims, session) => session);
+    const { auth, cookies } = setup({ mapRefresh });
+    await login(auth, cookies);
+    expect((await auth.handleHeartbeat(post('/api/auth/heartbeat'), cookies)).status).toBe(200);
+    expect(mapRefresh).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('typed session data', () => {
   interface AppData {
     tenant: string;

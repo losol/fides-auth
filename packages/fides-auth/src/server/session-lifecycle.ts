@@ -74,6 +74,16 @@ export interface SessionLifecycleOptions {
   /** Where the roles are in the ID token. False leaves them to `mapSession`. @default 'roles' */
   rolesClaim?: RolesClaim | false;
   mapSession?: MapRecordSession;
+  /**
+   * Changes the session a refresh leaves, the way `mapSession` does at login:
+   * to follow claims the app keeps in `data`, say. It gets the refresh's token
+   * response, the claims of its ID token, undefined without one, and the
+   * session after the library's own changes. The identity and lifetime are
+   * kept whatever it returns. A throw is logged and the session saved as the
+   * refresh left it: the provider has spent the old refresh token by then, so
+   * the refresh can no longer fail.
+   */
+  mapRefresh?: MapRecordSession;
   /** Plain fields to keep next to a stored session. Store storage only. */
   storeFields?(session: Session): StoreFields;
   /**
@@ -201,7 +211,7 @@ interface RecentRefresh {
  * @throws TypeError if `refreshGraceSeconds` is not a finite number, 0 or more.
  */
 export function createSessionLifecycle(options: SessionLifecycleOptions): SessionLifecycle {
-  const { storage, secret, rolesClaim, mapSession, logger } = options;
+  const { storage, secret, rolesClaim, mapSession, mapRefresh, logger } = options;
   const sessionDurationSeconds = checkSessionDuration(options.sessionDurationSeconds);
   const refreshGraceSeconds = checkRefreshGrace(options.refreshGraceSeconds);
   const inflight = new Map<string, Promise<RefreshRecordResult>>();
@@ -275,7 +285,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
    * login that shows it.
    */
   function checkMappedRoles(built: Session, mapped: Session): void {
-    if (warnedAboutRoles || rolesClaim === false || !built.user || !built.idp) return;
+    // With `mapRefresh` the app has a say at every refresh too.
+    if (warnedAboutRoles || rolesClaim === false || mapRefresh || !built.user || !built.idp) return;
     const before = built.user.roles ?? [];
     const after = mapped.user?.roles ?? [];
     if (after.length === before.length && after.every((role, i) => role === before[i])) return;
@@ -404,7 +415,20 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       return { ok: false, reason: 'refresh_failed', cause: 'idp_error', correlationId };
     }
 
-    const updated = refreshRecord(current, tokens, { rolesClaim });
+    let updated = refreshRecord(current, tokens, { rolesClaim });
+    if (mapRefresh) {
+      try {
+        const mapped = await mapRefresh(tokens, claimsOf(tokens), updated.session);
+        updated = { ...updated, session: keepIdentity(updated.session, mapped) };
+      } catch (error) {
+        // The old refresh token is spent. Failing here would lose the new
+        // tokens and with them the session, so the app's changes are what goes.
+        logger.error(
+          { correlationId, error },
+          'mapRefresh threw; the session is saved as the refresh left it',
+        );
+      }
+    }
     const rotatedRefreshToken = updated.tokens.refreshToken !== current.tokens.refreshToken;
     const written = await save(cookies, updated, 'refresh');
     if (!written.saved) {

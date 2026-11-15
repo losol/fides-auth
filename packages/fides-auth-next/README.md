@@ -46,6 +46,7 @@ of an app is a confidential client.
 | `refreshGraceSeconds` | 10 | With cookie sessions: how long after a refresh a request with the old cookie gets that refresh's result. 0 turns it off. |
 | `applicationUrl` | the redirect URI's origin | The app's public origin, for the same-origin check and redirects. |
 | `mapSession` | none | Changes the session built at login, e.g. to add `data`. |
+| `mapRefresh` | none | Changes the session a refresh leaves, e.g. to have `data` follow the claims. |
 | `rolesClaim` | `'roles'` | Where the user's roles are in the ID token, at login and on every refresh that brings one: a claim's name, or a function of the claims for a nested one. False leaves the roles to `mapSession`. See [the core README](../fides-auth/README.md#sessions). |
 | `validateReturnTo` | a path on this origin | Turns `?returnTo=` into a safe path, or null. |
 | `defaultRedirectPath` | `'/'` | Where a login without a return path lands. |

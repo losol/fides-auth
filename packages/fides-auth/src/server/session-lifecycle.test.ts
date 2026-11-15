@@ -262,6 +262,112 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
     });
   });
 
+  describe('mapRefresh', () => {
+    const refreshed = (claims: Record<string, unknown>) =>
+      tokens(2, {
+        scope: 'openid',
+        id_token: new UnsecuredJWT({ iss: 'https://idp.test', sub: 'user-1', name: 'Ada L.', ...claims }).encode(),
+      });
+
+    it('changes the session a refresh leaves, from that refresh\'s tokens and claims', async () => {
+      const mapRefresh = vi.fn<NonNullable<SessionLifecycleOptions['mapRefresh']>>((_tokens, claims, session) => ({
+        ...session,
+        data: { ...session.data, tenant: claims?.tenant },
+      }));
+      const { lifecycle, cookies } = setup({
+        mapSession: (_tokens, _claims, session) => ({ ...session, data: { tenant: 'acme', theme: 'dark' } }),
+        mapRefresh,
+        refreshTokens: vi.fn(async () => refreshed({ tenant: 'globex' })),
+      });
+      const created = await lifecycle.create(cookies, tokens(1));
+      expect(mapRefresh).not.toHaveBeenCalled();
+
+      const result = await lifecycle.refresh(cookies);
+      expect(result).toMatchObject({ ok: true, rotatedRefreshToken: true });
+      expect(mapRefresh).toHaveBeenCalledTimes(1);
+      const [got, claims, session] = mapRefresh.mock.calls[0]!;
+      expect(got.access_token).toBe('access-2');
+      expect(claims).toMatchObject({ sub: 'user-1', tenant: 'globex' });
+      // The session after the library's own changes, with what login put in data.
+      expect(session).toMatchObject({ user: { name: 'Ada L.' }, scopes: ['openid'], data: { tenant: 'acme' } });
+
+      const { record } = await lifecycle.read(cookies);
+      expect(record?.session.data).toEqual({ tenant: 'globex', theme: 'dark' });
+      expect(record?.tokens.refreshToken).toBe('refresh-2');
+      expect(record?.session.correlationId).toBe(created.session.correlationId);
+    });
+
+    it('can change the user and data, never the identity or the lifetime', async () => {
+      const { lifecycle, cookies } = setup({
+        mapRefresh: (_tokens, _claims, session) => ({
+          ...session,
+          correlationId: 'forged',
+          expiresAt: '2999-01-01T00:00:00.000Z',
+          idp: { iss: 'https://evil.test', sub: 'someone-else' },
+          user: session.user && { ...session.user, roles: ['from-the-access-token'] },
+        }),
+      });
+      const created = await lifecycle.create(cookies, tokens(1));
+      await lifecycle.refresh(cookies);
+
+      const { record } = await lifecycle.read(cookies);
+      expect(record?.session).toMatchObject({
+        correlationId: created.session.correlationId,
+        expiresAt: created.session.expiresAt,
+        idp: created.session.idp,
+        user: { sub: 'user-1', roles: ['from-the-access-token'] },
+      });
+    });
+
+    it('gets no claims from a refresh without an ID token', async () => {
+      const mapRefresh = vi.fn<NonNullable<SessionLifecycleOptions['mapRefresh']>>((_tokens, _claims, session) => session);
+      const { lifecycle, cookies } = setup({
+        mapRefresh,
+        refreshTokens: vi.fn(async () => tokens(2, { id_token: undefined })),
+      });
+      await lifecycle.create(cookies, tokens(1));
+      await lifecycle.refresh(cookies);
+      expect(mapRefresh.mock.calls[0]![1]).toBeUndefined();
+    });
+
+    it('cannot fail the refresh: a throw is logged, and the new tokens are saved', async () => {
+      const error = vi.fn();
+      const broken = new Error('the lookup failed');
+      const { lifecycle, cookies, events } = setup({
+        logger: { ...quiet, error },
+        mapSession: (_tokens, _claims, session) => ({ ...session, data: { tenant: 'acme' } }),
+        mapRefresh: async () => {
+          throw broken;
+        },
+      });
+      const created = await lifecycle.create(cookies, tokens(1));
+
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: true, rotatedRefreshToken: true });
+      const { record } = await lifecycle.read(cookies);
+      expect(record?.tokens).toMatchObject({ accessToken: 'access-2', refreshToken: 'refresh-2' });
+      expect(record?.session.data).toEqual({ tenant: 'acme' });
+      expect(error).toHaveBeenCalledWith(
+        { correlationId: created.session.correlationId, error: broken },
+        expect.stringContaining('mapRefresh'),
+      );
+      expect(events.at(-1)).toMatchObject({ event: 'session.refreshed' });
+    });
+
+    it('runs only when the provider was asked: not at login, on an update or for a refresh that fails', async () => {
+      const mapRefresh = vi.fn<NonNullable<SessionLifecycleOptions['mapRefresh']>>((_tokens, _claims, session) => session);
+      const { lifecycle, cookies, refreshTokens } = setup({ mapRefresh });
+      await lifecycle.create(cookies, tokens(1));
+      await lifecycle.update(cookies, (session) => ({ ...session, data: { a: 1 } }));
+      refreshTokens.mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }));
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: false, cause: 'transport' });
+      expect(mapRefresh).not.toHaveBeenCalled();
+
+      // Two refreshes at once share one call to the provider, and one mapRefresh.
+      await Promise.all([lifecycle.refresh(cookies), lifecycle.refresh(cookies)]);
+      expect(mapRefresh).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('rule 3: mapSession at login can change the user and data, not the identity', async () => {
     const { lifecycle, cookies } = setup({
       mapSession: async (_tokens, claims, session) => ({
