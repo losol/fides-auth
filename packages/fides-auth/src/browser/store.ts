@@ -6,10 +6,10 @@
 // Any UI layer can subscribe; @eventuras/fides-auth-react does so for React.
 
 import { consoleLoggerFactory, type FidesLoggerFactory } from '../shared/logger.js';
-import type { Session, SessionInfo } from '../shared/types.js';
+import type { SessionInfo, SessionUser } from '../shared/types.js';
 
 /** The user the session info endpoint reports. */
-export type AuthUser = NonNullable<Session['user']>;
+export type AuthUser = SessionUser;
 
 /** A snapshot of the store. A new object on every change, so it can be compared by identity. */
 export interface AuthState {

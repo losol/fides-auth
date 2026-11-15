@@ -1,5 +1,10 @@
 /** The tokens of a session. Only the library and `getTokens` see them. */
 export interface Tokens {
+  /**
+   * Set in every session today. Optional so that a session which keeps only a
+   * refresh token, or more than one access token, stays possible without
+   * changing this type.
+   */
   accessToken?: string;
   /** ISO 8601 string — the session is a JSON/JWT envelope, so dates live as strings on the wire. */
   accessTokenExpiresAt?: string;
@@ -21,6 +26,19 @@ export interface IdpSession {
   sid?: string;
 }
 
+/** The user of a session: what the library reads from the ID token. */
+export interface SessionUser {
+  /**
+   * The ID token's `sub`, unless `mapSession` put the app's own id here. The
+   * provider's is always in `Session.idp.sub`.
+   */
+  sub: string;
+  name?: string;
+  email?: string;
+  /** From the claim that `rolesClaim` names. */
+  roles?: string[];
+}
+
 /**
  * A session as the app sees it. It carries no tokens, so it is safe to hand to
  * browser code; reach the tokens with `getTokens`.
@@ -32,8 +50,11 @@ export interface Session<TData = Record<string, unknown>> {
   createdAt: string;
   /** ISO 8601. Fixed at login; refreshes don't extend it. */
   expiresAt: string;
-  /** From the ID token. Absent when the token response has none. */
-  user?: { sub: string; name?: string; email?: string; roles?: string[] };
+  /**
+   * From the ID token. Absent when the token response has none. The app's own
+   * fields belong in `data`.
+   */
+  user?: SessionUser;
   /** Scopes the provider granted (e.g. ["openid", "profile", "email"]). */
   scopes?: string[];
   idp?: IdpSession;
