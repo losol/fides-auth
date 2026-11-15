@@ -85,8 +85,9 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   /**
    * Changes the user or data. Null when there is no session. It waits its
    * turn after a refresh or another update of the session, and `update` gets
-   * the session as it is then, so `update` must not refresh or update the
-   * same session itself.
+   * the session as it is then, so `update` must not refresh, update or end
+   * the same session itself: that call is refused with a TypeError. It rejects
+   * with what the store threw when the store fails.
    */
   updateSession(
     update: (session: Session<TData>) => Session<TData> | Promise<Session<TData>>,
