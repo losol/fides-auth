@@ -799,8 +799,8 @@ describe('session members', () => {
       expect(await cold.auth.endUserSessions({ sub: 'user-1' })).toBe(1);
       expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
       expect(warn).toHaveBeenCalledWith(
-        expect.objectContaining({ error: expect.anything() }),
-        expect.stringContaining('https://idp.test'),
+        expect.objectContaining({ issuer: 'https://idp.test', error: expect.anything() }),
+        expect.stringContaining('metadata'),
       );
     });
 

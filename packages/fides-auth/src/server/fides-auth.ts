@@ -717,8 +717,8 @@ export function createFidesAuth<TData = Record<string, unknown>>(
           // Ending local sessions should not depend on the provider being up.
           issuer = knownIssuer ?? oauthConfig.issuer;
           log.logout.warn(
-            { error: getOAuthErrorLogContext(error) },
-            `Could not read the provider's metadata; using the issuer ${issuer}`,
+            { issuer, error: getOAuthErrorLogContext(error) },
+            "Could not read the provider's metadata; using the issuer last seen or configured",
           );
         }
       }
