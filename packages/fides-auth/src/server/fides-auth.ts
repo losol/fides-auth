@@ -143,7 +143,7 @@ export interface FidesAuth {
     cookies: CookieStore,
     options?: { state?: string; logoutHint?: string },
   ): Promise<Response>;
-  /** `POST`. Refreshes the session. 401 means it is over; 503 means the provider couldn't be reached. */
+  /** `POST`. Refreshes the session. 401 means it is over; 503 means the provider or the store failed. */
   handleHeartbeat(request: Request, cookies: CookieStore): Promise<Response>;
   /** `GET`. Whether there is a session, and whose. Never refreshes, never returns tokens. */
   handleSessionInfo(request: Request, cookies: CookieStore): Promise<Response>;
@@ -537,9 +537,9 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
         };
         return Response.json(body, { headers: NO_STORE });
       }
-      // The provider was unreachable or broken. The session is probably fine,
-      // so keep it and let the client retry rather than log the user out.
-      if (result.cause === 'transport' || result.cause === 'idp_error') {
+      // The provider or the store was unreachable or broken. The session is
+      // probably fine, so keep it and let the client retry rather than log the user out.
+      if (result.cause === 'transport' || result.cause === 'idp_error' || result.cause === 'store') {
         log.heartbeat.warn(
           { correlationId: result.correlationId, cause: result.cause },
           'Heartbeat refresh could not be completed; keeping the session',

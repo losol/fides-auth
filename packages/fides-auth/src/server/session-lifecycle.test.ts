@@ -381,8 +381,19 @@ describe('the session lifecycle, store storage only', () => {
     expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'session_not_found' });
   });
 
-  it('takes a concurrent refresh from another instance instead of spending the token again', async () => {
-    const { lifecycle, cookies, refreshTokens, store, jar } = setup();
+  it.each([
+    ['with', (store: SessionStore) => store],
+    ['without', (store: SessionStore): SessionStore => ({ ...store, withLock: undefined })],
+  ])('takes a concurrent refresh from another instance instead of spending the token again, %s a lock', async (_, adapt) => {
+    const base = setup();
+    const store = adapt(base.store);
+    const lifecycle = createSessionLifecycle({
+      storage: storeStorage({ store, secure: true }),
+      secret,
+      refreshTokens: base.refreshTokens,
+      logger: quiet,
+    });
+    const { cookies, refreshTokens, jar } = base;
     const created = await lifecycle.create(cookies, tokens(1));
     const { sha256 } = await import('../session/utils.js');
     const key = await sha256(jar.get('__Host-session') ?? '');
@@ -398,5 +409,39 @@ describe('the session lifecycle, store storage only', () => {
     const result = await lifecycle.refresh(cookies);
     expect(result).toMatchObject({ ok: true, rotatedRefreshToken: true });
     expect(result.ok && result.record.tokens.accessToken).toBe('other');
+  });
+
+  it('fails a refresh whose lock it can\'t take as a store failure, and keeps the session', async () => {
+    const events: SessionEvent[] = [];
+    const store: SessionStore = {
+      ...createMemorySessionStore(),
+      withLock: async () => {
+        throw new Error('lock timeout');
+      },
+    };
+    const refreshTokens = vi.fn(async () => tokens(2));
+    const lifecycle = createSessionLifecycle({
+      storage: storeStorage({ store, secure: true }),
+      secret,
+      refreshTokens,
+      logger: quiet,
+      onSessionEvent: (event) => events.push(event),
+    });
+    const { cookies } = cookieJar();
+    const created = await lifecycle.create(cookies, tokens(1));
+
+    expect(await lifecycle.refresh(cookies)).toEqual({
+      ok: false,
+      reason: 'refresh_failed',
+      cause: 'store',
+      correlationId: created.session.correlationId,
+    });
+    expect(refreshTokens).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({
+      event: 'session.refresh_failed',
+      cause: 'store',
+      error: { message: 'lock timeout' },
+    });
+    expect((await lifecycle.read(cookies)).record).toEqual(created);
   });
 });

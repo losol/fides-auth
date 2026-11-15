@@ -67,7 +67,9 @@ export type RefreshFailureCause =
   /** The provider was never reached — DNS, TCP, TLS, timeout, abort. Retryable. */
   | 'transport'
   /** The provider was reached but answered with an error or something unparseable. Retryable. */
-  | 'idp_error';
+  | 'idp_error'
+  /** The session store failed, or its `withLock` couldn't take the lock. Retryable. */
+  | 'store';
 
 /** Where a session lives between requests. See `server/session-storage.ts`. */
 export type SessionPersistenceMode = 'cookie' | 'server';
@@ -151,6 +153,7 @@ const REFRESH_FAILED_LEVEL: Record<RefreshFailureCause, Level> = {
   invalid_grant: 'info',
   transport: 'warn',
   idp_error: 'error',
+  store: 'error',
 };
 
 /** Human-readable message per event; the machine-readable truth is in the fields. */

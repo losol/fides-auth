@@ -110,8 +110,26 @@ authorization. The instance:
   saved first, and the logout revokes its refresh token, or finds the record
   gone and saves nothing.
 
-Implement `withLock` when you run more than one instance. Give the lock a
-timeout, so a crashed holder doesn't wedge the session.
+Implement `withLock` when you run more than one instance, above all with a
+provider that rotates refresh tokens. Without it, two instances can refresh one
+session with the same token. The one that loses gets `invalid_grant` and
+re-reads the record, which rescues it only if the winner has already saved.
+Otherwise the refresh fails and the user logs in again, and a provider that
+treats the reuse as theft revokes the winner's tokens too.
+
+What a lock must allow:
+
+- `fn` calls `get` and `set` on the same key while the lock is held. Don't make
+  those calls wait for the lock's own resources: an adapter that holds the lock
+  on one pooled connection, and needs another for each query, deadlocks once as
+  many sessions refresh at once as the pool has connections.
+- The lock is held across the call to the provider, which openid-client gives
+  up on after 30 seconds. A lock that expires sooner lets a second holder
+  refresh with the same token.
+- Give the lock a timeout, so a crashed holder doesn't wedge the session. When
+  `withLock` rejects, for a timeout or anything else, the refresh fails with
+  `cause: 'store'` and the heartbeat answers `503`, so the browser retries. A
+  logout that can't take the lock answers `500`.
 
 A refresh keeps the handle, so it writes no cookie. It works where cookies
 can't be set, such as a Next.js Server Component.

@@ -609,6 +609,22 @@ describe('session members', () => {
     });
   });
 
+  it('answers the heartbeat with 503, not a throw, when the store lock fails', async () => {
+    const store = {
+      ...createMemorySessionStore(),
+      withLock: async () => {
+        throw new Error('lock timeout');
+      },
+    };
+    const { auth, cookies } = setup({ sessionStore: store });
+    await login(auth, cookies);
+
+    expect(await auth.refreshSession(cookies)).toMatchObject({ ok: false, cause: 'store' });
+    const heartbeat = await auth.handleHeartbeat(post('/api/auth/heartbeat'), cookies);
+    expect(heartbeat.status).toBe(503);
+    expect(await auth.readSession(cookies)).not.toBeNull();
+  });
+
   it('keeps the session in a store when given one', async () => {
     const store = createMemorySessionStore();
     const { auth, cookies, jar } = setup({ sessionStore: store });

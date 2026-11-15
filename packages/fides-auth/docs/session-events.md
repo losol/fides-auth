@@ -62,10 +62,11 @@ concludes there is "nothing in the logs".
 | `invalid_grant` | info  | The provider says the refresh token is dead.                   | Over    |
 | `transport`     | warn  | The provider was never reached — DNS, TCP, TLS, timeout.       | Probably fine |
 | `idp_error`     | error | The provider answered with an error or something unparseable.  | Probably fine |
+| `store`         | error | The session store failed, or `withLock` couldn't take the lock. | Probably fine |
 
 Only `invalid_grant` ends a session. The heartbeat endpoint answers `401` for it
-and `503` for the other two, so a provider outage no longer logs out users whose
-sessions were valid.
+and `503` for the others, so a provider or store outage doesn't log out users
+whose sessions were valid.
 
 ## `correlationId`
 
@@ -141,6 +142,7 @@ The session is cut into at most three cookies of up to 4096 bytes, and
 | --------- | --- |
 | any `session.created` with `hasRefreshToken=false` | Guaranteed logouts at access-token TTL. |
 | `session.refresh_failed` with `cause=idp_error` above baseline | The provider is failing. |
+| `session.refresh_failed` with `cause=store` above ~0 | The session store or its lock is failing. |
 | `session.rejected` with `reason=unreadable_session` above ~0 | Corruption, or a secret rotated without draining sessions. |
 | `cookieBytes` p99 approaching 12000 | Sessions about to stop fitting: logins start failing with 431. |
 
