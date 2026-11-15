@@ -538,7 +538,7 @@ The work, as PRs in beta. The numbers in brackets are rows in the breaking-chang
    - Core becomes a peer dependency of `fides-auth-next` and `fides-auth-react`, and `engines` moves to Node 22.
 6. **Docs.** The README rewrite, and the migration doc rewritten as an upgrade guide from any 0.x.
 
-**1.x: add.** Ship each as its own minor: back-channel logout, then the API proxy, the Fetch cookie store and the BFF guide. Secret rotation and a sliding lifetime follow when a consumer needs them. Once the old cookies' `Max-Age` has passed, a 1.x stops deleting them.
+**1.x: add.** Ship each as its own minor: back-channel logout, then the API proxy and the BFF guide. The Fetch cookie store came with 1.0 instead, as `fetchCookieStore` in `/server`: an app outside Next needs one from its first route, and writing it by hand is where a logout that doesn't delete its cookie comes from. Secret rotation and a sliding lifetime follow when a consumer needs them. Once the old cookies' `Max-Age` has passed, a 1.x stops deleting them.
 
 ## Open questions
 

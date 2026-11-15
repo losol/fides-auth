@@ -54,7 +54,8 @@ export const auth = createFidesAuth({
 | `validateReturnUrl` | `validateReturnTo` in `createFidesAuth`: `(returnTo) => string \| null` |
 | `/session-cookies`, `/session-refresh`, `/session-validation` | the instance reads, refreshes and seals the session itself |
 | the login transaction helpers (`createTransaction`, `validateCallback`, …) | internal. For a custom flow, use the OIDC client and keep its authorization request on the server |
-| `CookieStore.delete` | not needed: the library deletes a cookie by setting it empty with `maxAge: 0` |
+| `CookieStore.delete` | not needed: the library deletes a cookie by setting it empty with `maxAge: 0`, so a store must pass `maxAge` on as it is given |
+| a `CookieStore` written by hand over a Fetch `Request` | `fetchCookieStore(request)` from `/server`, with `apply(response)` and `headers()` for the `Set-Cookie` lines |
 
 **The session.** `Session` has `correlationId`, `createdAt`, `expiresAt`,
 `user`, `scopes`, `idp` and `data`. `user.sub` is required and `user.name`

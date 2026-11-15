@@ -314,15 +314,43 @@ the session storage and the guards, and each member takes the `Request` and a
 `CookieStore` over the request's cookies:
 
 ```typescript
-import { createFidesAuth, type CookieStore } from "@eventuras/fides-auth/server";
+import { createFidesAuth, fetchCookieStore } from "@eventuras/fides-auth/server";
 
 export const auth = createFidesAuth({ oauthConfig, secret: process.env.SESSION_SECRET! });
+
+// A route in a framework that hands you a Request and takes a Response
+export async function login(request: Request): Promise<Response> {
+  const cookies = fetchCookieStore(request);
+  return cookies.apply(await auth.handleOidcLogin(request, cookies));
+}
+```
+
+`fetchCookieStore` reads the request's `Cookie` header and keeps what the
+members write. `apply` copies a handler's response with those cookies added,
+and `headers()` gives them for a response you build yourself:
+
+```typescript
+const cookies = fetchCookieStore(request);
+await auth.refreshSession(cookies, { ifExpiresWithin: 60 });
+return new Response(body, { headers: cookies.headers() });
+```
+
+It fits React Router, Hono, SvelteKit, Astro and other frameworks built on
+Fetch. Next.js has its own store in `@eventuras/fides-auth-next`. Anything else
+needs only `get` and `set`:
+
+```typescript
+import type { CookieStore } from "@eventuras/fides-auth/server";
 
 const cookies: CookieStore = {
   get: (name) => requestCookies.get(name),
   set: (name, value, options) => responseCookies.set(name, value, options),
 };
 ```
+
+A store must write each cookie with the options it is given. The library
+deletes a cookie by setting it empty with `maxAge: 0`, so a store that sets a
+lifetime of its own turns a logout into an empty cookie that stays.
 
 It does no I/O until a member needs it, and checks the secret and the redirect
 URI on first use, so a build can load the module that creates it. A client with
