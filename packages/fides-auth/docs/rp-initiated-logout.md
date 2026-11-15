@@ -28,8 +28,8 @@ const auth = createFidesAuth({
 return auth.handleOidcLogout(request, cookies);
 ```
 
-That reads the session's ID token, ends the session, and redirects to the
-provider's end-session endpoint. Next.js apps get the same member from
+That ends the session, revokes its refresh token, and redirects to the
+provider's end-session endpoint with the ID token as the hint. Next.js apps get the same member from
 `createFidesAuth` in `@eventuras/fides-auth-next`, without the `cookies`
 argument. Pass `{ state, logoutHint }` as the third argument when you need them.
 
@@ -60,6 +60,22 @@ Unsupplied parameters are omitted.
 `end_session_endpoint`, when discovery fails, or when the endpoint is not https —
 the URL carries a raw ID token, so it never travels in the clear. Callers fall back to
 a local-only logout.
+
+## Revoking the refresh token
+
+`handleOidcLogout` and `clearSession` revoke the session's refresh token
+([RFC 7009][revocation]) when the provider advertises a `revocation_endpoint`,
+and send nothing when it doesn't. A copy of the session, or a refresh that was
+running at logout, can't renew it afterwards. A refresh running in the same
+process is waited for, and the token it brought back is the one revoked.
+Whether the provider also ends the access token and the rest of the grant is up
+to the provider.
+
+The session is over whether or not the revocation succeeds, so a failure is
+logged at `warn` and the logout goes on. `auth.oidc.revoke(token, { tokenTypeHint })`
+makes the same call for a token of your own.
+
+[revocation]: https://www.rfc-editor.org/rfc/rfc7009
 
 ## Why `id_token_hint` matters
 

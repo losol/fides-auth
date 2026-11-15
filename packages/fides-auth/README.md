@@ -266,7 +266,8 @@ const logoutUrl = await oidc.logoutUrl({
 ```
 
 `handleOidcLogout` on the [server instance](#server-server) wraps the whole
-dance: read the hint, end the session, redirect.
+dance: end the session, revoke its refresh token where the provider has a
+`revocation_endpoint`, and redirect with the ID token as the hint.
 
 See [docs/rp-initiated-logout.md](./docs/rp-initiated-logout.md) for the full
 parameter set, where the ID token is stored, and why `client_id` is still sent.
@@ -312,13 +313,14 @@ confidential client.
 |---|---|
 | `handleOidcLogin(request, cookies, { authorizationParameters? })` | `GET`, with an optional `?returnTo=`. Redirects to the provider. |
 | `handleOidcCallback(request, cookies)` | Starts the session. Redirects to the return path with `?login=success`, or home with `?login=error&error=<code>`. |
-| `handleOidcLogout(request, cookies, { state?, logoutHint? })` | `POST` from the app's own pages. Ends the session and redirects to the provider's end-session endpoint. |
+| `handleOidcLogout(request, cookies, { state?, logoutHint? })` | `POST` from the app's own pages. Ends the session, revokes its refresh token, and redirects to the provider's end-session endpoint. |
 | `handleSessionInfo(request, cookies)` | `GET`. Whether there is a session, and whose. Never refreshes, never returns tokens. |
 | `handleHeartbeat(request, cookies)` | `POST`. Refreshes the session: 401 when it is over, 503 when the provider can't be reached. |
 | `readSession`, `tryReadSession` | The session or null, or why there is none. |
 | `getTokens` | The tokens, which the session doesn't carry. |
 | `refreshSession(cookies, { ifExpiresWithin? })` | Refreshes the tokens, or only when the access token is about to expire. |
-| `createSession`, `updateSession`, `clearSession` | |
+| `createSession`, `updateSession` | |
+| `clearSession(cookies, { trigger? })` | Ends the session and revokes its refresh token, without the redirect. |
 | `authorizedFetch(cookies, url, options)` | Calls an API with the access token. Never refreshes. |
 | `cookieNames`, `oidc` | The session cookie's name, and the instance's OIDC client. |
 
@@ -400,8 +402,15 @@ const auth = createFidesAuth({
 | Sent on every request | The whole sealed session | The handle |
 | Refresh | Writes cookies, so it runs where they can be set: a proxy, a route handler or a Server Action | Keeps the handle and writes no cookie, so it also runs in a Server Component |
 | Concurrent refreshes | Shared within one process. A request sent before the new cookies arrived holds the old refresh token | Shared across instances too, when the store implements `withLock` |
-| Logout | Clears the cookie. A copy of it stays valid until `expiresAt`, or until a refresh fails | Deletes the record, so a copied cookie stops working |
+| Logout | Clears the cookie and revokes the refresh token. A copy of the cookie still reads as a session, and its access token works until it expires | Deletes the record, so a copied cookie stops working |
 | To run | Nothing | A store every instance shares, with a TTL on `expiresAt` |
+
+A refresh that is running when the user logs out finishes first, and the
+logout revokes the refresh token it brought back. With cookie storage, that
+refresh's response still sets the cookie again: the browser reads as logged in
+until the access token expires, and can't refresh. A store doesn't save a
+session that ended, and ends it under `withLock`, so no instance brings it
+back.
 
 Choose the store when the provider's tokens don't fit in three cookies
 (OpenIddict's encrypted JWE tokens, for instance), when logout must end a

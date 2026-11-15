@@ -5,7 +5,7 @@
 // from its own cookie API.
 
 import { CookieTooLargeError } from '../shared/cookies.js';
-import { consoleLoggerFactory, type FidesLoggerFactory } from '../shared/logger.js';
+import { consoleLoggerFactory, type FidesLogger, type FidesLoggerFactory } from '../shared/logger.js';
 import {
   SESSION_EVENT,
   logSessionEvent,
@@ -23,7 +23,8 @@ import type {
 } from '../shared/types.js';
 import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { redirectUriOf, type OidcClientConfig } from '../protocol/config.js';
-import type { MapRecordSession } from '../session/record.js';
+import { getOAuthErrorLogContext } from '../protocol/logging.js';
+import type { MapRecordSession, SessionRecord } from '../session/record.js';
 import { authorizedFetch as fetchWithTokens, type AuthorizedFetchOptions } from './authorized-fetch.js';
 import type { CookieStore } from './cookie-store.js';
 import { isSameOriginRequest } from './csrf.js';
@@ -133,7 +134,10 @@ export interface FidesAuth {
   ): Promise<Response>;
   /** The provider's redirect back. Starts the session and redirects to the return path. */
   handleOidcCallback(request: Request, cookies: CookieStore): Promise<Response>;
-  /** `POST`. Ends the session and redirects to the provider's end-session endpoint. */
+  /**
+   * `POST`. Ends the session, revokes its refresh token where the provider has
+   * a revocation endpoint, and redirects to the provider's end-session endpoint.
+   */
   handleOidcLogout(
     request: Request,
     cookies: CookieStore,
@@ -164,7 +168,11 @@ export interface FidesAuth {
     cookies: CookieStore,
     update: (session: Session) => Session | Promise<Session>,
   ): Promise<Session | null>;
-  /** Ends the session. With a store, the record is deleted too. `trigger` defaults to `'logout'`. */
+  /**
+   * Ends the session and revokes its refresh token where the provider has a
+   * revocation endpoint. With a store, the record is deleted too. `trigger`
+   * defaults to `'logout'`.
+   */
   clearSession(cookies: CookieStore, options?: { trigger?: SessionClearedTrigger }): Promise<void>;
   /**
    * Calls an API with the session's access token. It never refreshes, so a 401
@@ -275,6 +283,26 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
   }
   let resolved: ReturnType<typeof resolveSettings> | undefined;
   const settings = () => (resolved ??= resolveSettings());
+
+  /**
+   * Revokes the refresh token of a session that has ended, so neither a copy
+   * of the session nor a refresh that was in flight can renew it. The session
+   * is over either way, so a failure is only logged.
+   */
+  async function revokeRefreshToken(ended: SessionRecord | undefined, logger: FidesLogger): Promise<void> {
+    if (!ended?.tokens.refreshToken) return;
+    const { correlationId } = ended.session;
+    try {
+      if (await oidc.revoke(ended.tokens.refreshToken, { tokenTypeHint: 'refresh_token' })) {
+        logger.info({ correlationId }, 'Refresh token revoked');
+      }
+    } catch (error) {
+      logger.warn(
+        { correlationId, error: getOAuthErrorLogContext(error) },
+        'Could not revoke the refresh token',
+      );
+    }
+  }
 
   async function limited(request: Request): Promise<boolean> {
     return !!rateLimit && !(await rateLimit(request));
@@ -458,17 +486,21 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
         return tooManyRequests();
       }
 
-      // Read before ending: the ID token is the hint that lets the provider skip its prompt.
-      const idTokenHint = (await settings().lifecycle.read(cookies)).record?.tokens.idToken;
+      // A bad secret is a config error, not a session to end quietly.
+      assertSessionSecret(secret);
+      let ended: SessionRecord | undefined;
       try {
-        await settings().lifecycle.end(cookies, { trigger: 'logout' });
+        ended = await settings().lifecycle.end(cookies, { trigger: 'logout' });
       } catch (error) {
         // Never send the user to the provider with the local session half ended:
         // they would come back looking logged in.
         log.logout.error({ error }, 'Failed to end the session');
         return new Response('Logout failed', { status: 500 });
       }
+      await revokeRefreshToken(ended, log.logout);
 
+      // The ID token is the hint that lets the provider skip its prompt.
+      const idTokenHint = ended?.tokens.idToken;
       const { postLogoutRedirectUri } = settings();
       const url = await oidc.logoutUrl({
         postLogoutRedirectUri,
@@ -550,7 +582,9 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     refreshSession,
     createSession: async (cookies, tokens) => (await settings().lifecycle.create(cookies, tokens)).session,
     updateSession: async (cookies, update) => (await settings().lifecycle.update(cookies, update))?.session ?? null,
-    clearSession: (cookies, { trigger = 'logout' } = {}) => settings().lifecycle.end(cookies, { trigger }),
+    async clearSession(cookies, { trigger = 'logout' } = {}) {
+      await revokeRefreshToken(await settings().lifecycle.end(cookies, { trigger }), log.logout);
+    },
 
     async authorizedFetch(cookies, url, options) {
       const tokens = (await settings().lifecycle.read(cookies)).record?.tokens;
