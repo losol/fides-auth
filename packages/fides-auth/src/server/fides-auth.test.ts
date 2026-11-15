@@ -499,6 +499,17 @@ describe('guards', () => {
     expect(oidc.createAuthorizationRequest).not.toHaveBeenCalled();
   });
 
+  it('says in the session info when the session ends, and a refresh does not move it', async () => {
+    const { auth, cookies } = setup();
+    await login(auth, cookies);
+    const session = await auth.readSession(cookies);
+    const info = async () => (await auth.handleSessionInfo(get('/api/auth/session'), cookies)).json();
+
+    expect((await info()).expiresAt).toBe(session?.expiresAt);
+    await auth.refreshSession(cookies);
+    expect((await info()).expiresAt).toBe(session?.expiresAt);
+  });
+
   it('answers session info only to GET and HEAD', async () => {
     const { auth, cookies } = setup();
     const response = await auth.handleSessionInfo(post('/api/auth/session'), cookies);

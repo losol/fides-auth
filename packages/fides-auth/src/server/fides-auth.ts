@@ -191,7 +191,10 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   ): Promise<Response>;
   /** `POST`. Refreshes the session. 401 means it is over; 503 means the provider or the store failed. */
   handleHeartbeat(request: Request, cookies: CookieStore): Promise<Response>;
-  /** `GET`. Whether there is a session, and whose. Never refreshes, never returns tokens. */
+  /**
+   * `GET`. Whether there is a session, whose, and when it ends. Never
+   * refreshes, never returns tokens.
+   */
   handleSessionInfo(request: Request, cookies: CookieStore): Promise<Response>;
 
   /** The session, or null. */
@@ -669,6 +672,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
             user: record.session.user,
             scopes: record.session.scopes,
             accessTokenExpiresAt: record.tokens.accessTokenExpiresAt ?? null,
+            expiresAt: record.session.expiresAt,
           }
         : { authenticated: false };
       return Response.json(body, { headers: NO_STORE });

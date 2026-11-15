@@ -83,8 +83,10 @@ Logout answers only a `POST` from the app's own pages, so a form does it:
 </form>
 ```
 
-`handleSessionInfo` answers whether there is a session, and whose. It never
-refreshes and never returns tokens. `handleHeartbeat` is there for apps that tie
+`handleSessionInfo` answers whether there is a session, whose, and when it
+ends: `expiresAt` is the session's own end, which a refresh doesn't move, so a
+page can warn before the user is logged out. It never refreshes and never
+returns tokens. `handleHeartbeat` is there for apps that tie
 refreshes to user activity; it too answers only a same-origin `POST`.
 
 ## Reading the session

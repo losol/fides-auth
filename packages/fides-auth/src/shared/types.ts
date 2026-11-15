@@ -69,6 +69,11 @@ export interface SessionInfo {
   scopes?: string[];
   /** ISO 8601, or null when the provider gave no lifetime. */
   accessTokenExpiresAt?: string | null;
+  /**
+   * ISO 8601: when the session itself ends, however its tokens are refreshed.
+   * For a page that warns before the user is logged out. Absent without a session.
+   */
+  expiresAt?: string;
 }
 
 /** What the heartbeat endpoint answers after a refresh. */

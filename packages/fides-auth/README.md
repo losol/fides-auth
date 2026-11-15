@@ -362,7 +362,7 @@ confidential client.
 | `handleOidcLogin(request, cookies, { authorizationParameters? })` | `GET`, with an optional `?returnTo=`. Redirects to the provider. |
 | `handleOidcCallback(request, cookies)` | Starts the session. Redirects to the return path with `?login=success`, unless `loginSuccessParam` is false, or home with `?login=error&error=<code>`. |
 | `handleOidcLogout(request, cookies, { state?, logoutHint? })` | `POST` from the app's own pages. Ends the session, revokes its refresh token, and redirects to the provider's end-session endpoint. |
-| `handleSessionInfo(request, cookies)` | `GET`. Whether there is a session, and whose. Never refreshes, never returns tokens. |
+| `handleSessionInfo(request, cookies)` | `GET`. Whether there is a session, whose, and when it ends (`expiresAt`). Never refreshes, never returns tokens. |
 | `handleHeartbeat(request, cookies)` | `POST`. Refreshes the session: 401 when it is over, 503 when the provider or the store failed. |
 | `readSession`, `tryReadSession` | The session or null, or why there is none. |
 | `getTokens` | The tokens, which the session doesn't carry. |
