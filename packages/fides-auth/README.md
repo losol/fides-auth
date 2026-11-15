@@ -354,6 +354,7 @@ Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
 #### Sessions
 
 A session lasts `sessionDurationDays` from login, and refreshes don't extend it.
+It counts days, and a fraction is fine: `1 / 3` is eight hours.
 It is sealed with AES-256-GCM into the `__Host-session` cookie, in up to three
 chunks (`session` over plain http). A `Session` has `correlationId`,
 `createdAt`, `expiresAt`, `user`, `scopes`, `idp` and `data`. The tokens aren't

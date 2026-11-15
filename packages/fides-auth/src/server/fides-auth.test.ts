@@ -328,6 +328,22 @@ describe('login, session and logout', () => {
     );
     expect(oidc.revoke).not.toHaveBeenCalled();
   });
+
+  it('refuses a session lifetime that is not a number of days, when it is created', () => {
+    for (const sessionDurationDays of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
+      expect(() => setup({ sessionDurationDays }), String(sessionDurationDays)).toThrow(TypeError);
+    }
+    // An unset environment variable is the usual way to get here.
+    expect(() => setup({ sessionDurationDays: Number(undefined) })).toThrow(/sessionDurationDays/);
+  });
+
+  it('takes a fraction of a day as the session lifetime', async () => {
+    const { auth, cookies } = setup({ sessionDurationDays: 1 / 3 });
+    await login(auth, cookies);
+    const session = await auth.readSession(cookies);
+    const hours = (Date.parse(session?.expiresAt ?? '') - Date.parse(session?.createdAt ?? '')) / 3_600_000;
+    expect(hours).toBeCloseTo(8, 5);
+  });
 });
 
 describe('return paths', () => {
