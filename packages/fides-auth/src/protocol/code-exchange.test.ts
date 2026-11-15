@@ -34,7 +34,7 @@ function exchange(callbackUrl: URL, codeVerifier: string, state: string) {
   return client.exchangeCode(callbackUrl, { codeVerifier, state });
 }
 
-const discoveredConfig = {} as unknown as openid.Configuration;
+const discoveredConfig = { serverMetadata: () => ({}) } as unknown as openid.Configuration;
 
 beforeEach(() => {
   vi.clearAllMocks();

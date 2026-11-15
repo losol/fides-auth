@@ -1,6 +1,7 @@
 import * as openid from 'openid-client';
 
 import type { ProtocolContext } from './context.js';
+import { isLoopback } from './discovery.js';
 
 /** Parameters for an RP-initiated logout request (OIDC RP-Initiated Logout 1.0 §2). */
 export interface OidcLogoutOptions {
@@ -66,7 +67,8 @@ export async function logoutUrl(
       // openid-client rejects a non-https endpoint on the path above; the manual
       // one must too. The URL carries a raw id_token_hint, so a discovery document
       // that downgrades the scheme would put it on the wire in the clear.
-      if (logoutUrl.protocol !== 'https:') {
+      const allowedHttp = oauthConfig.allowInsecureRequests === true && isLoopback(logoutUrl);
+      if (logoutUrl.protocol !== 'https:' && !allowedHttp) {
         logger.error(
           { issuer: oauthConfig.issuer, protocol: logoutUrl.protocol },
           'end_session_endpoint is not https — refusing to build a logout URL',

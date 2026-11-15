@@ -30,9 +30,9 @@ const clientFor = (tokenEndpoint: string) =>
 
 describe('OidcClient.clientCredentials', () => {
   it('refuses a non-https token endpoint rather than posting the secret in the clear', async () => {
-    await expect(clientFor('http://api.example.com/token').clientCredentials()).rejects.toMatchObject({
-      code: 'OAUTH_HTTP_REQUEST_FORBIDDEN',
-    });
+    await expect(clientFor('http://api.example.com/token').clientCredentials()).rejects.toThrow(
+      /token_endpoint http:\/\/api\.example\.com\/token uses http/,
+    );
   });
 
   it('rejects a malformed token endpoint', async () => {

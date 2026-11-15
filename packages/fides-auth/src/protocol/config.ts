@@ -53,6 +53,15 @@ export type OidcClientConfig = ClientAuthConfig & {
    * only for logs and caching.
    */
   serverMetadata?: openid.ServerMetadata;
+  /**
+   * Allows plain http to the provider, for one on a loopback address in
+   * development or CI: `localhost`, a `*.localhost` name, `127.0.0.0/8` or
+   * `[::1]`. The issuer and every endpoint in its metadata must be https or
+   * loopback, or the first call to the provider throws a TypeError. Without it,
+   * any http URL throws.
+   * @default false
+   */
+  allowInsecureRequests?: boolean;
 };
 
 /**

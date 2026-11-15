@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('openid-client', () => ({
   discovery: vi.fn(),
   buildEndSessionUrl: vi.fn(),
+  allowInsecureRequests: vi.fn(),
   ClientSecretPost: vi.fn(() => () => undefined),
 }));
 
@@ -136,6 +137,17 @@ describe('OidcClient.logoutUrl', () => {
   it('returns null when discovery fails', async () => {
     vi.mocked(openid.discovery).mockRejectedValue(new Error('unreachable'));
     expect(await logoutUrl({ postLogoutRedirectUri: 'https://app.example.com/' })).toBeNull();
+  });
+
+  it('builds a loopback http logout URL on the manual branch with allowInsecureRequests', async () => {
+    mockDiscovery('http://localhost:3000/logout');
+    const client = createOidcClient(
+      { ...oauthConfig, issuer: 'http://localhost:3000', allowInsecureRequests: true },
+      { logger: quiet },
+    );
+
+    const url = await client.logoutUrl({ idTokenHint: 'the-id-token', includeClientId: false });
+    expect(url?.toString()).toBe('http://localhost:3000/logout?id_token_hint=the-id-token');
   });
 
   it('refuses a non-https end_session_endpoint on the manual branch', async () => {
