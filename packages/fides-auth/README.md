@@ -9,7 +9,7 @@ Framework-agnostic OAuth 2.0 / OpenID Connect library with PKCE, encrypted sessi
 - **Server and browser** — `/server` for the server side and `/browser` for the page; `/oidc` runs anywhere with Web Crypto and `fetch`
 - **Encrypted sessions** — AES-256-GCM encrypted JWTs for secure session storage
 - **Server-side sessions** — Opt-in store behind an opaque handle cookie, for providers whose tokens don't fit a cookie
-- **Rate limiting hook** — `rateLimit` makes the handlers answer 429, with the limiter of your choice
+- **Rate limiting hook** — `rateLimit` refuses a request, with the limiter of your choice
 - **RP-initiated logout** — End the provider's session too, with `id_token_hint` (OIDC RP-Initiated Logout 1.0)
 - **Silent login** — `prompt=none` logins, and helpers that read their result
 - **Pluggable logging** — Bring your own logger (pino, winston, etc.) or use the built-in console logger
