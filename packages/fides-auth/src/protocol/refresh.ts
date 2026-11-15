@@ -2,10 +2,13 @@ import * as openid from 'openid-client';
 
 import type { ProtocolContext } from './context.js';
 import { getOAuthErrorLogContext } from './logging.js';
-import { joinScope } from './scope.js';
 
 /**
  * Runs a refresh token grant. The core of `OidcClient.refresh`.
+ *
+ * Sends no `scope`, so the provider keeps the scope it granted at login. The
+ * configured scope may hold more than was granted, e.g. `offline_access`, and
+ * asking for that on a refresh fails with `invalid_scope` (RFC 6749 §6).
  */
 export async function refresh(
   { config: oAuthConfig, configuration, logger }: ProtocolContext,
@@ -16,13 +19,7 @@ export async function refresh(
   try {
     const config = await configuration();
 
-    const tokens = await openid.refreshTokenGrant(
-      config,
-      refreshToken,
-      {
-        scope: joinScope(oAuthConfig.scope),
-      },
-    );
+    const tokens = await openid.refreshTokenGrant(config, refreshToken);
 
     logger.info({
       hasAccessToken: !!tokens.access_token,

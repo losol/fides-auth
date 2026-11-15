@@ -243,13 +243,13 @@ describe('createOidcClient: tokens', () => {
     expect(parameters).toEqual({ redirect_uri: 'https://app.example.test/callback' });
   });
 
-  it('refreshes with the configured scope', async () => {
+  it('refreshes without a scope, keeping the one granted at login', async () => {
     const client = createOidcClient({ ...config, scope: ['openid', 'offline_access'] });
     await client.refresh('refresh-token');
 
-    expect(openid.refreshTokenGrant).toHaveBeenCalledWith(expect.anything(), 'refresh-token', {
-      scope: 'openid offline_access',
-    });
+    const [, refreshToken, parameters] = vi.mocked(openid.refreshTokenGrant).mock.calls[0];
+    expect(refreshToken).toBe('refresh-token');
+    expect(parameters).toBeUndefined();
   });
 
   it('runs client credentials with its own scope, not the login scope', async () => {

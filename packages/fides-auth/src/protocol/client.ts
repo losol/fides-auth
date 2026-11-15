@@ -81,7 +81,7 @@ export interface OidcClient {
     request: Pick<AuthorizationRequest, 'codeVerifier' | 'state'>,
   ): Promise<openid.TokenEndpointResponse>;
 
-  /** Runs a refresh token grant. */
+  /** Runs a refresh token grant. Sends no `scope`, so the granted scope is kept. */
   refresh(refreshToken: string): Promise<openid.TokenEndpointResponse>;
 
   /**
