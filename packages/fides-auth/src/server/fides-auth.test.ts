@@ -698,6 +698,18 @@ describe('session members', () => {
     expect(() => setup({ refreshGraceSeconds: Number.NaN })).toThrow(TypeError);
   });
 
+  it('takes the scopes a refresh grants, for the session and the session info', async () => {
+    const { auth, cookies } = setup();
+    await login(auth, cookies);
+    expect((await auth.readSession(cookies))?.scopes).toEqual(['openid', 'profile']);
+
+    oidc.refresh.mockResolvedValueOnce(tokens(2, { scope: 'openid' }));
+    await auth.refreshSession(cookies);
+    expect((await auth.readSession(cookies))?.scopes).toEqual(['openid']);
+    const info = await (await auth.handleSessionInfo(get('/api/auth/session'), cookies)).json();
+    expect(info.scopes).toEqual(['openid']);
+  });
+
   it('answers the heartbeat with 503, not a throw, when the store lock fails', async () => {
     const store = {
       ...createMemorySessionStore(),
