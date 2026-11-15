@@ -731,6 +731,7 @@ describe('the session lifecycle, store storage only', () => {
         reason: 'refresh_failed',
         cause: 'invalid_grant',
         correlationId: created.session.correlationId,
+        ended: true,
       });
       expect(events.slice(-2)).toMatchObject([
         { event: 'session.refresh_failed', cause: 'invalid_grant' },
@@ -758,11 +759,79 @@ describe('the session lifecycle, store storage only', () => {
         reason: 'refresh_failed',
         cause: 'invalid_grant',
         correlationId: created.session.correlationId,
+        ended: true,
       });
       expect(events.at(-1)).toMatchObject({ event: 'session.cleared', trigger: 'rejected' });
       // The handle stays, and finds nothing.
       expect(jar.get('__Host-session')).toMatch(/^[0-9a-f]{64}$/);
       expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'session_not_found' });
+    });
+
+    /** Another request from the same browser: its own jar, with the same handle. */
+    function sameBrowser(jar: Map<string, string>) {
+      const copy = cookieJar();
+      for (const [name, value] of jar) copy.jar.set(name, value);
+      return copy;
+    }
+
+    it('deletes the cookie on every request that shared the refresh, not only the first', async () => {
+      const { lifecycle, refreshTokens, cookies, jar } = over(createMemorySessionStore());
+      await lifecycle.create(cookies, tokens(1));
+      const second = sameBrowser(jar);
+      const third = sameBrowser(jar);
+      let refuse: (error: Error) => void = () => {};
+      refreshTokens.mockImplementationOnce(() => new Promise((_, reject) => (refuse = reject)));
+
+      const first = lifecycle.refresh(cookies);
+      await vi.waitFor(() => expect(refreshTokens).toHaveBeenCalled());
+      const others = [lifecycle.refresh(second.cookies), lifecycle.refresh(third.cookies)];
+      // Let the others read the session and join the refresh that is running.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      refuse(invalidGrant());
+
+      for (const result of [await first, ...(await Promise.all(others))]) {
+        expect(result).toMatchObject({ ok: false, cause: 'invalid_grant' });
+      }
+      expect(refreshTokens).toHaveBeenCalledTimes(1);
+      expect(jar.size).toBe(0);
+      expect(second.jar.size).toBe(0);
+      expect(third.jar.size).toBe(0);
+    });
+
+    it('deletes the cookie on another instance that waited for the lock and found the record gone', async () => {
+      const store = createMemorySessionStore();
+      const here = over(store);
+      const there = over(store);
+      await here.lifecycle.create(here.cookies, tokens(1));
+      for (const [name, value] of here.jar) there.jar.set(name, value);
+      let refuse: (error: Error) => void = () => {};
+      here.refreshTokens.mockImplementationOnce(() => new Promise((_, reject) => (refuse = reject)));
+
+      const first = here.lifecycle.refresh(here.cookies);
+      await vi.waitFor(() => expect(here.refreshTokens).toHaveBeenCalled());
+      const waiting = there.lifecycle.refresh(there.cookies);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      refuse(invalidGrant());
+
+      expect(await first).toMatchObject({ ok: false, cause: 'invalid_grant' });
+      expect(await waiting).toMatchObject({ ok: false, reason: 'session_not_found' });
+      // It never asked the provider: the session was gone when its turn came.
+      expect(there.refreshTokens).not.toHaveBeenCalled();
+      expect(here.jar.size).toBe(0);
+      expect(there.jar.size).toBe(0);
+    });
+
+    it('leaves the cookie of a request that comes after, which only sees that the record is missing', async () => {
+      const { lifecycle, refreshTokens, cookies, jar } = over(createMemorySessionStore());
+      await lifecycle.create(cookies, tokens(1));
+      const later = sameBrowser(jar);
+      refreshTokens.mockRejectedValueOnce(invalidGrant());
+      await lifecycle.refresh(cookies);
+
+      // A missing record can also be a store that lost it for a moment. The
+      // request has no session either way; only the cookie is left alone.
+      expect(await lifecycle.refresh(later.cookies)).toEqual({ ok: false, reason: 'session_not_found' });
+      expect(later.jar.get('__Host-session')).toMatch(/^[0-9a-f]{64}$/);
     });
 
     it('leaves the session under a store without a lock, where another instance may have refreshed', async () => {
@@ -861,7 +930,8 @@ describe('the session lifecycle, store storage only', () => {
     finish(tokens(2));
 
     expect(await refreshing).toMatchObject({ ok: false, reason: 'session_not_found' });
-    expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'session_not_found' });
+    // The refresh found the session ended, so its request loses the cookie too.
+    expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'no_session_cookie' });
   });
 
   it.each([

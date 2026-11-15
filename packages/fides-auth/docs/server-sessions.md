@@ -77,6 +77,9 @@ library's side:
   session. An expired record reads as `session_expired`; a store that drops it
   first reads as `session_not_found`.
 - `expiresAt` is fixed at login and kept across refreshes.
+- `get` answers null only when there is no record. A store that can't be
+  reached must throw: a refresh that reads a session and then finds it gone
+  takes it for ended, and deletes its cookie.
 
 `createMemorySessionStore()` ships for tests and single-instance development;
 sessions don't survive a restart. Database adapters belong in your app. A
@@ -205,9 +208,12 @@ authorization. The instance:
   gone and saves nothing;
 - deletes the record when the provider refuses a refresh for good
   (`invalid_grant`) under `withLock`: no other instance can have refreshed, so
-  the session's tokens are dead. The handle's cookie is deleted with it where
-  cookies can be set; where they can only be read, a Next Server Component
-  say, the handle stays and reads as `session_not_found`. Without `withLock`
+  the session's tokens are dead. The handle's cookie is deleted with it, on
+  every request whose refresh learns of it: the one that ended the session,
+  those that shared its call to the provider, and those on other instances
+  that waited for the lock and found the record gone. Where cookies can only
+  be read, a Next Server Component say, the handle stays and reads as
+  `session_not_found`, as it does for a request that comes after. Without `withLock`
   the record is left, since another instance may hold newer tokens.
 
 Implement `withLock` when you run more than one instance, above all with a

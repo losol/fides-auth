@@ -295,9 +295,9 @@ export interface FidesAuth<TData = Record<string, unknown>> {
    *
    * A refresh the provider refuses for good, `cause: 'invalid_grant'`, ends a
    * session held by a `sessionStore` with `withLock`: the record is deleted,
-   * and the cookie too where cookies can be set. Any other session is left as
-   * it is, since another instance may have refreshed it; end it with
-   * `clearSession`.
+   * and the cookie too where cookies can be set, on every request that was
+   * waiting for that refresh. Any other session is left as it is, since
+   * another instance may have refreshed it; end it with `clearSession`.
    */
   refreshSession(
     cookies: CookieStore,

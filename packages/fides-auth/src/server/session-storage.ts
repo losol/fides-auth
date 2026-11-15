@@ -115,12 +115,17 @@ export interface SessionStorage {
    */
   readonly exclusive?: boolean;
   /**
-   * Deletes the record, and the cookie where cookies can be written. Where
-   * they can only be read, the cookie stays and finds no session. For a
-   * session that ends while it is refreshed, which may be in such a place.
+   * Deletes the record and leaves the cookie, which then finds no session.
    * Only store storage.
    */
   discard?(cookies: CookieStore): Promise<void>;
+  /**
+   * Deletes the session cookie where cookies can be written. Where they can
+   * only be read, it does nothing: the cookie stays and finds no session. For
+   * a session that is found over while it is refreshed, which may be in such
+   * a place. Only store storage.
+   */
+  forget?(cookies: CookieStore): Promise<void>;
   /** The sessions that match. Only store storage, and only over a store that can search. */
   findMatching?(match: SessionMatch): Promise<FoundSession[]>;
 }
@@ -300,6 +305,9 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
     async discard(cookies) {
       const current = await locate(cookies);
       if (current && current !== 'invalid') await store.delete(current.key);
+    },
+
+    async forget(cookies) {
       try {
         await deletePresent(cookies, [name, ...otherChunks], cookieOptions(secure, 0));
       } catch {
