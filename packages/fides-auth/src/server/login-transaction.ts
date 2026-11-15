@@ -36,6 +36,8 @@ export interface LoginTransaction {
   codeVerifier: string;
   /** Path to return to after login, already validated. */
   returnTo?: string;
+  /** The scope the login asked for, as sent. */
+  scope?: string;
   /** Start of the login, in epoch milliseconds. */
   createdAt: number;
 }
@@ -83,7 +85,8 @@ export interface ValidateCallbackOptions {
 
 /** Starts a login transaction from the authorization request sent to the provider. */
 export function createTransaction(
-  request: Pick<AuthorizationRequest, 'state' | 'codeVerifier'>,
+  request: Pick<AuthorizationRequest, 'state' | 'codeVerifier'> &
+    Partial<Pick<AuthorizationRequest, 'parameters'>>,
   { returnTo, logger }: CreateTransactionOptions,
 ): LoginTransaction {
   let kept = returnTo || undefined;
@@ -91,10 +94,12 @@ export function createTransaction(
     logger.warn({ length: kept.length }, 'returnTo too long, dropped');
     kept = undefined;
   }
+  const scope = request.parameters?.scope;
   return {
     state: request.state,
     codeVerifier: request.codeVerifier,
     ...(kept ? { returnTo: kept } : {}),
+    ...(typeof scope === 'string' && scope ? { scope } : {}),
     createdAt: Date.now(),
   };
 }
@@ -245,12 +250,14 @@ async function open(value: string, key: Uint8Array): Promise<LoginTransaction | 
       typeof sealed.state === 'string' &&
       typeof sealed.codeVerifier === 'string' &&
       typeof sealed.createdAt === 'number' &&
-      (sealed.returnTo === undefined || typeof sealed.returnTo === 'string')
+      (sealed.returnTo === undefined || typeof sealed.returnTo === 'string') &&
+      (sealed.scope === undefined || typeof sealed.scope === 'string')
     ) {
       return {
         state: sealed.state,
         codeVerifier: sealed.codeVerifier,
         returnTo: sealed.returnTo,
+        scope: sealed.scope,
         createdAt: sealed.createdAt,
       };
     }

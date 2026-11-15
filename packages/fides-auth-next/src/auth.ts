@@ -76,7 +76,11 @@ export interface FidesAuth<TData = Record<string, unknown>> {
    * `refreshInProxy`.
    */
   refreshSession(options?: RefreshSessionOptions): Promise<FidesRefreshResult<TData>>;
-  /** Starts a session from a token response, for a login that doesn't go through the handlers. */
+  /**
+   * Starts a session from a token response, for a login that doesn't go through
+   * the handlers. `scopes` come from the response's `scope`; when the provider
+   * leaves it out, pass it along, e.g. `{ ...tokens, scope }`.
+   */
   createSession(tokens: TokenResponse): Promise<Session<TData>>;
   /**
    * Changes the user or data. Null when there is no session. It waits its

@@ -422,7 +422,8 @@ login after that is a redirect without a password.
 It is sealed with AES-256-GCM into the `__Host-session` cookie, in up to three
 chunks (`session` over plain http). A `Session` has `correlationId`,
 `createdAt`, `expiresAt`, `user`, `scopes`, `idp` and `data`. The tokens aren't
-on it: `getTokens` returns them.
+on it: `getTokens` returns them. At login `scopes` are the scopes the provider
+granted, which are the ones asked for when its response names none.
 
 Every read opens the session again, and with a `sessionStore` it is a round
 trip to the store. Code that needs both the session and its tokens reads them
