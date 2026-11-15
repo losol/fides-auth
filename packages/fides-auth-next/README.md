@@ -48,6 +48,7 @@ of an app is a confidential client.
 | `rolesClaim` | `'roles'` | The ID token claim that holds the user's roles, at login and on every refresh that brings an ID token. |
 | `validateReturnTo` | a path on this origin | Turns `?returnTo=` into a safe path, or null. |
 | `defaultRedirectPath` | `'/'` | Where a login without a return path lands. |
+| `loginSuccessParam` | `true` | Adds `?login=success` to the return path after a login. False leaves the path as it was. |
 | `postLogoutRedirectUri` | `applicationUrl` | Where the provider sends the user after logout. |
 | `rateLimit` | none | `(request) => boolean`. The handlers answer 429 when it returns false. |
 | `logger` | JSON lines on the console | A `FidesLoggerFactory`. |
@@ -70,7 +71,8 @@ export const GET = (request: Request) => auth.handleSessionInfo(request);
 ```
 
 The callback's path must be the redirect URI's. Login takes `?returnTo=/path`
-and lands there with `?login=success`.
+and lands there with `?login=success`, or on the path as it was with
+`loginSuccessParam: false`.
 
 Logout answers only a `POST` from the app's own pages, so a form does it:
 

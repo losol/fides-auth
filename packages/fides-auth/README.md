@@ -332,7 +332,7 @@ confidential client.
 | Member | |
 |---|---|
 | `handleOidcLogin(request, cookies, { authorizationParameters? })` | `GET`, with an optional `?returnTo=`. Redirects to the provider. |
-| `handleOidcCallback(request, cookies)` | Starts the session. Redirects to the return path with `?login=success`, or home with `?login=error&error=<code>`. |
+| `handleOidcCallback(request, cookies)` | Starts the session. Redirects to the return path with `?login=success`, unless `loginSuccessParam` is false, or home with `?login=error&error=<code>`. |
 | `handleOidcLogout(request, cookies, { state?, logoutHint? })` | `POST` from the app's own pages. Ends the session, revokes its refresh token, and redirects to the provider's end-session endpoint. |
 | `handleSessionInfo(request, cookies)` | `GET`. Whether there is a session, and whose. Never refreshes, never returns tokens. |
 | `handleHeartbeat(request, cookies)` | `POST`. Refreshes the session: 401 when it is over, 503 when the provider or the store failed. |
@@ -348,8 +348,8 @@ confidential client.
 Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
 `storeFields`, `sessionDurationDays` (30), `applicationUrl` (the redirect URI's origin),
 `mapSession`, `rolesClaim` (`roles`), `validateReturnTo`, `defaultRedirectPath`
-(`/`), `postLogoutRedirectUri` (`applicationUrl`), `rateLimit`, `logger` and
-`onSessionEvent`.
+(`/`), `postLogoutRedirectUri` (`applicationUrl`), `rateLimit`, `logger`,
+`onSessionEvent` and `loginSuccessParam` (true).
 
 #### Sessions
 
