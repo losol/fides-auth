@@ -6,6 +6,8 @@
 // 3. A refresh or an update changes the contents, never the identity or the lifetime.
 // 4. A session is read whole or not at all.
 // 5. Concurrent refreshes of one session in one process share one provider call.
+//    Under cookie storage, so does a refresh that comes just after, from a
+//    request that still carries the cookie from before.
 // 6. A rejected reason means the same thing in both storages.
 // 7. A refresh the provider refuses for good ends the session where that is
 //    certain: under a store's lock. Elsewhere another instance may have
@@ -69,6 +71,14 @@ export interface SessionLifecycleOptions {
   mapSession?: MapRecordSession;
   /** Plain fields to keep next to a stored session. Store storage only. */
   storeFields?(session: Session): StoreFields;
+  /**
+   * Cookie storage only. For this many seconds after a refresh that rotated
+   * the refresh token, a request that still carries the cookie from before
+   * gets that refresh's result instead of spending the old token again. 0
+   * turns it off.
+   * @default 10
+   */
+  refreshGraceSeconds?: number;
   /** Runs the refresh token grant, e.g. `oidc.refresh`. */
   refreshTokens(refreshToken: string): Promise<TokenResponse>;
   logger: FidesLogger;
@@ -154,11 +164,76 @@ function refreshedSince(before: SessionRecord, after: SessionRecord): boolean {
   );
 }
 
-/** Creates the lifecycle over one storage. Two lifecycles share no state. */
+/**
+ * The grace period in seconds, 10 unless given.
+ *
+ * @throws TypeError if it is not a finite number, 0 or more.
+ */
+export function checkRefreshGrace(seconds = 10): number {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    throw new TypeError(`refreshGraceSeconds must be a finite number >= 0, got ${seconds}`);
+  }
+  return seconds;
+}
+
+/** A refresh this process just did: the refresh token it spent, and what it got. */
+interface RecentRefresh {
+  spent: string;
+  record: SessionRecord;
+  /** Milliseconds since the epoch. */
+  until: number;
+}
+
+/**
+ * Creates the lifecycle over one storage. Two lifecycles share no state.
+ *
+ * @throws TypeError if `refreshGraceSeconds` is not a finite number, 0 or more.
+ */
 export function createSessionLifecycle(options: SessionLifecycleOptions): SessionLifecycle {
   const { storage, secret, sessionDurationDays = 30, rolesClaim, mapSession, logger } = options;
+  const refreshGraceSeconds = checkRefreshGrace(options.refreshGraceSeconds);
   const inflight = new Map<string, Promise<RefreshRecordResult>>();
+  // By correlation id, oldest first. A store has no use for it: a request with
+  // an old cookie holds the same handle, and reads the new record.
+  const recent = new Map<string, RecentRefresh>();
   let lookupKeyPromise: Promise<CryptoKey> | undefined;
+
+  /** Remembers a refresh that rotated the refresh token, until the grace period or the access token ends. */
+  function remember(spent: string, record: SessionRecord): void {
+    const correlationId = record.session.correlationId;
+    recent.delete(correlationId);
+    if (storage.mode !== 'cookie' || refreshGraceSeconds === 0 || record.tokens.refreshToken === spent) {
+      return;
+    }
+    const now = Date.now();
+    // Entries are added in time order, so the expired ones are at the front.
+    for (const [id, entry] of recent) {
+      if (entry.until > now) break;
+      recent.delete(id);
+    }
+    const expiresAt = Date.parse(record.tokens.accessTokenExpiresAt ?? '');
+    const until = now + refreshGraceSeconds * 1000;
+    recent.set(correlationId, {
+      spent,
+      record,
+      until: Number.isNaN(expiresAt) ? until : Math.min(until, expiresAt),
+    });
+  }
+
+  /**
+   * What a refresh in this process just got for the session `stale` belongs
+   * to, when `stale` holds the refresh token that refresh spent: the request
+   * was sent before the new cookies arrived.
+   */
+  function refreshedAfter(stale: SessionRecord): SessionRecord | undefined {
+    const entry = recent.get(stale.session.correlationId);
+    if (!entry || entry.spent !== stale.tokens.refreshToken) return undefined;
+    if (entry.until <= Date.now()) {
+      recent.delete(stale.session.correlationId);
+      return undefined;
+    }
+    return entry.record;
+  }
 
   function emit(event: SessionEvent): void {
     logSessionEvent(logger, event);
@@ -282,6 +357,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       logger.info({ correlationId }, 'Session ended during refresh; not saved');
       return { ok: false, reason: 'session_not_found', correlationId };
     }
+    remember(refreshToken, updated);
     emit({
       event: SESSION_EVENT.REFRESHED,
       correlationId,
@@ -326,6 +402,16 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
       const running = inflight.get(correlationId);
       if (running) return running;
+
+      // The refresh token in this request's cookie was spent a moment ago.
+      // Sending it again would fail, and a provider that takes reuse for theft
+      // revokes the session. Hand on what that refresh got, and save it, so
+      // this response carries the new cookies too.
+      const already = refreshedAfter(current);
+      if (already) {
+        await save(cookies, already, true);
+        return alreadyRefreshed(current, already);
+      }
 
       const run = async (): Promise<RefreshRecordResult> => {
         if (!storage.lock) return refreshNow(cookies, current, refreshToken);
@@ -377,7 +463,9 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       // for it, so the tokens it got are the ones ended.
       const running = current && inflight.get(current.session.correlationId);
       const refreshed = running ? await running.catch(() => undefined) : undefined;
-      let ended = refreshed?.ok ? refreshed.record : current;
+      // Or one that finished just before, when this request still carries the cookie from before it.
+      let ended = (refreshed?.ok ? refreshed.record : current && refreshedAfter(current)) ?? current;
+      if (current) recent.delete(current.session.correlationId);
 
       if (storage.lock) {
         // A refresh on another instance holds the same lock: it either saved

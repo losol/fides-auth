@@ -375,7 +375,8 @@ confidential client.
 | `cookieNames`, `oidc` | The session cookie's name, and the instance's OIDC client. |
 
 Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
-`storeFields`, `sessionDurationDays` (30), `applicationUrl` (the redirect URI's origin),
+`storeFields`, `sessionDurationDays` (30), `refreshGraceSeconds` (10),
+`applicationUrl` (the redirect URI's origin),
 `mapSession`, `rolesClaim` (`roles`), `validateReturnTo`, `defaultRedirectPath`
 (`/`), `postLogoutRedirectUri` (`applicationUrl`), `rateLimit`, `logger`,
 `onSessionEvent` and `loginSuccessParam` (true).
@@ -458,12 +459,22 @@ heartbeat endpoint refreshes when the browser asks it to.
 
 Refreshes that overlap in one process share one call to the provider. With
 cookie storage, a request the browser sent before the new cookies arrived still
-carries the old refresh token, and so does a request that another instance
-refreshes at the same time. If the provider rotates refresh tokens, a refresh
-from such a request fails with `invalid_grant`, and some providers, OpenIddict
-among them, then revoke the whole authorization. Refreshing seldom keeps this
-rare. A `sessionStore` avoids it: a later request reads the new tokens from the
-store, and `withLock` covers instances that refresh at once.
+carries the old refresh token. If the provider rotates refresh tokens, sending
+that token again fails with `invalid_grant`, and some providers, OpenIddict
+among them, then revoke the whole authorization. So for `refreshGraceSeconds`
+after a refresh, 10 by default, such a request gets that refresh's result, and
+its response sets the new cookies too.
+
+The grace period works within one process, and only for the refresh token just
+spent. A request that comes later, or that another instance refreshes at the
+same time, still spends the old token. A `sessionStore` avoids that: a later
+request reads the new tokens from the store, and `withLock` covers instances
+that refresh at once.
+
+Within the grace period a copy of the old cookie gets the new tokens too, as it
+would under a provider's own reuse interval, so a stolen cookie isn't caught by
+the provider's reuse detection as long as it keeps up. Set `refreshGraceSeconds`
+to 0 to turn it off.
 
 #### Cookie or store
 
@@ -487,14 +498,16 @@ const auth = createFidesAuth({
 | Size | At most three cookies of 4 kB. A session that doesn't fit fails at login with 431 | No limit; the cookie holds a 64-character handle |
 | Sent on every request | The whole sealed session | The handle |
 | Refresh | Writes cookies, so it runs where they can be set: a proxy, a route handler or a Server Action | Keeps the handle and writes no cookie, so it also runs in a Server Component |
-| Concurrent refreshes | Shared within one process. A request sent before the new cookies arrived holds the old refresh token | Shared across instances too, when the store implements `withLock` |
+| Concurrent refreshes | Shared within one process, and for `refreshGraceSeconds` after, with a request that still carries the old cookie | Shared across instances too, when the store implements `withLock` |
 | Logout | Clears the cookie and revokes the refresh token. A copy of the cookie still reads as a session, and its access token works until it expires | Deletes the record, so a copied cookie stops working |
 | A refresh refused for good | The session reads until `expiresAt`, unless the app ends it | Ended at once, when the store implements `withLock` |
 | Ending a user's sessions elsewhere | No | `endUserSessions`, when the store implements `findMatching` |
 | To run | Nothing | A store every instance shares, with a TTL on `expiresAt` |
 
 A refresh that is running when the user logs out finishes first, and the
-logout revokes the refresh token it brought back. With cookie storage, that
+logout revokes the refresh token it brought back. The same goes for one that
+finished within the grace period, when the logout still carries the cookie from
+before it. With cookie storage, that
 refresh's response still sets the cookie again: the browser reads as logged in
 until the access token expires, and can't refresh. A store doesn't save a
 session that ended, and ends it under `withLock`, so no instance brings it

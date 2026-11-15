@@ -67,7 +67,9 @@ a local-only logout.
 ([RFC 7009][revocation]) when the provider advertises a `revocation_endpoint`,
 and send nothing when it doesn't. A copy of the session, or a refresh that was
 running at logout, can't renew it afterwards. A refresh running in the same
-process is waited for, and the token it brought back is the one revoked.
+process is waited for, and the token it brought back is the one revoked; so is
+the token of one that finished within `refreshGraceSeconds` before a logout
+that still carries the old cookie.
 Whether the provider also ends the access token and the rest of the grant is up
 to the provider.
 

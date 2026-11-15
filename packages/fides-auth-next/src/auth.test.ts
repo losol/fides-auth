@@ -440,6 +440,24 @@ describe('refreshInProxy', () => {
     expect(provider.tokenRequests).toHaveLength(2);
   });
 
+  it('refreshes once for requests that all carry the cookie from before', async () => {
+    const { auth } = setup();
+    provider.expiresIn = 30;
+    await login(auth);
+    later(20);
+    // A page and its prefetch, both sent with the cookies the browser had.
+    const page = proxied();
+    const prefetch = proxied('/account/orders');
+
+    const first = await auth.refreshInProxy(page);
+    const second = await auth.refreshInProxy(prefetch);
+
+    const refreshes = provider.tokenRequests.filter((body) => body.get('grant_type') === 'refresh_token');
+    expect(refreshes).toHaveLength(1);
+    expect(first.headers.get('set-cookie')).toMatch(/^__Host-session=/);
+    expect(second.headers.get('set-cookie')).toMatch(/^__Host-session=/);
+  });
+
   it('leaves the session as it is when the refresh fails', async () => {
     const { auth, events } = setup();
     provider.expiresIn = 30;
