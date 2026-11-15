@@ -311,6 +311,126 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
   });
 });
 
+describe('the session lifecycle, cookie storage only', () => {
+  function setup(options: Partial<SessionLifecycleOptions> = {}) {
+    let issued = 1;
+    const events: SessionEvent[] = [];
+    const refreshTokens = vi.fn(async (_refreshToken: string) => tokens(++issued));
+    const lifecycle = createSessionLifecycle({
+      storage: cookieStorage({ secure: true }),
+      secret,
+      refreshTokens,
+      logger: quiet,
+      onSessionEvent: (event) => events.push(event),
+      ...options,
+    });
+    return { lifecycle, refreshTokens, events, ...cookieJar() };
+  }
+
+  /** A request the browser sent before a refresh's cookies arrived: the jar as it was then. */
+  function sentBefore(jar: Map<string, string>) {
+    const copy = cookieJar();
+    for (const [name, value] of jar) copy.jar.set(name, value);
+    return copy;
+  }
+
+  it('hands a request that still carries the old cookie the refresh that was just done', async () => {
+    const { lifecycle, cookies, jar, refreshTokens, events } = setup();
+    await lifecycle.create(cookies, tokens(1));
+    const late = sentBefore(jar);
+    const first = await lifecycle.refresh(cookies);
+
+    const second = await lifecycle.refresh(late.cookies);
+    expect(second).toEqual(first);
+    expect(second).toMatchObject({ ok: true, rotatedRefreshToken: true });
+    expect(refreshTokens).toHaveBeenCalledTimes(1);
+    // The late request's response carries the new cookies too.
+    expect((await lifecycle.read(late.cookies)).record?.tokens.refreshToken).toBe('refresh-2');
+    expect(events.filter((event) => event.event === 'session.refreshed')).toHaveLength(1);
+  });
+
+  it('refreshes again for a request that carries the new cookie', async () => {
+    const { lifecycle, cookies, refreshTokens } = setup();
+    await lifecycle.create(cookies, tokens(1));
+    await lifecycle.refresh(cookies);
+    await lifecycle.refresh(cookies);
+    expect(refreshTokens.mock.calls.map(([token]) => token)).toEqual(['refresh-1', 'refresh-2']);
+  });
+
+  it('sends the old token again once the grace period is over', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-11-14T12:00:00Z') });
+    const { lifecycle, cookies, jar, refreshTokens } = setup();
+    await lifecycle.create(cookies, tokens(1));
+    const late = sentBefore(jar);
+    await lifecycle.refresh(cookies);
+
+    vi.setSystemTime(Date.now() + 9_000);
+    expect((await lifecycle.refresh(sentBefore(late.jar).cookies)).ok).toBe(true);
+    expect(refreshTokens).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(Date.now() + 2_000);
+    refreshTokens.mockRejectedValueOnce(invalidGrant());
+    expect(await lifecycle.refresh(late.cookies)).toMatchObject({ ok: false, cause: 'invalid_grant' });
+    expect(refreshTokens.mock.calls.map(([token]) => token)).toEqual(['refresh-1', 'refresh-1']);
+  });
+
+  it('keeps the result no longer than its access token lasts', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-11-14T12:00:00Z') });
+    const { lifecycle, cookies, jar, refreshTokens } = setup();
+    await lifecycle.create(cookies, tokens(1));
+    const late = sentBefore(jar);
+    refreshTokens.mockResolvedValueOnce(tokens(2, { expires_in: 5 }));
+    await lifecycle.refresh(cookies);
+
+    vi.setSystemTime(Date.now() + 6_000);
+    await lifecycle.refresh(late.cookies);
+    expect(refreshTokens).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not keep a refresh that left the refresh token as it was', async () => {
+    const { lifecycle, cookies, jar, refreshTokens } = setup();
+    await lifecycle.create(cookies, tokens(1));
+    const late = sentBefore(jar);
+    refreshTokens.mockResolvedValueOnce(tokens(2, { refresh_token: 'refresh-1' }));
+    await lifecycle.refresh(cookies);
+
+    // Without rotation the old cookie's token still works, and a forced refresh must reach the provider.
+    await lifecycle.refresh(late.cookies);
+    expect(refreshTokens).toHaveBeenCalledTimes(2);
+  });
+
+  it('can be turned off', async () => {
+    const { lifecycle, cookies, jar, refreshTokens } = setup({ refreshGraceSeconds: 0 });
+    await lifecycle.create(cookies, tokens(1));
+    const late = sentBefore(jar);
+    await lifecycle.refresh(cookies);
+    await lifecycle.refresh(late.cookies);
+    expect(refreshTokens.mock.calls.map(([token]) => token)).toEqual(['refresh-1', 'refresh-1']);
+  });
+
+  it('needs a number of seconds, 0 or more', () => {
+    for (const refreshGraceSeconds of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => setup({ refreshGraceSeconds })).toThrow(TypeError);
+    }
+  });
+
+  it('ends the tokens of a refresh that finished just before a logout with the old cookie', async () => {
+    const { lifecycle, cookies, jar, refreshTokens } = setup();
+    await lifecycle.create(cookies, tokens(1));
+    const logout = sentBefore(jar);
+    const straggler = sentBefore(jar);
+    await lifecycle.refresh(cookies);
+
+    const ended = await lifecycle.end(logout.cookies, { trigger: 'logout' });
+    expect(ended?.tokens.refreshToken).toBe('refresh-2');
+
+    // The session is over: nothing is handed on after it.
+    refreshTokens.mockRejectedValueOnce(invalidGrant());
+    expect(await lifecycle.refresh(straggler.cookies)).toMatchObject({ ok: false, cause: 'invalid_grant' });
+    expect(refreshTokens).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('the session lifecycle, store storage only', () => {
   function setup() {
     const store = createMemorySessionStore();
@@ -582,6 +702,19 @@ describe('the session lifecycle, store storage only', () => {
       });
       await expect(inCookies.endMatching({ iss: 'https://idp.test', sub: 'ada' })).rejects.toThrow(TypeError);
     });
+  });
+
+  it('reads the new tokens for a request that still carries the handle, with nothing kept in the process', async () => {
+    const { lifecycle, cookies, jar, refreshTokens } = setup();
+    await lifecycle.create(cookies, tokens(1));
+    const late = cookieJar();
+    late.jar.set('__Host-session', jar.get('__Host-session') ?? '');
+    await lifecycle.refresh(cookies);
+
+    // A forced refresh reaches the provider, with the token the store holds now.
+    refreshTokens.mockResolvedValueOnce(tokens(3));
+    await lifecycle.refresh(late.cookies);
+    expect(refreshTokens.mock.calls.map(([token]) => token)).toEqual(['refresh-1', 'refresh-2']);
   });
 
   it('fails a refresh whose lock it can\'t take as a store failure, and keeps the session', async () => {

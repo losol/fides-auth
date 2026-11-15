@@ -620,6 +620,50 @@ describe('session members', () => {
     expect((await auth.readSession(cookies))?.user).toEqual({ sub: 'user-1', name: 'Ada', roles: [] });
   });
 
+  describe('a request that still carries the cookie from before a refresh', () => {
+    /** The browser's jar as it is now, for a request already on its way. */
+    function sentNow(jar: Map<string, string>) {
+      const copy = cookieJar();
+      for (const [name, value] of jar) copy.jar.set(name, value);
+      return copy;
+    }
+
+    it('gets that refresh\'s tokens without another call to the provider', async () => {
+      const { auth, cookies, jar } = setup();
+      await login(auth, cookies);
+      const late = sentNow(jar);
+      await auth.refreshSession(cookies);
+
+      expect(await auth.refreshSession(late.cookies)).toMatchObject({ ok: true, refreshed: true });
+      expect(oidc.refresh).toHaveBeenCalledTimes(1);
+      expect((await auth.getTokens(late.cookies))?.accessToken).toBe('access-2');
+    });
+
+    it('revokes the new refresh token when it is a logout', async () => {
+      const { auth, cookies, jar } = setup();
+      await login(auth, cookies);
+      const late = sentNow(jar);
+      await auth.refreshSession(cookies);
+
+      await auth.handleOidcLogout(post('/api/auth/logout'), late.cookies);
+      expect(oidc.revoke).toHaveBeenCalledWith('refresh-2', { tokenTypeHint: 'refresh_token' });
+    });
+
+    it('spends the old token again with refreshGraceSeconds 0', async () => {
+      const { auth, cookies, jar } = setup({ refreshGraceSeconds: 0 });
+      await login(auth, cookies);
+      const late = sentNow(jar);
+      await auth.refreshSession(cookies);
+      await auth.refreshSession(late.cookies);
+      expect(oidc.refresh.mock.calls.map(([token]) => token)).toEqual(['refresh-1', 'refresh-1']);
+    });
+  });
+
+  it('refuses a refreshGraceSeconds that is not a number of seconds, when it is created', () => {
+    expect(() => setup({ refreshGraceSeconds: -1 })).toThrow(TypeError);
+    expect(() => setup({ refreshGraceSeconds: Number.NaN })).toThrow(TypeError);
+  });
+
   it('answers the heartbeat with 503, not a throw, when the store lock fails', async () => {
     const store = {
       ...createMemorySessionStore(),

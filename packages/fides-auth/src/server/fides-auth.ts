@@ -38,7 +38,7 @@ import {
   validateCallback,
 } from './login-transaction.js';
 import { validateReturnUrl } from './return-to.js';
-import { createSessionLifecycle } from './session-lifecycle.js';
+import { checkRefreshGrace, createSessionLifecycle } from './session-lifecycle.js';
 import { assertSessionSecret, type SessionSecret } from './session-secret.js';
 import { cookieStorage, sessionCookieName, storeStorage } from './session-storage.js';
 import type { SessionStore, StoreFields } from './session-store.js';
@@ -71,6 +71,15 @@ export interface FidesAuthConfig {
    * @default 30
    */
   sessionDurationDays?: number;
+  /**
+   * With cookie sessions: for this many seconds after a refresh, a request
+   * that still carries the cookie from before it gets that refresh's result,
+   * instead of spending the old refresh token again. A copy of the old cookie
+   * gets it too, as with a provider's own reuse interval. 0 turns it off.
+   * Ignored with a `sessionStore`, where every request reads the new tokens.
+   * @default 10
+   */
+  refreshGraceSeconds?: number;
   /** The app's public origin, for the CSRF guard and redirects. Defaults to the redirect URI's origin. */
   applicationUrl?: string;
   /** Changes the session built at login. */
@@ -256,8 +265,8 @@ const forbidden = () => new Response('Forbidden', { status: 403 });
  * and reads the redirect URI only then: an app creates the instance when a module
  * loads, and a build can load that module without the runtime environment.
  *
- * @throws TypeError if `clientAuth` is `'none'`. A member throws TypeError if the
- * config has no redirect URI.
+ * @throws TypeError if `clientAuth` is `'none'`, or `refreshGraceSeconds` isn't a
+ * finite number, 0 or more. A member throws TypeError if the config has no redirect URI.
  */
 export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
   const { oauthConfig, secret, sessionStore, rateLimit } = config;
@@ -266,6 +275,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
       "createFidesAuth needs a confidential client: a backend-for-frontend can't use clientAuth 'none'",
     );
   }
+  const refreshGraceSeconds = checkRefreshGrace(config.refreshGraceSeconds);
   const defaultRedirectPath = config.defaultRedirectPath ?? '/';
   const validateReturnTo = config.validateReturnTo ?? defaultValidateReturnTo;
 
@@ -299,6 +309,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
         rolesClaim: config.rolesClaim,
         mapSession: config.mapSession,
         storeFields: config.storeFields,
+        refreshGraceSeconds,
         refreshTokens: (refreshToken) => oidc.refresh(refreshToken),
         logger: loggers.create({ namespace: 'fides-auth:server:session' }),
         onSessionEvent: config.onSessionEvent,

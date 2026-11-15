@@ -43,6 +43,7 @@ of an app is a confidential client.
 | `sessionStore` | none | Keeps sessions in a store, with only a handle in the cookie. See below. |
 | `storeFields` | none | `(session) => fields`. Plain fields to keep next to each stored session, e.g. your own user id. |
 | `sessionDurationDays` | 30 | How long a session lasts from login. Refreshes don't extend it. |
+| `refreshGraceSeconds` | 10 | With cookie sessions: how long after a refresh a request with the old cookie gets that refresh's result. 0 turns it off. |
 | `applicationUrl` | the redirect URI's origin | The app's public origin, for the same-origin check and redirects. |
 | `mapSession` | none | Changes the session built at login, e.g. to add `data`. |
 | `rolesClaim` | `'roles'` | The ID token claim that holds the user's roles, at login and on every refresh that brings an ID token. |
@@ -133,9 +134,11 @@ session cookie passes straight through, and a failed refresh leaves the session
 as it is.
 
 The proxy runs for every request a page makes, prefetches included. With cookie
-sessions and a provider that rotates refresh tokens, a request sent before the
-new cookies arrived refreshes with a spent token and fails with
-`invalid_grant`; see
+sessions, a request sent before the new cookies arrived still carries the old
+refresh token. For `refreshGraceSeconds` after a refresh, 10 by default, it
+gets that refresh's result. After that, or on another instance, it spends the
+old token again, which fails with `invalid_grant` when the provider rotates
+refresh tokens; see
 [Keeping the session fresh](../fides-auth/README.md#keeping-the-session-fresh)
 in the core README. A `sessionStore` avoids it.
 
