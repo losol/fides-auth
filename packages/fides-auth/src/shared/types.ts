@@ -3,6 +3,11 @@ export interface Tokens {
   accessToken?: string;
   /** ISO 8601 string — the session is a JSON/JWT envelope, so dates live as strings on the wire. */
   accessTokenExpiresAt?: string;
+  /**
+   * ISO 8601: when the token response arrived, by this server's clock. With
+   * {@link accessTokenExpiresAt}, the access token's lifetime. Both or neither are set.
+   */
+  accessTokenIssuedAt?: string;
   refreshToken?: string;
   /** ISO 8601 string — see {@link accessTokenExpiresAt}. */
   refreshTokenExpiresAt?: string;

@@ -124,10 +124,19 @@ export const config = {
 ```
 
 `refreshInProxy` refreshes a session whose access token expires within 60
-seconds; `ifExpiresWithin` changes that. It sets the new cookies on the
-response and on the request it forwards, so the page renders with the
-refreshed session. A request without a session cookie passes straight through,
-and a failed refresh leaves the session as it is.
+seconds; `ifExpiresWithin` changes that. The window never covers more than half
+the token's lifetime, so a token shorter than the window isn't refreshed on
+every request. It sets the new cookies on the response and on the request it
+forwards, so the page renders with the refreshed session. A request without a
+session cookie passes straight through, and a failed refresh leaves the session
+as it is.
+
+The proxy runs for every request a page makes, prefetches included. With cookie
+sessions and a provider that rotates refresh tokens, a request sent before the
+new cookies arrived refreshes with a spent token and fails with
+`invalid_grant`; see
+[Keeping the session fresh](../fides-auth/README.md#keeping-the-session-fresh)
+in the core README. A `sessionStore` avoids it.
 
 To send users without a session to the login, check the cookie first:
 

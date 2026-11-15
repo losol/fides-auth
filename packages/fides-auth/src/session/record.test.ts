@@ -59,6 +59,7 @@ describe('createRecord', () => {
     expect(record.tokens).toEqual({
       accessToken: 'access-1',
       accessTokenExpiresAt: new Date(now + 300_000).toISOString(),
+      accessTokenIssuedAt: new Date(now).toISOString(),
       refreshToken: 'refresh-1',
       idToken: tokens().id_token,
     });
@@ -139,6 +140,7 @@ describe('refreshRecord', () => {
     expect(refreshed.tokens).toEqual({
       accessToken: 'access-2',
       accessTokenExpiresAt: new Date(now + 61_000).toISOString(),
+      accessTokenIssuedAt: new Date(now + 1000).toISOString(),
       refreshToken: 'refresh-2',
       idToken: record.tokens.idToken,
     });
@@ -148,6 +150,7 @@ describe('refreshRecord', () => {
     const refreshed = refreshRecord(record, { access_token: 'access-2', token_type: 'bearer' });
     expect(refreshed.tokens.refreshToken).toBe('refresh-1');
     expect(refreshed.tokens.accessTokenExpiresAt).toBeUndefined();
+    expect(refreshed.tokens.accessTokenIssuedAt).toBeUndefined();
   });
 });
 
