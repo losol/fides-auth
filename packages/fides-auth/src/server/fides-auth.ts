@@ -25,6 +25,7 @@ import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { redirectUriOf, type OidcClientConfig } from '../protocol/config.js';
 import { getOAuthErrorLogContext } from '../protocol/logging.js';
 import { checkSessionDuration, type MapRecordSession, type SessionRecord } from '../session/record.js';
+import type { RolesClaim } from '../session/user-claims.js';
 import { authorizedFetch as fetchWithTokens, type AuthorizedFetchOptions } from './authorized-fetch.js';
 import type { CookieStore } from './cookie-store.js';
 import { isSameOriginRequest } from './csrf.js';
@@ -49,6 +50,8 @@ import type { SessionStore, StoreFields } from './session-store.js';
  * one. The correlation id, the timestamps and the IdP session are kept
  * whatever it returns. It runs at login only: a refresh that brings an ID
  * token updates the user's roles, name and email from it, and keeps the rest.
+ * So roles set here last only with `rolesClaim: false`; to read them from
+ * another claim, make `rolesClaim` a function.
  *
  * `TData` is the type of `session.data`, from `createFidesAuth<TData>`.
  */
@@ -93,11 +96,15 @@ export interface FidesAuthConfig<TData = Record<string, unknown>> {
   /** Changes the session built at login. */
   mapSession?: MapSession<TData>;
   /**
-   * The ID token claim that holds the user's roles, read at login and on every
-   * refresh that brings an ID token.
+   * Where the user's roles are in the ID token, read at login and on every
+   * refresh that brings an ID token: the name of a top-level claim, or a
+   * function of the claims for anything else, such as Keycloak's
+   * `(claims) => claims.realm_access?.roles`. A token without the claim gives
+   * no roles. False leaves `user.roles` to `mapSession`: the library never
+   * sets them, and a refresh keeps them as they are.
    * @default 'roles'
    */
-  rolesClaim?: string;
+  rolesClaim?: RolesClaim | false;
   /**
    * Turns a requested return path into a safe one, or null to use
    * `defaultRedirectPath`. Runs at login and again at the callback. The

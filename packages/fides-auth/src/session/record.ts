@@ -9,7 +9,7 @@ import { decodeJwt, type JWTPayload } from 'jose';
 
 import { newSessionId } from '../shared/session-events.js';
 import type { Session, SessionUser, Tokens, TokenResponse } from '../shared/types.js';
-import { userFromClaims } from './user-claims.js';
+import { rolesFromClaims, type RolesClaim } from './user-claims.js';
 import { createEncryptedJWT, decryptJWT } from './utils.js';
 
 /** What is sealed: one string, the same in both storages. */
@@ -33,8 +33,8 @@ export type MapRecordSession = (
 /** Options for {@link createRecord}. */
 export interface CreateRecordOptions {
   sessionDurationSeconds: number;
-  /** @default 'roles' */
-  rolesClaim?: string;
+  /** Where the roles are in the ID token. False leaves `user.roles` unset. @default 'roles' */
+  rolesClaim?: RolesClaim | false;
   /** Milliseconds since the epoch. */
   now?: number;
 }
@@ -79,12 +79,15 @@ function stringClaim(claims: JWTPayload, name: string): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-/** The user an ID token describes, as at login. Undefined without a `sub`. */
-function userOf(claims: JWTPayload, rolesClaim: string | undefined): SessionUser | undefined {
+/**
+ * The user an ID token describes, as at login. Undefined without a `sub`.
+ * With `rolesClaim: false` it has no `roles`: they aren't the library's to set.
+ */
+function userOf(claims: JWTPayload, rolesClaim: RolesClaim | false | undefined): SessionUser | undefined {
   const sub = stringClaim(claims, 'sub');
   if (!sub) return undefined;
-  const { roles } = userFromClaims(claims, rolesClaim);
-  const user: SessionUser = { sub, roles };
+  const user: SessionUser = { sub };
+  if (rolesClaim !== false) user.roles = rolesFromClaims(claims, rolesClaim);
   const name = stringClaim(claims, 'name');
   const email = stringClaim(claims, 'email');
   if (name) user.name = name;
@@ -155,8 +158,8 @@ export function keepIdentity(original: Session, changed: Session): Session {
 
 /** Options for {@link refreshRecord}. */
 export interface RefreshRecordOptions {
-  /** @default 'roles' */
-  rolesClaim?: string;
+  /** Where the roles are in the ID token. False keeps the roles the session has. @default 'roles' */
+  rolesClaim?: RolesClaim | false;
   /** Milliseconds since the epoch. */
   now?: number;
 }
@@ -179,7 +182,10 @@ export function isSameSubject(record: SessionRecord, tokens: TokenResponse): boo
  *
  * A new ID token updates the user as at login: the roles follow `rolesClaim`,
  * the name and email change when the token carries them, and `sub` and the
- * fields `mapSession` added stay. Check {@link isSameSubject} first.
+ * fields `mapSession` added stay. A token without the roles claim takes the
+ * roles away: a provider that leaves out an empty claim says the same as one
+ * that sends an empty list. With `rolesClaim: false` the roles stay as they
+ * are. Check {@link isSameSubject} first.
  *
  * A response that names its `scope` updates the session's scopes too: a
  * provider must name it when it grants something else than before.
