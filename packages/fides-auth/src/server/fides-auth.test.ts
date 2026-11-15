@@ -684,6 +684,22 @@ describe('session members', () => {
     expect(set.mock.calls[0]?.[2]).toEqual({ continuation: false });
   });
 
+  it('keeps the session in a store when given one', async () => {
+    const store = createMemorySessionStore();
+    const { auth, cookies, jar } = setup({ sessionStore: store });
+    await login(auth, cookies);
+
+    const handle = jar.get('__Host-session') ?? '';
+    expect(handle).toMatch(/^[0-9a-f]{64}$/);
+    expect((await auth.readSession(cookies))?.user?.name).toBe('Ada');
+
+    await auth.handleOidcLogout(post('/api/auth/logout'), cookies);
+    expect(jar.size).toBe(0);
+    // A replayed handle finds nothing: the record went with the logout.
+    jar.set('__Host-session', handle);
+    expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+  });
+
   describe('a refresh the provider refuses for good', () => {
     it('ends a stored session, so later reads find none', async () => {
       const { auth, cookies } = setup({ sessionStore: createMemorySessionStore() });
@@ -711,22 +727,6 @@ describe('session members', () => {
       expect(jar.size).toBe(0);
       expect(await auth.readSession(cookies)).toBeNull();
     });
-  });
-
-  it('keeps the session in a store when given one', async () => {
-    const store = createMemorySessionStore();
-    const { auth, cookies, jar } = setup({ sessionStore: store });
-    await login(auth, cookies);
-
-    const handle = jar.get('__Host-session') ?? '';
-    expect(handle).toMatch(/^[0-9a-f]{64}$/);
-    expect((await auth.readSession(cookies))?.user?.name).toBe('Ada');
-
-    await auth.handleOidcLogout(post('/api/auth/logout'), cookies);
-    expect(jar.size).toBe(0);
-    // A replayed handle finds nothing: the record went with the logout.
-    jar.set('__Host-session', handle);
-    expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
   });
 });
 
