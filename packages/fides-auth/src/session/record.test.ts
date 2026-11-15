@@ -25,6 +25,10 @@ function idToken(claims: Record<string, unknown>): string {
   return new UnsecuredJWT(claims).encode();
 }
 
+/** Keycloak's realm roles: a claim inside a claim, which a name can't reach. */
+const realmRoles = (claims: Record<string, unknown>) =>
+  (claims.realm_access as { roles?: string[] } | undefined)?.roles;
+
 function tokens(extra: Partial<TokenResponse> = {}): TokenResponse {
   return {
     access_token: 'access-1',
@@ -98,6 +102,19 @@ describe('createRecord', () => {
       { sessionDurationSeconds: 1 * 86_400, rolesClaim: 'groups', now },
     );
     expect(record.session.user?.roles).toEqual(['a', 'b']);
+  });
+
+  it('reads roles through a function, for a claim that is not at the top level', () => {
+    const record = createRecord(
+      tokens({ id_token: idToken({ sub: 'user-1', realm_access: { roles: ['admin'] } }) }),
+      { sessionDurationSeconds: 1 * 86_400, rolesClaim: realmRoles, now },
+    );
+    expect(record.session.user?.roles).toEqual(['admin']);
+  });
+
+  it('leaves the roles unset with rolesClaim false', () => {
+    const record = createRecord(tokens(), { sessionDurationSeconds: 1 * 86_400, rolesClaim: false, now });
+    expect(record.session.user).toEqual({ sub: 'user-1', name: 'Ada', email: 'ada@example.test' });
   });
 
   it('throws without an access token', () => {
@@ -181,6 +198,34 @@ describe('refreshRecord', () => {
   it('reads the roles from rolesClaim', () => {
     const refreshed = refreshRecord(record, withIdToken({ groups: ['staff'] }), { rolesClaim: 'groups' });
     expect(refreshed.session.user?.roles).toEqual(['staff']);
+  });
+
+  it('reads the roles through a function, and takes them away when the claim is gone', () => {
+    const login = createRecord(
+      tokens({ id_token: idToken({ iss: 'https://idp.example.test', sub: 'user-1', realm_access: { roles: ['admin'] } }) }),
+      { sessionDurationSeconds: 1 * 86_400, rolesClaim: realmRoles, now },
+    );
+    const still = refreshRecord(login, withIdToken({ realm_access: { roles: ['admin', 'editor'] } }), {
+      rolesClaim: realmRoles,
+    });
+    expect(still.session.user?.roles).toEqual(['admin', 'editor']);
+    expect(refreshRecord(still, withIdToken({}), { rolesClaim: realmRoles }).session.user?.roles).toEqual([]);
+  });
+
+  it('keeps the roles as they are with rolesClaim false', () => {
+    const mapped = {
+      ...record,
+      session: { ...record.session, user: { ...record.session.user!, roles: ['from-the-database'] } },
+    };
+    const refreshed = refreshRecord(mapped, withIdToken({ name: 'Ada L.', roles: ['viewer'] }), {
+      rolesClaim: false,
+    });
+    expect(refreshed.session.user).toEqual({
+      sub: 'user-1',
+      name: 'Ada L.',
+      email: 'ada@example.test',
+      roles: ['from-the-database'],
+    });
   });
 
   it('keeps sub, data and the fields mapSession added', () => {

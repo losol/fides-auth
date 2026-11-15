@@ -95,8 +95,11 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   clearSession(options?: { trigger?: SessionClearedTrigger }): Promise<void>;
   /**
    * Ends every session of one user, wherever they are signed in, and revokes
-   * their refresh tokens. `sub` is the provider's, from the ID token. Needs a
-   * `sessionStore` with `findMatching`.
+   * their refresh tokens. `sub` is the provider's, from the ID token. `iss`
+   * defaults to the provider's issuer from its metadata. When the provider
+   * can't be reached, it is the issuer this instance last saw, or else
+   * `oauthConfig.issuer`: pass `iss` when your ID tokens spell the issuer
+   * differently from your config. Needs a `sessionStore` with `findMatching`.
    *
    * @returns How many sessions it ended.
    */

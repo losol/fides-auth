@@ -16,6 +16,7 @@ export {
   type MapSession,
   type RefreshSessionOptions,
 } from './fides-auth.js';
+export type { RolesClaim } from '../session/user-claims.js';
 export { SessionSecretError, type SessionSecret } from './session-secret.js';
 export { AuthorizedFetchError, type AuthorizedFetchErrorReason } from './authorized-fetch.js';
 
@@ -27,4 +28,5 @@ export {
   type StoredSessionEntry,
   type StoreFields,
   type StoreSetContext,
+  type StoreSetReason,
 } from './session-store.js';

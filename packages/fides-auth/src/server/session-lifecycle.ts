@@ -45,10 +45,11 @@ import {
   sealRecord,
   type SessionRecord,
 } from '../session/record.js';
+import type { RolesClaim } from '../session/user-claims.js';
 import type { CookieStore } from './cookie-store.js';
 import { assertSessionSecret, type SessionSecret } from './session-secret.js';
 import type { LookupFields, SaveResult, SessionStorage } from './session-storage.js';
-import type { SessionMatch, StoreFields } from './session-store.js';
+import type { SessionMatch, StoreFields, StoreSetReason } from './session-store.js';
 
 export type ReadRecordResult =
   | { record: SessionRecord; reason?: undefined }
@@ -70,8 +71,8 @@ export interface SessionLifecycleOptions {
   secret: SessionSecret;
   /** @default 43200, which is 12 hours */
   sessionDurationSeconds?: number;
-  /** @default 'roles' */
-  rolesClaim?: string;
+  /** Where the roles are in the ID token. False leaves them to `mapSession`. @default 'roles' */
+  rolesClaim?: RolesClaim | false;
   mapSession?: MapRecordSession;
   /** Plain fields to keep next to a stored session. Store storage only. */
   storeFields?(session: Session): StoreFields;
@@ -265,6 +266,27 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     return entry.record;
   }
 
+  let warnedAboutRoles = false;
+
+  /**
+   * `mapSession` runs at login only, and a refresh that brings an ID token
+   * reads the roles from `rolesClaim` again. Roles that `mapSession` set are
+   * gone then, which shows only after the first refresh. Say so at the first
+   * login that shows it.
+   */
+  function checkMappedRoles(built: Session, mapped: Session): void {
+    if (warnedAboutRoles || rolesClaim === false || !built.user || !built.idp) return;
+    const before = built.user.roles ?? [];
+    const after = mapped.user?.roles ?? [];
+    if (after.length === before.length && after.every((role, i) => role === before[i])) return;
+    warnedAboutRoles = true;
+    logger.warn(
+      { correlationId: built.correlationId },
+      'mapSession changed user.roles, but a refresh that brings an ID token reads them from rolesClaim again. ' +
+        'Make rolesClaim a function to read them from the claims, or false to keep what mapSession set',
+    );
+  }
+
   function emit(event: SessionEvent): void {
     logSessionEvent(logger, event);
     try {
@@ -294,7 +316,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
   async function save(
     cookies: CookieStore,
     record: SessionRecord,
-    continuation: boolean,
+    reason: StoreSetReason,
   ): Promise<SaveResult> {
     return storage.save(cookies, {
       sealed: await sealRecord(record, secret),
@@ -302,7 +324,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       correlationId: record.session.correlationId,
       lookup: await lookupFields(record),
       fields: storage.mode === 'server' ? options.storeFields?.(record.session) : undefined,
-      continuation,
+      continuation: reason !== 'login',
+      reason,
     });
   }
 
@@ -382,7 +405,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
     const updated = refreshRecord(current, tokens, { rolesClaim });
     const rotatedRefreshToken = updated.tokens.refreshToken !== current.tokens.refreshToken;
-    const written = await save(cookies, updated, true);
+    const written = await save(cookies, updated, 'refresh');
     if (!written.saved) {
       logger.info({ correlationId }, 'Session ended during refresh; not saved');
       return { ok: false, reason: 'session_not_found', correlationId };
@@ -407,9 +430,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       let record = createRecord(tokens, { sessionDurationSeconds, rolesClaim });
       if (mapSession) {
         const mapped = await mapSession(tokens, claimsOf(tokens), record.session);
+        checkMappedRoles(record.session, mapped);
         record = { ...record, session: keepIdentity(record.session, mapped) };
       }
-      const written = await save(cookies, record, false);
+      const written = await save(cookies, record, 'login');
       emit({
         event: SESSION_EVENT.CREATED,
         correlationId: record.session.correlationId,
@@ -439,7 +463,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       // this response carries the new cookies too.
       const already = refreshedAfter(current);
       if (already) {
-        await save(cookies, already, true);
+        await save(cookies, already, 'refresh');
         return alreadyRefreshed(current, already);
       }
 
@@ -493,7 +517,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         const current = refreshed ?? latest;
         const changed = await update(current.session);
         const updated = { ...current, session: keepIdentity(current.session, changed) };
-        const written = await save(cookies, updated, true);
+        const written = await save(cookies, updated, 'update');
         if (!written.saved) return null;
         // The next request with the old cookie gets the update too.
         const entry = recent.get(correlationId);

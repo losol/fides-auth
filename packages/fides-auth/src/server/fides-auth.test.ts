@@ -18,7 +18,7 @@ import type { CookieStore } from './cookie-store.js';
 import { fetchCookieStore } from './fetch-cookie-store.js';
 import { createFidesAuth, type FidesAuth, type FidesAuthConfig } from './fides-auth.js';
 import { SessionSecretError } from './session-secret.js';
-import { createMemorySessionStore } from './session-store.js';
+import { createMemorySessionStore, type StoreFields } from './session-store.js';
 
 const secret = 'a'.repeat(64);
 const APP = 'https://app.test';
@@ -785,6 +785,47 @@ describe('session members', () => {
       await login(auth, cookies);
       await expect(auth.endUserSessions({ sub: 'user-1', iss: 'https://idp.test' })).rejects.toThrow(TypeError);
     });
+
+    it('ends the sessions while the provider is unreachable, using oauthConfig.issuer', async () => {
+      const store = createMemorySessionStore();
+      const { auth, cookies } = setup({ sessionStore: store });
+      await login(auth, cookies);
+
+      // A second instance over the same store, whose discovery fails from the start.
+      const warn = vi.fn();
+      const cold = setup({ sessionStore: store, logger: { create: () => ({ ...quiet, warn }) } });
+      oidc.metadata.mockRejectedValue(new Error('provider down'));
+
+      expect(await cold.auth.endUserSessions({ sub: 'user-1' })).toBe(1);
+      expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({ issuer: 'https://idp.test', error: expect.anything() }),
+        expect.stringContaining('metadata'),
+      );
+    });
+
+    it('uses the issuer it last saw, not oauthConfig.issuer, when the provider goes down', async () => {
+      const store = createMemorySessionStore();
+      const { auth, cookies } = setup({
+        sessionStore: store,
+        oauthConfig: {
+          issuer: 'https://idp.test/',
+          clientId: 'web',
+          clientSecret: 'shh',
+          redirectUri: `${APP}/api/auth/callback`,
+          scope: 'openid profile offline_access',
+        },
+      });
+      const phone = cookieJar();
+      await login(auth, cookies);
+      await login(auth, phone.cookies);
+
+      oidc.metadata.mockResolvedValueOnce({ issuer: 'https://idp.test' });
+      expect(await auth.endUserSessions({ sub: 'user-2' })).toBe(0);
+      oidc.metadata.mockRejectedValue(new Error('provider down'));
+      expect(await auth.endUserSessions({ sub: 'user-1' })).toBe(2);
+      expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+    });
   });
 
   it('keeps the app\'s storeFields next to the stored session', async () => {
@@ -796,7 +837,7 @@ describe('session members', () => {
     });
     await login(auth, cookies);
     expect(set.mock.calls[0]?.[1].fields).toEqual({ userId: 'user-1' });
-    expect(set.mock.calls[0]?.[2]).toEqual({ continuation: false });
+    expect(set.mock.calls[0]?.[2]).toEqual({ continuation: false, reason: 'login' });
   });
 
   describe('readSessionWithTokens', () => {
@@ -1020,6 +1061,84 @@ describe('over Request and Response, with fetchCookieStore', () => {
   });
 });
 
+describe('roles', () => {
+  const realmRoles = (claims: Record<string, unknown>) =>
+    (claims.realm_access as { roles?: string[] } | undefined)?.roles;
+  const withRealmRoles = (n: number, roles: string[]) =>
+    tokens(n, {
+      id_token: new UnsecuredJWT({ iss: 'https://idp.test', sub: 'user-1', realm_access: { roles } }).encode(),
+    });
+
+  it('reads a nested claim through a rolesClaim function, at login and at every refresh', async () => {
+    const { auth, cookies } = setup({ rolesClaim: realmRoles });
+    oidc.exchangeCode.mockResolvedValueOnce(withRealmRoles(1, ['admin']));
+    await login(auth, cookies);
+    expect((await auth.readSession(cookies))?.user?.roles).toEqual(['admin']);
+
+    oidc.refresh.mockResolvedValueOnce(withRealmRoles(2, ['admin']));
+    await auth.refreshSession(cookies);
+    expect((await auth.readSession(cookies))?.user?.roles).toEqual(['admin']);
+
+    oidc.refresh.mockResolvedValueOnce(withRealmRoles(3, []));
+    await auth.refreshSession(cookies);
+    expect((await auth.readSession(cookies))?.user?.roles).toEqual([]);
+  });
+
+  it('keeps the roles mapSession set through a refresh, with rolesClaim false', async () => {
+    const { auth, cookies } = setup({
+      rolesClaim: false,
+      mapSession: (_tokens, claims, session) => ({
+        ...session,
+        user: session.user && { ...session.user, roles: realmRoles(claims ?? {}) ?? [] },
+      }),
+    });
+    oidc.exchangeCode.mockResolvedValueOnce(withRealmRoles(1, ['admin']));
+    await login(auth, cookies);
+    oidc.refresh.mockResolvedValueOnce(withRealmRoles(2, ['admin']));
+    expect(await auth.refreshSession(cookies)).toMatchObject({ ok: true, refreshed: true });
+    expect((await auth.readSession(cookies))?.user?.roles).toEqual(['admin']);
+  });
+
+  describe('roles that mapSession set while rolesClaim reads them too', () => {
+    function warned(overrides: Partial<FidesAuthConfig>) {
+      const warn = vi.fn();
+      const made = setup({ logger: { create: () => ({ ...quiet, warn }) }, ...overrides });
+      return { ...made, warn };
+    }
+    const fromRealm: FidesAuthConfig['mapSession'] = (_tokens, claims, session) => ({
+      ...session,
+      user: session.user && { ...session.user, roles: realmRoles(claims ?? {}) ?? [] },
+    });
+
+    it('are gone after a refresh, which the first such login warns about, once', async () => {
+      const { auth, cookies, warn } = warned({ mapSession: fromRealm });
+      oidc.exchangeCode.mockResolvedValue(withRealmRoles(1, ['admin']));
+      await login(auth, cookies);
+      await login(auth, cookieJar().cookies);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        { correlationId: (await auth.readSession(cookies))?.correlationId },
+        expect.stringContaining('rolesClaim'),
+      );
+
+      oidc.refresh.mockResolvedValueOnce(withRealmRoles(2, ['admin']));
+      await auth.refreshSession(cookies);
+      expect((await auth.readSession(cookies))?.user?.roles).toEqual([]);
+    });
+
+    it('bring no warning when mapSession leaves the roles alone, or rolesClaim is false', async () => {
+      const untouched = warned({ mapSession: (_tokens, _claims, session) => ({ ...session, data: { a: 1 } }) });
+      await login(untouched.auth, untouched.cookies);
+      expect(untouched.warn).not.toHaveBeenCalled();
+
+      const handsOff = warned({ rolesClaim: false, mapSession: fromRealm });
+      oidc.exchangeCode.mockResolvedValueOnce(withRealmRoles(1, ['admin']));
+      await login(handsOff.auth, handsOff.cookies);
+      expect(handsOff.warn).not.toHaveBeenCalled();
+    });
+  });
+});
+
 describe('typed session data', () => {
   interface AppData {
     tenant: string;
@@ -1077,5 +1196,34 @@ describe('typed session data', () => {
     const session = await auth.readSession(cookies);
     expectTypeOf(session).toEqualTypeOf<Session | null>();
     expectTypeOf(session?.data).toEqualTypeOf<Record<string, unknown> | undefined>();
+  });
+});
+
+describe('the reason a store gets', () => {
+  it('is login, refresh and update, and storeFields may hold a list of strings', async () => {
+    const store = createMemorySessionStore();
+    const set = vi.spyOn(store, 'set');
+    const { auth, cookies } = setup({
+      sessionStore: store,
+      storeFields: (session) => ({ roles: session.user?.roles ?? [] }),
+    });
+    await login(auth, cookies);
+    await auth.refreshSession(cookies);
+    await auth.updateSession(cookies, (current) => current);
+
+    expect(set.mock.calls.map(([, , context]) => context)).toEqual([
+      { continuation: false, reason: 'login' },
+      { continuation: true, reason: 'refresh' },
+      { continuation: true, reason: 'update' },
+    ]);
+    expect(set.mock.calls[0]?.[1].fields).toEqual({ roles: ['admin'] });
+  });
+
+  it('types storeFields values as scalars or lists of strings', () => {
+    const lists: StoreFields = { roles: ['admin'], userId: 'u', active: true, team: null, n: 1 };
+    expectTypeOf(lists).toMatchTypeOf<StoreFields>();
+    // @ts-expect-error a nested object is not a field value
+    const nested: StoreFields = { profile: { name: 'Ada' } };
+    expect(nested).toBeDefined();
   });
 });

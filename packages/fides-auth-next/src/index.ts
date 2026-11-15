@@ -16,10 +16,12 @@ export type {
   FidesSessionWithTokens,
   MapSession,
   RefreshSessionOptions,
+  RolesClaim,
   SessionMatch,
   SessionStore,
   StoredSession,
   StoredSessionEntry,
   StoreFields,
   StoreSetContext,
+  StoreSetReason,
 } from '@eventuras/fides-auth/server';

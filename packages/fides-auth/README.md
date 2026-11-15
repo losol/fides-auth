@@ -244,7 +244,7 @@ metadata and the audience is the client ID:
 import { userFromClaims } from "@eventuras/fides-auth/oidc";
 
 const claims = await oidc.verifyIdToken(tokens.id_token!);
-const user = userFromClaims(claims, "roles"); // { sub, name, email, roles }
+const user = userFromClaims(claims, "roles"); // { sub, name?, email?, roles }
 ```
 
 `algorithms` defaults to `RS*`, `PS*`, `ES*` and `EdDSA`. The JWKS is cached on
@@ -384,7 +384,9 @@ Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
 #### Sessions
 
 A session lasts `sessionDurationSeconds` from login, 12 hours unless you say
-otherwise, and refreshes don't extend it. With a session at the provider, the
+otherwise, and refreshes don't extend it. Read `expiresAt` from the session each
+time rather than computing it from `createdAt`, since a later version may let a
+session be extended. With a session at the provider, the
 login after that is a redirect without a password.
 It is sealed with AES-256-GCM into the `__Host-session` cookie, in up to three
 chunks (`session` over plain http). A `Session` has `correlationId`,
@@ -441,6 +443,29 @@ fields `mapSession` added stay. `scopes` follow the refresh too, when its
 response names them, so a scope taken away goes as well. `data` doesn't change. An ID token for another
 `iss` or `sub` than at login fails the refresh with `cause: 'idp_error'`, and
 nothing is saved.
+
+`rolesClaim` says where the roles are in the ID token. A name reads a
+top-level claim, `roles` unless you say otherwise. A function reads anything
+else, such as Keycloak's realm roles, which are a claim inside a claim:
+
+```typescript
+const auth = createFidesAuth({
+  oauthConfig,
+  secret,
+  rolesClaim: (claims) => (claims.realm_access as { roles?: string[] } | undefined)?.roles,
+});
+```
+
+A token without the claim gives no roles, at login and at a refresh. Some
+providers leave out a claim that would be empty, so a missing claim has to
+count as the roles being taken away. The function must not throw when the
+claim is missing.
+
+Set the roles in `mapSession` only together with `rolesClaim: false`, for roles
+that don't come from the ID token: your own database, say. The library then
+never sets `user.roles`, and a refresh keeps them as they are. Under any other
+`rolesClaim`, roles that `mapSession` set are replaced at the first refresh
+that brings an ID token. The first login that shows this logs a warning.
 
 #### Keeping the session fresh
 

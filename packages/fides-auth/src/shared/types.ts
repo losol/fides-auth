@@ -35,7 +35,7 @@ export interface SessionUser {
   sub: string;
   name?: string;
   email?: string;
-  /** From the claim that `rolesClaim` names. */
+  /** From the ID token, as `rolesClaim` says. With `rolesClaim: false`, what `mapSession` set. */
   roles?: string[];
 }
 
@@ -48,7 +48,11 @@ export interface Session<TData = Record<string, unknown>> {
   correlationId: string;
   /** ISO 8601. */
   createdAt: string;
-  /** ISO 8601. Fixed at login; refreshes don't extend it. */
+  /**
+   * ISO 8601. Fixed at login today; refreshes don't extend it. Read it from the
+   * session each time, don't keep your own copy or compute it from `createdAt`:
+   * a later version may let a session be extended.
+   */
   expiresAt: string;
   /**
    * From the ID token. Absent when the token response has none. The app's own
@@ -72,6 +76,8 @@ export interface SessionInfo {
   /**
    * ISO 8601: when the session itself ends, however its tokens are refreshed.
    * For a page that warns before the user is logged out. Absent without a session.
+   * Read it from the session info each time, don't keep your own copy or compute it
+   * from `createdAt`: a later version may let a session be extended.
    */
   expiresAt?: string;
 }

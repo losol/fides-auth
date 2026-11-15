@@ -25,6 +25,7 @@ import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { redirectUriOf, type OidcClientConfig } from '../protocol/config.js';
 import { getOAuthErrorLogContext } from '../protocol/logging.js';
 import { checkSessionDuration, type MapRecordSession, type SessionRecord } from '../session/record.js';
+import type { RolesClaim } from '../session/user-claims.js';
 import { authorizedFetch as fetchWithTokens, type AuthorizedFetchOptions } from './authorized-fetch.js';
 import type { CookieStore } from './cookie-store.js';
 import { isSameOriginRequest } from './csrf.js';
@@ -49,6 +50,8 @@ import type { SessionStore, StoreFields } from './session-store.js';
  * one. The correlation id, the timestamps and the IdP session are kept
  * whatever it returns. It runs at login only: a refresh that brings an ID
  * token updates the user's roles, name and email from it, and keeps the rest.
+ * So roles set here last only with `rolesClaim: false`; to read them from
+ * another claim, make `rolesClaim` a function.
  *
  * `TData` is the type of `session.data`, from `createFidesAuth<TData>`.
  */
@@ -93,11 +96,15 @@ export interface FidesAuthConfig<TData = Record<string, unknown>> {
   /** Changes the session built at login. */
   mapSession?: MapSession<TData>;
   /**
-   * The ID token claim that holds the user's roles, read at login and on every
-   * refresh that brings an ID token.
+   * Where the user's roles are in the ID token, read at login and on every
+   * refresh that brings an ID token: the name of a top-level claim, or a
+   * function of the claims for anything else, such as Keycloak's
+   * `(claims) => claims.realm_access?.roles`. A token without the claim gives
+   * no roles. False leaves `user.roles` to `mapSession`: the library never
+   * sets them, and a refresh keeps them as they are.
    * @default 'roles'
    */
-  rolesClaim?: string;
+  rolesClaim?: RolesClaim | false;
   /**
    * Turns a requested return path into a safe one, or null to use
    * `defaultRedirectPath`. Runs at login and again at the callback. The
@@ -248,8 +255,11 @@ export interface FidesAuth<TData = Record<string, unknown>> {
    * Ends every session of one user, wherever they are signed in, and revokes
    * their refresh tokens: for "sign out everywhere", or when an account is
    * closed. `sub` is the provider's, from the ID token (`session.idp.sub`),
-   * and `iss` defaults to the provider's issuer. The browsers keep their
-   * cookies, which then find no session.
+   * and `iss` defaults to the provider's issuer from its metadata. When the
+   * provider can't be reached, it is the issuer this instance last saw, or else
+   * `oauthConfig.issuer`: pass `iss` when your ID tokens spell the issuer
+   * differently from your config. The browsers keep their cookies, which then
+   * find no session.
    *
    * @returns How many sessions it ended.
    * @throws TypeError without a `sessionStore` that has `findMatching`.
@@ -380,6 +390,8 @@ export function createFidesAuth<TData = Record<string, unknown>>(
   }
   let resolved: ReturnType<typeof resolveSettings> | undefined;
   const settings = () => (resolved ??= resolveSettings());
+  /** The issuer from the last metadata this instance read, for when the provider is down. */
+  let knownIssuer: string | undefined;
 
   /**
    * Revokes the refresh token of a session that has ended, so neither a copy
@@ -709,7 +721,20 @@ export function createFidesAuth<TData = Record<string, unknown>>(
 
     async endUserSessions({ sub, iss }, { trigger = 'logout' } = {}) {
       // The ID token's `iss`, which a session's lookup fields are stored under.
-      const issuer = iss ?? (await oidc.metadata()).issuer;
+      let issuer = iss;
+      if (!issuer) {
+        try {
+          issuer = (await oidc.metadata()).issuer;
+          if (issuer) knownIssuer = issuer;
+        } catch (error) {
+          // Ending local sessions should not depend on the provider being up.
+          issuer = knownIssuer ?? oauthConfig.issuer;
+          log.logout.warn(
+            { issuer, error: getOAuthErrorLogContext(error) },
+            "Could not read the provider's metadata; using the issuer last seen or configured",
+          );
+        }
+      }
       if (!issuer) {
         throw new TypeError("endUserSessions needs iss: the provider's metadata has no issuer");
       }
