@@ -20,6 +20,7 @@ import { checkTtl, createDiscoveryCache } from './discovery.js';
 import { createJwksCache, verifyIdTokenWith } from './id-token.js';
 import { logoutUrl, type OidcLogoutOptions } from './logout-url.js';
 import { refresh } from './refresh.js';
+import { revoke, type RevokeOptions } from './revocation.js';
 
 /** Options for {@link createOidcClient}. */
 export interface OidcClientOptions {
@@ -95,6 +96,14 @@ export interface OidcClient {
   logoutUrl(options?: OidcLogoutOptions): Promise<URL | null>;
 
   /**
+   * Asks the provider to revoke a token (RFC 7009). Whether that also ends the
+   * other tokens of the same grant is up to the provider.
+   *
+   * @returns false when the provider has no revocation endpoint, so nothing was sent.
+   */
+  revoke(token: string, options?: RevokeOptions): Promise<boolean>;
+
+  /**
    * Verifies an ID token's signature, `iss`, `aud` and `exp`. The issuer comes
    * from the metadata and the audience is the client ID. The JWKS is cached on
    * the client.
@@ -158,6 +167,8 @@ export function createOidcClient(
     clientCredentials: (grantOptions) => clientCredentials(context, grantOptions),
 
     logoutUrl: (logoutOptions = {}) => logoutUrl(context, logoutOptions),
+
+    revoke: (token, revokeOptions) => revoke(context, token, revokeOptions),
 
     async verifyIdToken(idToken, verifyOptions = {}) {
       const { issuer, jwks_uri } = await metadata();

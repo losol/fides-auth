@@ -40,7 +40,10 @@ export interface FidesAuth {
   ): Promise<Response>;
   /** The provider's redirect back. Starts the session and redirects to the return path. */
   handleOidcCallback(request: Request): Promise<Response>;
-  /** `POST`. Ends the session and redirects to the provider's end-session endpoint. */
+  /**
+   * `POST`. Ends the session, revokes its refresh token where the provider has
+   * a revocation endpoint, and redirects to the provider's end-session endpoint.
+   */
   handleOidcLogout(
     request: Request,
     options?: { state?: string; logoutHint?: string },
@@ -67,7 +70,11 @@ export interface FidesAuth {
   createSession(tokens: TokenResponse): Promise<Session>;
   /** Changes the user or data. Null when there is no session. */
   updateSession(update: (session: Session) => Session | Promise<Session>): Promise<Session | null>;
-  /** Ends the session. With a store, the record is deleted too. `trigger` defaults to `'logout'`. */
+  /**
+   * Ends the session and revokes its refresh token where the provider has a
+   * revocation endpoint. With a store, the record is deleted too. `trigger`
+   * defaults to `'logout'`.
+   */
   clearSession(options?: { trigger?: SessionClearedTrigger }): Promise<void>;
   /**
    * Calls an API with the session's access token. It never refreshes, so it is

@@ -15,6 +15,7 @@ export type {
 } from './protocol/authorization-parameters.js';
 export type { ClientCredentialsOptions } from './protocol/client-credentials.js';
 export type { OidcLogoutOptions } from './protocol/logout-url.js';
+export type { RevokeOptions } from './protocol/revocation.js';
 
 export { createPkcePair, createState, type PkcePair } from './protocol/pkce.js';
 export { defaultScope, joinScope } from './protocol/scope.js';

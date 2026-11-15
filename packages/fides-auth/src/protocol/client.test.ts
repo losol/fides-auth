@@ -14,6 +14,7 @@ vi.mock('openid-client', () => ({
   refreshTokenGrant: vi.fn(),
   clientCredentialsGrant: vi.fn(),
   buildEndSessionUrl: vi.fn(),
+  tokenRevocation: vi.fn(),
   ClientSecretPost: vi.fn(() => () => undefined),
   ClientSecretBasic: vi.fn(() => () => undefined),
   None: vi.fn(() => () => undefined),
@@ -273,6 +274,34 @@ describe('createOidcClient: tokens', () => {
 
     await expect(client.clientCredentials()).rejects.toThrow(TypeError);
     expect(openid.discovery).not.toHaveBeenCalled();
+  });
+});
+
+describe('createOidcClient: revoke', () => {
+  it('revokes a token at the revocation endpoint, with its type as a hint', async () => {
+    vi.mocked(openid.discovery).mockResolvedValue(
+      discovered({ revocation_endpoint: `${issuer}/revoke` }),
+    );
+    const client = createOidcClient(config);
+
+    expect(await client.revoke('refresh-token', { tokenTypeHint: 'refresh_token' })).toBe(true);
+    expect(openid.tokenRevocation).toHaveBeenCalledWith(expect.anything(), 'refresh-token', {
+      token_type_hint: 'refresh_token',
+    });
+  });
+
+  it('sends nothing when the provider has no revocation endpoint', async () => {
+    const client = createOidcClient(config);
+    expect(await client.revoke('refresh-token')).toBe(false);
+    expect(openid.tokenRevocation).not.toHaveBeenCalled();
+  });
+
+  it('throws when the provider refuses the request', async () => {
+    vi.mocked(openid.discovery).mockResolvedValue(
+      discovered({ revocation_endpoint: `${issuer}/revoke` }),
+    );
+    vi.mocked(openid.tokenRevocation).mockRejectedValueOnce(new Error('invalid_client'));
+    await expect(createOidcClient(config).revoke('refresh-token')).rejects.toThrow('invalid_client');
   });
 });
 

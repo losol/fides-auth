@@ -105,7 +105,10 @@ authorization. The instance:
   record under the lock, so a refresh another instance already did is reused
   rather than repeated;
 - on `invalid_grant`, re-reads once more before giving up, in case a concurrent
-  refresh elsewhere spent the token first.
+  refresh elsewhere spent the token first;
+- ends a session under the same lock, so a refresh on another instance either
+  saved first, and the logout revokes its refresh token, or finds the record
+  gone and saves nothing.
 
 Implement `withLock` when you run more than one instance. Give the lock a
 timeout, so a crashed holder doesn't wedge the session.

@@ -88,6 +88,7 @@ function fakeOidc() {
       new URL('https://idp.test/logout'),
     ),
     verifyIdToken: vi.fn(),
+    revoke: vi.fn(async (_token: string, _options?: { tokenTypeHint?: string }) => true),
   };
   return client;
 }
@@ -229,6 +230,7 @@ describe('login, session and logout', () => {
     expect(oidc.logoutUrl).toHaveBeenCalledWith(
       expect.objectContaining({ postLogoutRedirectUri: APP, idTokenHint: tokens(2).id_token }),
     );
+    expect(oidc.revoke).toHaveBeenCalledWith('refresh-2', { tokenTypeHint: 'refresh_token' });
     expect(jar.size).toBe(0);
     expect(await auth.readSession(cookies)).toBeNull();
     expect(await (await auth.handleSessionInfo(get('/api/auth/session'), cookies)).json()).toEqual({
@@ -271,6 +273,37 @@ describe('login, session and logout', () => {
     expect((await auth.readSession(cookies))?.data).toEqual({ tenant: 'user-1' });
   });
 
+  it('logs out when the refresh token cannot be revoked', async () => {
+    const { auth, cookies, jar } = setup();
+    await login(auth, cookies);
+    oidc.revoke.mockRejectedValueOnce(oauthError('invalid_client'));
+    const out = await auth.handleOidcLogout(post('/api/auth/logout'), cookies);
+    expect(out.status).toBe(302);
+    expect(out.headers.get('location')).toBe('https://idp.test/logout');
+    expect(jar.size).toBe(0);
+  });
+
+  it('revokes the tokens a refresh still running brings back', async () => {
+    const { auth, cookies, jar } = setup();
+    await login(auth, cookies);
+    let finish: (value: TokenResponse) => void = () => {};
+    oidc.refresh.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+
+    // A prefetch refreshes with the browser's cookie while the user logs out with the same one.
+    const prefetch = cookieJar();
+    for (const [name, value] of jar) prefetch.jar.set(name, value);
+    const refreshing = auth.refreshSession(prefetch.cookies);
+    await vi.waitFor(() => expect(oidc.refresh).toHaveBeenCalled());
+    const out = auth.handleOidcLogout(post('/api/auth/logout'), cookies);
+    // Long enough for the logout to find the refresh, which it then waits for.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    finish(tokens(2));
+
+    expect(await refreshing).toMatchObject({ ok: true, refreshed: true });
+    expect((await out).status).toBe(302);
+    expect(oidc.revoke).toHaveBeenCalledWith('refresh-2', { tokenTypeHint: 'refresh_token' });
+  });
+
   it('redirects to postLogoutRedirectUri when the provider has no logout endpoint', async () => {
     const { auth, cookies, jar } = setup({ postLogoutRedirectUri: `${APP}/bye` });
     await login(auth, cookies);
@@ -286,6 +319,14 @@ describe('login, session and logout', () => {
       SessionSecretError,
     );
     expect(oidc.createAuthorizationRequest).not.toHaveBeenCalled();
+  });
+
+  it('refuses to log out with a bad secret instead of ending sessions quietly', async () => {
+    const { auth, cookies } = setup({ secret: 'too short' });
+    await expect(auth.handleOidcLogout(post('/api/auth/logout'), cookies)).rejects.toBeInstanceOf(
+      SessionSecretError,
+    );
+    expect(oidc.revoke).not.toHaveBeenCalled();
   });
 });
 
@@ -478,6 +519,7 @@ describe('session members', () => {
     await auth.clearSession(cookies);
     expect(jar.size).toBe(0);
     expect(events.at(-1)).toMatchObject({ event: 'session.cleared', trigger: 'logout' });
+    expect(oidc.revoke).toHaveBeenCalledWith('refresh-2', { tokenTypeHint: 'refresh_token' });
     expect(await auth.updateSession(cookies, (session) => session)).toBeNull();
     expect(await auth.refreshSession(cookies)).toEqual({ ok: false, reason: 'no_session_cookie' });
   });

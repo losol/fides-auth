@@ -81,8 +81,17 @@ export interface SessionLifecycle {
     cookies: CookieStore,
     update: (session: Session) => Session | Promise<Session>,
   ): Promise<SessionRecord | null>;
-  /** Ends the session. Under store storage, the record is deleted. */
-  end(cookies: CookieStore, options?: { trigger?: SessionClearedTrigger }): Promise<void>;
+  /**
+   * Ends the session. Under store storage, the record is deleted under the
+   * store's lock. A refresh of the session still running in this process is
+   * waited for first.
+   *
+   * @returns The record ended, with the tokens it held last, so they can be revoked.
+   */
+  end(
+    cookies: CookieStore,
+    options?: { trigger?: SessionClearedTrigger },
+  ): Promise<SessionRecord | undefined>;
 }
 
 const LOOKUP_KEY_INFO = 'fides-auth session lookup v1';
@@ -303,15 +312,35 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
     async end(cookies, { trigger } = {}) {
       // Read first, so the event names the session it ended.
-      const current = await read(cookies).catch(() => undefined);
-      await storage.remove(cookies);
+      const current = (await read(cookies).catch(() => undefined))?.record ?? undefined;
+
+      // A refresh of this session still running here would bring back tokens
+      // after the end, and under cookie storage save the session again. Wait
+      // for it, so the tokens it got are the ones ended.
+      const running = current && inflight.get(current.session.correlationId);
+      const refreshed = running ? await running.catch(() => undefined) : undefined;
+      let ended = refreshed?.ok ? refreshed.record : current;
+
+      if (storage.lock) {
+        // A refresh on another instance holds the same lock: it either saved
+        // first, and its tokens are the ones ended, or it finds the record gone.
+        ended = await storage.lock(cookies, async () => {
+          const latest = (await read(cookies).catch(() => undefined))?.record;
+          await storage.remove(cookies);
+          return latest ?? ended;
+        });
+      } else {
+        await storage.remove(cookies);
+      }
+
       if (trigger) {
         emit({
           event: SESSION_EVENT.CLEARED,
-          correlationId: current?.record?.session.correlationId,
+          correlationId: current?.session.correlationId,
           trigger,
         });
       }
+      return ended;
     },
   };
 }

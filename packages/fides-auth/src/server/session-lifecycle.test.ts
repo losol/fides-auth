@@ -249,6 +249,36 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
     expect(await lifecycle.update(cookies, (s) => s)).toBeNull();
   });
 
+  it('waits for a refresh still running, and ends the tokens it brought back', async () => {
+    const { lifecycle, cookies, refreshTokens } = setup();
+    const created = await lifecycle.create(cookies, tokens(1));
+    let finish: (value: TokenResponse) => void = () => {};
+    refreshTokens.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+
+    // A prefetch refreshing in one request while the user logs out in another.
+    const refreshing = lifecycle.refresh(cookies);
+    await vi.waitFor(() => expect(refreshTokens).toHaveBeenCalled());
+    const { cookies: logout, jar: logoutJar } = cookieJar();
+    for (const name of ['__Host-session', '__Host-session.1', '__Host-session.2']) {
+      const value = await cookies.get(name);
+      if (value) logoutJar.set(name, value);
+    }
+    let endDone = false;
+    const ending = lifecycle.end(logout, { trigger: 'logout' }).finally(() => {
+      endDone = true;
+    });
+    // Long enough for the end to read the cookie and find the refresh, which it then waits for.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(endDone).toBe(false);
+    finish(tokens(2));
+
+    expect((await refreshing).ok).toBe(true);
+    const ended = await ending;
+    expect(ended?.session.correlationId).toBe(created.session.correlationId);
+    expect(ended?.tokens.refreshToken).toBe('refresh-2');
+    expect(await lifecycle.read(logout)).toEqual({ record: null, reason: 'no_session_cookie' });
+  });
+
   it('keeps working when onSessionEvent throws', async () => {
     const { lifecycle, cookies } = setup({
       onSessionEvent: () => {
@@ -292,17 +322,59 @@ describe('the session lifecycle, store storage only', () => {
     expect(JSON.stringify(stored)).not.toContain('user-1');
   });
 
-  it('does not bring back a session that ended while its refresh ran', async () => {
-    const { lifecycle, cookies, refreshTokens } = setup();
-    await lifecycle.create(cookies, tokens(1));
+  /** A second instance over the same store, and a copy of the browser's cookie for it. */
+  async function otherInstance(store: SessionStore, cookies: CookieStore) {
+    const lifecycle = createSessionLifecycle({
+      storage: storeStorage({ store, secure: true }),
+      secret,
+      refreshTokens: async () => tokens(9),
+      logger: quiet,
+    });
+    const copy = cookieJar();
+    copy.jar.set('__Host-session', (await cookies.get('__Host-session')) ?? '');
+    return { lifecycle, cookies: copy.cookies };
+  }
+
+  /** Makes the next refresh wait until `finish` is called. */
+  function holdRefresh(refreshTokens: ReturnType<typeof setup>['refreshTokens']) {
     let finish: (value: TokenResponse) => void = () => {};
     refreshTokens.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    return (value: TokenResponse) => finish(value);
+  }
+
+  it('ends the session after a refresh on another instance, under the lock, with its tokens', async () => {
+    const { store, lifecycle, cookies, refreshTokens } = setup();
+    await lifecycle.create(cookies, tokens(1));
+    const finish = holdRefresh(refreshTokens);
 
     const refreshing = lifecycle.refresh(cookies);
     await vi.waitFor(() => expect(refreshTokens).toHaveBeenCalled());
-    const { cookies: other, jar: otherJar } = cookieJar();
-    otherJar.set('__Host-session', await cookies.get('__Host-session') ?? '');
-    await lifecycle.end(other);
+    const other = await otherInstance(store, cookies);
+    const ending = other.lifecycle.end(other.cookies, { trigger: 'logout' });
+    finish(tokens(2));
+
+    expect((await refreshing).ok).toBe(true);
+    expect((await ending)?.tokens.refreshToken).toBe('refresh-2');
+    expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'session_not_found' });
+  });
+
+  it('does not bring back a session another instance ended while its refresh ran, without a lock', async () => {
+    const { lifecycle: _, ...base } = setup();
+    const store: SessionStore = { ...base.store, withLock: undefined };
+    const lifecycle = createSessionLifecycle({
+      storage: storeStorage({ store, secure: true }),
+      secret,
+      refreshTokens: base.refreshTokens,
+      logger: quiet,
+    });
+    const { cookies, refreshTokens } = base;
+    await lifecycle.create(cookies, tokens(1));
+    const finish = holdRefresh(refreshTokens);
+
+    const refreshing = lifecycle.refresh(cookies);
+    await vi.waitFor(() => expect(refreshTokens).toHaveBeenCalled());
+    const other = await otherInstance(store, cookies);
+    await other.lifecycle.end(other.cookies);
     finish(tokens(2));
 
     expect(await refreshing).toMatchObject({ ok: false, reason: 'session_not_found' });
