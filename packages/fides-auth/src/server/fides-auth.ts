@@ -93,6 +93,14 @@ export interface FidesAuthConfig {
    * @default '/'
    */
   defaultRedirectPath?: string;
+  /**
+   * Whether a login lands on its return path with `?login=success` added, so
+   * the page can tell that the user just logged in. False leaves the path as
+   * it was. A failed login is sent to `defaultRedirectPath` with
+   * `?login=error&error=<code>` either way.
+   * @default true
+   */
+  loginSuccessParam?: boolean;
   /** Where the provider sends the user after logout. Defaults to `applicationUrl`. */
   postLogoutRedirectUri?: string;
   /** Answers false to make a handler respond 429. */
@@ -146,7 +154,10 @@ export interface FidesAuth {
     cookies: CookieStore,
     options?: { authorizationParameters?: Record<string, string> },
   ): Promise<Response>;
-  /** The provider's redirect back. Starts the session and redirects to the return path. */
+  /**
+   * The provider's redirect back. Starts the session and redirects to the
+   * return path, with `?login=success` unless `loginSuccessParam` is false.
+   */
   handleOidcCallback(request: Request, cookies: CookieStore): Promise<Response>;
   /**
    * `POST`. Ends the session, revokes its refresh token where the provider has
@@ -471,7 +482,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
         const session = await lifecycle.create(cookies, tokens);
 
         const url = returnUrl(transaction.returnTo);
-        url.searchParams.set('login', 'success');
+        if (config.loginSuccessParam !== false) url.searchParams.set('login', 'success');
         log.callback.info(
           { correlationId: session.session.correlationId, redirectUrl: url.toString() },
           'Login successful, redirecting',

@@ -342,6 +342,23 @@ describe('return paths', () => {
     expect(location(await login(auth, cookies, returnTo)).toString()).toBe(expected);
   });
 
+  it('lands on the return path as it was with loginSuccessParam false', async () => {
+    const { auth, cookies } = setup({ loginSuccessParam: false });
+    expect(location(await login(auth, cookies, '/ok?tab=2')).toString()).toBe(`${APP}/ok?tab=2`);
+    expect(location(await login(auth, cookies)).toString()).toBe(`${APP}/`);
+  });
+
+  it('still names the error when a login fails with loginSuccessParam false', async () => {
+    const { auth, cookies } = setup({ loginSuccessParam: false });
+    const started = await auth.handleOidcLogin(get('/api/auth/login'), cookies);
+    const state = location(started).searchParams.get('state');
+    const denied = await auth.handleOidcCallback(
+      get(`/api/auth/callback?error=access_denied&state=${state}`),
+      cookies,
+    );
+    expect(location(denied).toString()).toBe(`${APP}/?login=error&error=access_denied`);
+  });
+
   it('uses validateReturnTo and defaultRedirectPath', async () => {
     const { auth, cookies } = setup({
       validateReturnTo: (path) => (path.startsWith('/app/') ? path : null),
