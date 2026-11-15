@@ -15,6 +15,8 @@ export {
   type FidesSessionWithTokens,
   type LoginError,
   type LoginErrorCode,
+  type LogoutError,
+  type LogoutErrorCode,
   type MapSession,
   type RefreshSessionOptions,
 } from './fides-auth.js';

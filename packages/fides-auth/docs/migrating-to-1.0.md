@@ -226,6 +226,10 @@ one writes JSON lines to the console.
   `?login=error&error=<code>`. 0.x answered some failures with a status and
   English text. A page that sends users without a session to the login must
   leave a URL with `login=error` alone. `onLoginError` answers in another way.
+- **A rate-limited login and a failed logout redirect too**, to
+  `?login=error&error=rate_limited` and `?logout=error&error=<code>`. 0.x
+  answered them with a 429 or a 500 and English text. `onLogoutError` answers a
+  logout in another way.
 - **Next has no default rate limiter.** The handlers rate-limit only through
   `rateLimit`.
 - **`createFidesAuth` throws on `clientAuth: 'none'`.** The server side of an

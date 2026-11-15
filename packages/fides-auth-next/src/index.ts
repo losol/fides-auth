@@ -16,6 +16,8 @@ export type {
   FidesSessionWithTokens,
   LoginError,
   LoginErrorCode,
+  LogoutError,
+  LogoutErrorCode,
   MapSession,
   RefreshSessionOptions,
   RolesClaim,

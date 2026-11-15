@@ -47,6 +47,9 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   /**
    * `POST`. Ends the session, revokes its refresh token where the provider has
    * a revocation endpoint, and redirects to the provider's end-session endpoint.
+   * A logout that fails leaves the user logged in and is answered with what
+   * `onLogoutError` returns, or else a redirect to `defaultRedirectPath` with
+   * `?logout=error&error=<code>`.
    */
   handleOidcLogout(
     request: Request,

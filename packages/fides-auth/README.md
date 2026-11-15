@@ -394,6 +394,7 @@ in its own words:
 | `session_too_large` | The session doesn't fit in the cookies. A `sessionStore` is the fix. |
 | `login_failed` | Anything else at the callback, such as a code the provider won't exchange. |
 | `login_unavailable` | The login couldn't be started, most often because the provider couldn't be reached. |
+| `rate_limited` | `rateLimit` refused the request, at the login or at the callback. |
 | `access_denied` and the like | The provider's own error code, when the user cancels say. `idp_error` when the provider sent something that isn't a code. |
 
 The logs have the details. A page that sends users without a session to the
@@ -411,6 +412,12 @@ const auth = createFidesAuth({
   onLoginError: ({ code }) => Response.redirect(`https://app.example.com/login-failed?why=${code}`),
 });
 ```
+
+A logout that fails leaves the user logged in. It redirects to
+`defaultRedirectPath` with `?logout=error&error=logout_failed`, or
+`error=rate_limited` when `rateLimit` refused it. `onLogoutError` answers in
+another way. A logout while the provider can't be reached still ends the local
+session and lands on `postLogoutRedirectUri`.
 
 #### Sessions
 
