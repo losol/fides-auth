@@ -785,6 +785,47 @@ describe('session members', () => {
       await login(auth, cookies);
       await expect(auth.endUserSessions({ sub: 'user-1', iss: 'https://idp.test' })).rejects.toThrow(TypeError);
     });
+
+    it('ends the sessions while the provider is unreachable, using oauthConfig.issuer', async () => {
+      const store = createMemorySessionStore();
+      const { auth, cookies } = setup({ sessionStore: store });
+      await login(auth, cookies);
+
+      // A second instance over the same store, whose discovery fails from the start.
+      const warn = vi.fn();
+      const cold = setup({ sessionStore: store, logger: { create: () => ({ ...quiet, warn }) } });
+      oidc.metadata.mockRejectedValue(new Error('provider down'));
+
+      expect(await cold.auth.endUserSessions({ sub: 'user-1' })).toBe(1);
+      expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: expect.anything() }),
+        expect.stringContaining('https://idp.test'),
+      );
+    });
+
+    it('uses the issuer it last saw, not oauthConfig.issuer, when the provider goes down', async () => {
+      const store = createMemorySessionStore();
+      const { auth, cookies } = setup({
+        sessionStore: store,
+        oauthConfig: {
+          issuer: 'https://idp.test/',
+          clientId: 'web',
+          clientSecret: 'shh',
+          redirectUri: `${APP}/api/auth/callback`,
+          scope: 'openid profile offline_access',
+        },
+      });
+      const phone = cookieJar();
+      await login(auth, cookies);
+      await login(auth, phone.cookies);
+
+      oidc.metadata.mockResolvedValueOnce({ issuer: 'https://idp.test' });
+      expect(await auth.endUserSessions({ sub: 'user-2' })).toBe(0);
+      oidc.metadata.mockRejectedValue(new Error('provider down'));
+      expect(await auth.endUserSessions({ sub: 'user-1' })).toBe(2);
+      expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+    });
   });
 
   it('keeps the app\'s storeFields next to the stored session', async () => {

@@ -145,7 +145,10 @@ const ended = await auth.endUserSessions({ sub }); // how many it ended
 
 `sub` is the provider's, from the ID token: `session.idp.sub`, which stays the
 same whatever `mapSession` does to `user`. `iss` defaults to the provider's
-issuer. The instance hashes `sub`, asks the store's `findMatching` for the
+issuer from its metadata. If the provider can't be reached, it is the issuer
+this instance last saw, or else `oauthConfig.issuer`, so ending sessions works
+while the provider is down; pass `iss` if your ID tokens spell the issuer
+differently from your config. The instance hashes `sub`, asks the store's `findMatching` for the
 records, and for each one:
 
 - checks the sealed record's own `iss` and `sub` against the request, so a
