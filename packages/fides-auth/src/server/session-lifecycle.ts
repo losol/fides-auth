@@ -30,6 +30,7 @@ import {
 import type { Session, TokenResponse } from '../shared/types.js';
 import { hexToUint8Array } from '../session/utils.js';
 import {
+  checkSessionDuration,
   claimsOf,
   createRecord,
   isExpired,
@@ -64,8 +65,8 @@ export interface SessionLifecycleOptions {
   storage: SessionStorage;
   /** Seals records and derives the key for the store's lookup hashes. */
   secret: SessionSecret;
-  /** @default 30 */
-  sessionDurationDays?: number;
+  /** @default 43200, which is 12 hours */
+  sessionDurationSeconds?: number;
   /** @default 'roles' */
   rolesClaim?: string;
   mapSession?: MapRecordSession;
@@ -190,7 +191,8 @@ interface RecentRefresh {
  * @throws TypeError if `refreshGraceSeconds` is not a finite number, 0 or more.
  */
 export function createSessionLifecycle(options: SessionLifecycleOptions): SessionLifecycle {
-  const { storage, secret, sessionDurationDays = 30, rolesClaim, mapSession, logger } = options;
+  const { storage, secret, rolesClaim, mapSession, logger } = options;
+  const sessionDurationSeconds = checkSessionDuration(options.sessionDurationSeconds);
   const refreshGraceSeconds = checkRefreshGrace(options.refreshGraceSeconds);
   const inflight = new Map<string, Promise<RefreshRecordResult>>();
   // By correlation id, oldest first. A store has no use for it: a request with
@@ -374,7 +376,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
     async create(cookies, tokens) {
       assertSessionSecret(secret);
-      let record = createRecord(tokens, { sessionDurationDays, rolesClaim });
+      let record = createRecord(tokens, { sessionDurationSeconds, rolesClaim });
       if (mapSession) {
         const mapped = await mapSession(tokens, claimsOf(tokens), record.session);
         record = { ...record, session: keepIdentity(record.session, mapped) };

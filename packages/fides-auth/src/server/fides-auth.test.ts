@@ -330,20 +330,34 @@ describe('login, session and logout', () => {
     expect(oidc.revoke).not.toHaveBeenCalled();
   });
 
-  it('refuses a session lifetime that is not a number of days, when it is created', () => {
-    for (const sessionDurationDays of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
-      expect(() => setup({ sessionDurationDays }), String(sessionDurationDays)).toThrow(TypeError);
+  it('refuses a session lifetime that is not a number of seconds, when it is created', () => {
+    for (const sessionDurationSeconds of [Number.NaN, 0, -1, Number.POSITIVE_INFINITY]) {
+      expect(() => setup({ sessionDurationSeconds }), String(sessionDurationSeconds)).toThrow(TypeError);
     }
     // An unset environment variable is the usual way to get here.
-    expect(() => setup({ sessionDurationDays: Number(undefined) })).toThrow(/sessionDurationDays/);
+    expect(() => setup({ sessionDurationSeconds: Number(undefined) })).toThrow(/sessionDurationSeconds/);
   });
 
-  it('takes a fraction of a day as the session lifetime', async () => {
-    const { auth, cookies } = setup({ sessionDurationDays: 1 / 3 });
+  /** How long the session a login starts lasts, in hours. */
+  async function hoursOf(overrides: Partial<FidesAuthConfig> = {}): Promise<number> {
+    const { auth, cookies } = setup(overrides);
     await login(auth, cookies);
     const session = await auth.readSession(cookies);
-    const hours = (Date.parse(session?.expiresAt ?? '') - Date.parse(session?.createdAt ?? '')) / 3_600_000;
-    expect(hours).toBeCloseTo(8, 5);
+    return (Date.parse(session?.expiresAt ?? '') - Date.parse(session?.createdAt ?? '')) / 3_600_000;
+  }
+
+  it('ends a session 12 hours after login unless told otherwise', async () => {
+    expect(await hoursOf()).toBeCloseTo(12, 5);
+  });
+
+  it('counts the session lifetime in seconds', async () => {
+    expect(await hoursOf({ sessionDurationSeconds: 8 * 60 * 60 })).toBeCloseTo(8, 5);
+    expect(await hoursOf({ sessionDurationSeconds: 30 * 24 * 60 * 60 })).toBeCloseTo(720, 5);
+  });
+
+  it('refuses the old sessionDurationDays, rather than ignore it and shorten the sessions', () => {
+    const old = { sessionDurationDays: 30 } as Partial<FidesAuthConfig>;
+    expect(() => setup(old)).toThrow(/sessionDurationDays is now sessionDurationSeconds/);
   });
 });
 
@@ -611,7 +625,7 @@ describe('session members', () => {
 
     it('gives a session saved without the time it got its token the plain window', async () => {
       const { auth, cookies, jar } = setup();
-      const record = createRecord(tokens(1, { expires_in: 20 }), { sessionDurationDays: 1 });
+      const record = createRecord(tokens(1, { expires_in: 20 }), { sessionDurationSeconds: 86_400 });
       delete record.tokens.accessTokenIssuedAt;
       jar.set('__Host-session', await sealRecord(record, secret));
       expect(await auth.refreshSession(cookies, { ifExpiresWithin: 60 })).toMatchObject({

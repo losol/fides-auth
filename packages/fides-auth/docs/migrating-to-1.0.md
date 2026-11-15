@@ -41,7 +41,7 @@ export const auth = createFidesAuth({
 
 | 0.x | 1.0 |
 |---|---|
-| `handleOidcLogin`, `handleOidcCallback`, `handleOidcLogout`, `handleHeartbeat` with options per call | the same members on the instance. The options that don't vary per request move to `createFidesAuth`: `applicationUrl`, `mapSession`, `rolesClaim`, `validateReturnTo`, `defaultRedirectPath`, `postLogoutRedirectUri`, `sessionDurationDays` and `rateLimit` |
+| `handleOidcLogin`, `handleOidcCallback`, `handleOidcLogout`, `handleHeartbeat` with options per call | the same members on the instance. The options that don't vary per request move to `createFidesAuth`: `applicationUrl`, `mapSession`, `rolesClaim`, `validateReturnTo`, `defaultRedirectPath`, `postLogoutRedirectUri`, `rateLimit` and `sessionDurationDays`, which is now `sessionDurationSeconds` |
 | — | `handleSessionInfo`: whether there is a session, and whose. Never refreshes, never returns tokens |
 | `readSession(cookies, secret)`, `tryReadSession(cookies, secret)` | `readSession(cookies)`, `tryReadSession(cookies)` |
 | `refreshSessionInStore`, `tryRefreshSessionInStore`, `refreshSession(session, config)` | `refreshSession(cookies, { ifExpiresWithin? })` |
@@ -207,8 +207,11 @@ one writes JSON lines to the console.
 
 ## Behaviour that changes
 
-- **A session ends `sessionDurationDays` after login** (30 by default), however
-  often it is refreshed. A read after that answers `session_expired`.
+- **A session ends `sessionDurationSeconds` after login**, however often it is
+  refreshed, and 12 hours is the default. A read after that answers
+  `session_expired`. 0.x counted days in `sessionDurationDays`, with 30 as the
+  default: to keep that, set `sessionDurationSeconds: 30 * 24 * 60 * 60`.
+  `createFidesAuth` throws on the old name, so it can't be left behind unnoticed.
 - **Nothing refreshes unless you ask.** `authorizedFetch` throws an
   `http_error` on a 401. Its `refresh` option, the `refresh_failed` reason, and
   `refreshed` and `refreshFailure` in its result are gone. Call `refreshSession({ ifExpiresWithin: 60 })` where cookies

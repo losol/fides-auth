@@ -122,7 +122,7 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
 
   it('rule 2: a session ends at expiresAt, whatever refreshes it had', async () => {
     vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-11-14T12:00:00Z') });
-    const { lifecycle, cookies } = setup({ sessionDurationDays: 1 });
+    const { lifecycle, cookies } = setup({ sessionDurationSeconds: 1 * 86_400 });
     const created = await lifecycle.create(cookies, tokens(1));
 
     vi.setSystemTime(Date.now() + DAY / 2);

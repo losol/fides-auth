@@ -259,7 +259,7 @@ const auth = createFidesAuth({
   oauthConfig,
   secret,                // seals cookies, store records and the login transaction
   sessionStore,          // optional: omit for encrypted cookies, set for server sessions
-  sessionDurationDays,   // optional, default 30
+  sessionDurationSeconds, // optional, default 12 hours
   applicationUrl,        // optional: the app's public origin; defaults to redirectUri's origin
   mapSession,            // optional; rolesClaim too
   validateReturnTo,      // optional; defaultRedirectPath too
@@ -315,7 +315,7 @@ There is one session model. It doesn't know where a session is kept.
 
 | Transition | Triggered by | Identity | `expiresAt` | Event |
 |---|---|---|---|---|
-| create | the callback handler, `createSession` | new `correlationId`; whatever the browser held before is discarded | set from `sessionDurationDays` | `session.created` |
+| create | the callback handler, `createSession` | new `correlationId`; whatever the browser held before is discarded | set from `sessionDurationSeconds` | `session.created` |
 | refresh | `refreshSession`, `refreshInProxy`, the heartbeat handler | kept | kept | `session.refreshed` or `session.refresh_failed` |
 | update | `updateSession` | kept | kept | none |
 | end | the logout handler, `clearSession`, `endUserSessions`, expiry, an unusable session | gone | | `session.cleared` or `session.rejected` |
@@ -365,7 +365,7 @@ The heartbeat endpoint and its client stay, for apps that want refresh tied to u
 | Factory | `createFidesAuth` moves to core `/server` with the config and members above. Next wraps it and gains `sessionStore`. There is no `persistence` option: the storage seam is the library's own (finding 19). | Core and Next must share one shape. |
 | Session and tokens | `Session` has no `tokens`. It holds `correlationId`, `createdAt`, `expiresAt`, `user`, `scopes`, `idp` and `data`. The tokens are a separate `Tokens` value, reached through `getTokens` or used by `authorizedFetch`. `user.sub` is required when there is a `user`; `user.name` and `user.email` are optional, as the claims are. | A session handed to browser code must not carry tokens (driver 2), and the type is in every consumer. |
 | Sealed format | What is sealed is `{ v: 1, session, tokens }`, the same string in both storages. 1.0 doesn't read a payload without `v`, the pre-1.0 shape: it is `unreadable_session`, and the user logs in again. | Without a version, the next format change can't tell old sessions from broken ones. |
-| Session lifetime | `expiresAt` is absolute, set at login from `sessionDurationDays`, and enforced on read in both storages. An expired session is rejected with the new reason `session_expired`. The cookie's `Max-Age` is the time left, so a refresh no longer extends it. | Cookie sessions have no enforced lifetime today (finding 15). Enforcing one changes behaviour. |
+| Session lifetime | `expiresAt` is absolute, set at login from `sessionDurationSeconds`, and enforced on read in both storages. An expired session is rejected with the new reason `session_expired`. The cookie's `Max-Age` is the time left, so a refresh no longer extends it. | Cookie sessions have no enforced lifetime today (finding 15). Enforcing one changes behaviour. |
 | Instance state | No module-level state. The logger, the discovery cache and the JWKS cache live on the `OidcClient`, and `createFidesAuth` passes its `logger` on. `configureLogger`, `configureDiscoveryCache`, `clearDiscoveryCache` and `clearJwksCache` go. Session events go to the logger and to `onSessionEvent`. | Two installed copies must not split configuration (finding 17), and removing globals is breaking. |
 | `SessionStore` | Keep `get`, `set`, `delete` and the optional `withLock`. `StoredSession` gains three lookup fields, written from 1.0 on: `iss`, `subHash` and `idpSidHash`. The hashes are HMAC-SHA-256 under a key derived from `secret`, so a store dump doesn't reveal `sub`, which is personal data. Rotating `secret` already makes old records unreadable, so this adds no new rotation cost. An optional `findMatching({ iss, subHash?, idpSidHash? })` serves `endUserSessions` and back-channel logout. The library computes the hashes, and each key matches the field of the same name. A record must match every key that is given. It returns the records with their keys, and the library deletes them itself: under the lock, after checking each sealed record against the match, and with the tokens in hand to revoke. This replaces the `deleteMatching` first planned, which could delete but not revoke. `correlationId` is never a key. `set` also gets `{ continuation }`, and `storeFields` in the config puts plain fields of the app's choice on the record. | Adapters written for 1.0 must store the lookup fields. Otherwise, sessions created before back-channel logout ships can't be found. |
 | Store TTL | The library sets `StoredSession.expiresAt` and enforces it on read. An adapter stores the value from every `set` and takes its own TTL from it. Adapter TTLs are only for cleanup, and `get` may return expired records. In 1.0 the value doesn't change after login, but an adapter must not rely on that. | An adapter that only reads `expiresAt` on the first `set` would break a sliding lifetime in 1.x. |
@@ -401,7 +401,7 @@ The cookie rule:
 - **Path and Domain.** The library always sets `Path=/` and no `Domain`, and offers no option to change either. This is already true, since the persistences pass fixed options (`server/session-persistence.ts:179`, `:320`). The prefix therefore depends on `secure` alone, and the browser never gets a prefixed cookie it must reject. Next's cookie helpers, the only API that takes a custom path today, go in 1.0.
 - **One session name.** The session cookie is `__Host-session` in both storages. It holds the handle, or the first chunk of the sealed record; further chunks are `__Host-session.1` and `__Host-session.2`. Middleware can check one name without knowing the storage. `session_at`, `session_it` and `session_ref` go. A browser that arrives with the other storage's value gets `unreadable_session` and one new login.
 - **Names in code.** The names are no longer constants. The `createFidesAuth` instance exposes the resolved `cookieNames`, which is what middleware reads. The `cookieName` option of `serverPersistence` goes with it; an option to namespace the names can come in 1.x.
-- **Old cookies.** 1.0 doesn't read `session`, `session_at`, `session_it` or `session_ref`. When a request carries any of them, the response deletes them with the attributes they were set with (`Path=/`, `Secure`), and the user logs in again. The deletion matters: a browser that kept both sets could send a `Cookie` header that proxies refuse. It stays until the old cookies' `Max-Age` (`sessionDurationDays`) has passed.
+- **Old cookies.** 1.0 doesn't read `session`, `session_at`, `session_it` or `session_ref`. When a request carries any of them, the response deletes them with the attributes they were set with (`Path=/`, `Secure`), and the user logs in again. The deletion matters: a browser that kept both sets could send a `Cookie` header that proxies refuse. It stays until the old cookies' `Max-Age` (0.x's `sessionDurationDays`) has passed.
 
 `SameSite` stays `Lax`, not `Strict`, against the RFC's SHOULD. A `Strict` session cookie isn't sent on the redirect back from the IdP or on links from other sites, so the first page after login would look logged out. CSRF is the guard's job, and §6.1.3.3.1 says `SameSite` can't cover same-site subdomains anyway.
 
@@ -454,7 +454,7 @@ Set `sessionStore` when:
 - The session code is rewritten, not moved: the lifecycle, the storage seam and cookie chunking are new.
 - A cookie session with one corrupt part is now unreadable, where today it could come back without its access token.
 - A consumer that built on the free `/server` functions or on the session layer has to move to the instance, or ask for the export back.
-- Cookie sessions that slid forward on every refresh now end `sessionDurationDays` after login.
+- Cookie sessions that slid forward on every refresh now end `sessionDurationSeconds` after login.
 - Back-channel logout needs a `SessionStore`. Without one, a cookie session ends at `expiresAt` or when its tokens stop working.
 
 **Breaking changes in 1.0:**
@@ -466,7 +466,7 @@ Set `sessionStore` when:
 | 3 | The protocol functions become members of `createOidcClient`, with the renames in §3. `redirect_uri` becomes `redirectUri`, and the string overloads go. | Deprecated in 0.16. `OAuthConfig` accepts both spellings. |
 | 4 | The free `/server` functions are no longer exported: the handlers, the session helpers, the persistences and the login transaction. `createFidesAuth` is the way in, and the handler options that don't vary per request move to it. | The migration doc maps each one to an instance member |
 | 5 | `Session` has no `tokens`. `user.sub` is required, and `user.name` is optional. | `getTokens`. Sessions from 0.x aren't read, so users log in again once. |
-| 6 | Sessions have an absolute lifetime in both storages, and `session_expired` joins `SessionRejectedReason`. | `sessionDurationDays` |
+| 6 | Sessions have an absolute lifetime in both storages, and `session_expired` joins `SessionRejectedReason`. | `sessionDurationSeconds` |
 | 7 | `configureLogger`, `configureDiscoveryCache`, `clearDiscoveryCache` and `clearJwksCache` go. `fides-auth-store`'s `configureAuthLogger` goes with them; `/browser` takes a `logger` factory, as the factory and the OIDC client do. `logSessionEvent` and `newSessionId` become internal. | Deprecated in 0.16: `logger` and `discoveryTtlMs` on the client, and `logger` on the factory |
 | 8 | `CookieStore` has no `delete`, and `set` always gets options. An adapter that still has `delete` keeps compiling. | none needed |
 | 9 | `/heartbeat` and `/activity-tracker` move to `/browser`. | The migration doc |
@@ -555,7 +555,7 @@ The maintainer decided the six questions from the first draft, and the decisions
 
 The second revision, which added the "from scratch" changes and findings 15 to 21, leaves five:
 
-1. **Absolute lifetime for cookie sessions.** Today an active cookie session never ends. 1.0 ends it `sessionDurationDays` after login, as server sessions already do. Should 1.0 also ship the sliding lifetime, so consumers who rely on today's behaviour can keep it? Lean: no. Ship absolute only, and add sliding in 1.x.
+1. **Absolute lifetime for cookie sessions.** Today an active cookie session never ends. 1.0 ends it `sessionDurationSeconds` after login, as server sessions already do. Should 1.0 also ship the sliding lifetime, so consumers who rely on today's behaviour can keep it? Lean: no. Ship absolute only, and add sliding in 1.x.
 2. **How little `/server` exports.** The free handler functions, the login transaction and the session layer are not public in 1.0. Is there a consumer that needs one of them and can't use the instance? Lean: none known, and exporting later is additive.
 3. **The size of a cookie session.** Three chunks match today's three cookies. More would fit larger tokens, but many proxies refuse a `Cookie` header much above 8 kB. Lean: three, and point larger sessions to a `SessionStore`.
 4. **Knowing that cookies can't be set.** Decided: the library doesn't need to know. Refresh on demand would have had to, since a refresh that can't be saved loses a rotated refresh token, and Next offers no public way to tell a server component from a Server Action. So nothing refreshes unless the caller asks, with `refreshSession({ ifExpiresWithin })`, `refreshInProxy` or the heartbeat endpoint, and `authorizedFetch` no longer refreshes on a 401. See the contract table, "Refresh".
