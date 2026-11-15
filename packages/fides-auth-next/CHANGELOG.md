@@ -1,5 +1,56 @@
 # @eventuras/fides-auth-next
 
+## 1.0.0-beta.2
+
+### Minor Changes
+
+- 1113955: `readSessionWithTokens` gives the session and its tokens in one read, or why there is none.
+  `readSession` and `getTokens` each read, which with a `sessionStore` is a round trip each. The README
+  says to read once per request where several parts of it need the session.
+- ad8b5c4: `createFidesAuth<AppData>(…)` types `session.data` in everything the instance hands out: reads,
+  `refreshSession`, `createSession`, `updateSession`, `mapSession` and `storeFields`. `Session` was
+  generic already, but the instance wasn't, so `data` came back as an open record and every use
+  needed a cast. Without a type argument nothing changes.
+
+### Patch Changes
+
+- 6ffe912: A refresh the provider refuses for good, `invalid_grant`, ends a session held by a `sessionStore` with
+  `withLock`: the record is deleted, and later reads answer `session_not_found` instead of a session
+  whose tokens no longer work. It emits `session.cleared` with `trigger: "rejected"`. Cookie sessions,
+  and stores without a lock, are left as before, since another instance may have refreshed; the README
+  shows how to end them with `clearSession`.
+- 9fcdd4b: `loginSuccessParam: false` makes a login land on its return path as it was, without `?login=success`.
+  The default stays true. A failed login still goes to `defaultRedirectPath` with
+  `?login=error&error=<code>`.
+- 58fdc40: With cookie sessions, a request that still carries the cookie from before a refresh gets that
+  refresh's result for `refreshGraceSeconds` after it, 10 by default, instead of spending the old
+  refresh token again, which a provider that rotates refresh tokens answers with `invalid_grant`. A
+  logout with the old cookie revokes the new refresh token. It works within one process and for the
+  token just spent; set it to 0 to turn it off.
+- 038aa72: `sessionDurationDays` is now `sessionDurationSeconds`, like the other durations in the API, and the
+  default goes from 30 days to 12 hours. `createFidesAuth` throws a `TypeError` on the old name, and
+  unless the lifetime is a finite number above 0: a value such as `NaN`, from an unset environment
+  variable, used to pass and then fail every login with a 500. To keep a 30-day session, set
+  `sessionDurationSeconds: 30 * 24 * 60 * 60`.
+- 41c27cf: The session info endpoint answers with `expiresAt`, when the session itself ends. A page knew when
+  the access token expires, which a refresh moves, but not when the user will be logged out.
+- e6ce4de: `SessionUser` names the type of `session.user`, so an app no longer writes
+  `NonNullable<Session['user']>`. The app's own fields belong in `data`. `Tokens.accessToken` stays
+  optional, and its doc now says why: a session that keeps only a refresh token must stay possible.
+- Updated dependencies [6ffe912]
+- Updated dependencies [790a3f7]
+- Updated dependencies [9fcdd4b]
+- Updated dependencies [9990390]
+- Updated dependencies [1113955]
+- Updated dependencies [58fdc40]
+- Updated dependencies [bdc86a2]
+- Updated dependencies [127c85d]
+- Updated dependencies [038aa72]
+- Updated dependencies [41c27cf]
+- Updated dependencies [e6ce4de]
+- Updated dependencies [ad8b5c4]
+  - @eventuras/fides-auth@1.0.0-beta.2
+
 ## 1.0.0-beta.1
 
 ### Minor Changes
