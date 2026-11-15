@@ -168,6 +168,11 @@ export interface FidesAuth {
    * is about to expire. Apart from the heartbeat endpoint, nothing else on the
    * instance refreshes. With cookie storage it writes cookies, so call it where
    * they can be set.
+   *
+   * A refresh the provider refuses for good, `cause: 'invalid_grant'`, ends a
+   * session held by a `sessionStore` with `withLock`. Any other session is
+   * left as it is, since another instance may have refreshed it; end it with
+   * `clearSession`.
    */
   refreshSession(cookies: CookieStore, options?: RefreshSessionOptions): Promise<FidesRefreshResult>;
   /** Starts a session from a token response, for a login that doesn't go through the handlers. */

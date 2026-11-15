@@ -174,7 +174,12 @@ authorization. The instance:
   refresh elsewhere spent the token first;
 - ends a session under the same lock, so a refresh on another instance either
   saved first, and the logout revokes its refresh token, or finds the record
-  gone and saves nothing.
+  gone and saves nothing;
+- deletes the record when the provider refuses a refresh for good
+  (`invalid_grant`) under `withLock`: no other instance can have refreshed, so
+  the session's tokens are dead, and the handle then reads as
+  `session_not_found`. Without `withLock` the record is left, since another
+  instance may hold newer tokens.
 
 Implement `withLock` when you run more than one instance, above all with a
 provider that rotates refresh tokens. Without it, two instances can refresh one

@@ -129,8 +129,8 @@ seconds; `ifExpiresWithin` changes that. The window never covers more than half
 the token's lifetime, so a token shorter than the window isn't refreshed on
 every request. It sets the new cookies on the response and on the request it
 forwards, so the page renders with the refreshed session. A request without a
-session cookie passes straight through, and a failed refresh leaves the session
-as it is.
+session cookie passes straight through, and a failed refresh leaves a cookie
+session as it is.
 
 The proxy runs for every request a page makes, prefetches included. With cookie
 sessions and a provider that rotates refresh tokens, a request sent before the

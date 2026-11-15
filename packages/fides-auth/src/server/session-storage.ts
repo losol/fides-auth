@@ -107,6 +107,16 @@ export interface SessionStorage {
   remove(cookies: CookieStore): Promise<void>;
   /** Runs `fn` holding the store's lock on this session. Only store storage has one. */
   lock?<T>(cookies: CookieStore, fn: () => Promise<T>): Promise<T>;
+  /**
+   * True when `lock` keeps every instance out, so what is read under it is the
+   * last word. Only store storage over a store with `withLock`.
+   */
+  readonly exclusive?: boolean;
+  /**
+   * Deletes the record and leaves the cookie, which then finds no session.
+   * For where cookies can't be written. Only store storage.
+   */
+  discard?(cookies: CookieStore): Promise<void>;
   /** The sessions that match. Only store storage, and only over a store that can search. */
   findMatching?(match: SessionMatch): Promise<FoundSession[]>;
 }
@@ -233,6 +243,7 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
 
   const storage: SessionStorage = {
     mode: 'server',
+    exclusive: !!store.withLock,
 
     async load(cookies) {
       const current = await locate(cookies);
@@ -280,6 +291,11 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
       const current = await locate(cookies);
       if (!current || current === 'invalid' || !store.withLock) return fn();
       return store.withLock(current.key, fn);
+    },
+
+    async discard(cookies) {
+      const current = await locate(cookies);
+      if (current && current !== 'invalid') await store.delete(current.key);
     },
   };
 

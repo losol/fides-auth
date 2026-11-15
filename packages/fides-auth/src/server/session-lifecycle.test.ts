@@ -324,6 +324,70 @@ describe('the session lifecycle, store storage only', () => {
     return { store, lifecycle, refreshTokens, ...cookieJar() };
   }
 
+  describe('a refresh the provider refuses for good', () => {
+    /** A lifecycle over `store`, with its events, and a jar that counts its writes. */
+    function over(store: SessionStore) {
+      const events: SessionEvent[] = [];
+      const refreshTokens = vi.fn(async () => tokens(2));
+      const lifecycle = createSessionLifecycle({
+        storage: storeStorage({ store, secure: true }),
+        secret,
+        refreshTokens,
+        logger: quiet,
+        onSessionEvent: (event) => events.push(event),
+      });
+      const { cookies, jar } = cookieJar();
+      const set = vi.spyOn(cookies, 'set');
+      return { lifecycle, refreshTokens, events, cookies, jar, set };
+    }
+
+    it('ends the session under a store that locks, and writes no cookie', async () => {
+      const { lifecycle, refreshTokens, events, cookies, jar, set } = over(createMemorySessionStore());
+      const created = await lifecycle.create(cookies, tokens(1));
+      set.mockClear();
+      refreshTokens.mockRejectedValueOnce(invalidGrant());
+
+      expect(await lifecycle.refresh(cookies)).toEqual({
+        ok: false,
+        reason: 'refresh_failed',
+        cause: 'invalid_grant',
+        correlationId: created.session.correlationId,
+      });
+      expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'session_not_found' });
+      expect(events.slice(-2)).toMatchObject([
+        { event: 'session.refresh_failed', cause: 'invalid_grant' },
+        { event: 'session.cleared', correlationId: created.session.correlationId, trigger: 'rejected' },
+      ]);
+      // It may run where cookies can't be set: the handle stays, and finds nothing.
+      expect(set).not.toHaveBeenCalled();
+      expect(jar.get('__Host-session')).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('leaves the session under a store without a lock, where another instance may have refreshed', async () => {
+      const { lifecycle, refreshTokens, events, cookies } = over({
+        ...createMemorySessionStore(),
+        withLock: undefined,
+      });
+      const created = await lifecycle.create(cookies, tokens(1));
+      refreshTokens.mockRejectedValueOnce(invalidGrant());
+
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: false, cause: 'invalid_grant' });
+      expect((await lifecycle.read(cookies)).record).toEqual(created);
+      expect(events.some((event) => event.event === 'session.cleared')).toBe(false);
+    });
+
+    it('keeps the session when the provider could not be reached', async () => {
+      const { lifecycle, refreshTokens, cookies } = over(createMemorySessionStore());
+      const created = await lifecycle.create(cookies, tokens(1));
+      refreshTokens.mockRejectedValueOnce(
+        Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }),
+      );
+
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: false, cause: 'transport' });
+      expect((await lifecycle.read(cookies)).record).toEqual(created);
+    });
+  });
+
   it('stores the lookup fields as keyed hashes, never sub itself', async () => {
     const { store, lifecycle, cookies, jar } = setup();
     const created = await lifecycle.create(cookies, tokens(1));
