@@ -8,7 +8,7 @@
 import { decodeJwt, type JWTPayload } from 'jose';
 
 import { newSessionId } from '../shared/session-events.js';
-import type { Session, Tokens, TokenResponse } from '../shared/types.js';
+import type { Session, SessionUser, Tokens, TokenResponse } from '../shared/types.js';
 import { userFromClaims } from './user-claims.js';
 import { createEncryptedJWT, decryptJWT } from './utils.js';
 
@@ -80,11 +80,11 @@ function stringClaim(claims: JWTPayload, name: string): string | undefined {
 }
 
 /** The user an ID token describes, as at login. Undefined without a `sub`. */
-function userOf(claims: JWTPayload, rolesClaim: string | undefined): Session['user'] {
+function userOf(claims: JWTPayload, rolesClaim: string | undefined): SessionUser | undefined {
   const sub = stringClaim(claims, 'sub');
   if (!sub) return undefined;
   const { roles } = userFromClaims(claims, rolesClaim);
-  const user: NonNullable<Session['user']> = { sub, roles };
+  const user: SessionUser = { sub, roles };
   const name = stringClaim(claims, 'name');
   const email = stringClaim(claims, 'email');
   if (name) user.name = name;

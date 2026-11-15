@@ -8,6 +8,7 @@ export type {
   IdpSession,
   Session,
   SessionInfo,
+  SessionUser,
   TokenResponse,
   Tokens,
 } from './shared/types.js';

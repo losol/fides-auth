@@ -429,8 +429,9 @@ session?.data?.tenant; // string | undefined, without a cast
 ```
 
 `claims` are decoded, not verified. Without an `id_token` (no `openid` scope),
-`claims` is undefined and the session has no `user`. Extra fields make the
-session bigger; large ones need a `sessionStore`.
+`claims` is undefined and the session has no `user`. `user` is a `SessionUser`:
+`sub`, `name`, `email` and `roles`. Keep the app's own fields in `data`. Extra
+fields make the session bigger; large ones need a `sessionStore`.
 
 `mapSession` runs at login only. A refresh that brings an ID token updates
 `user` from it the same way, so roles taken away at the provider go with the
