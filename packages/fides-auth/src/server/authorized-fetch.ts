@@ -110,7 +110,7 @@ export async function authorizedFetch<T = undefined>(
   const request = { method: (init.method ?? 'GET').toUpperCase(), url: redactUrl(target) };
 
   const sentAt = Date.now();
-  const { response, timeout, unlink } = await send(tokens, target, init, timeoutMs, request);
+  const { response, timeout, signal, unlink } = await send(tokens, target, init, timeoutMs, request);
   if (!response.ok) {
     const expiresAt = Date.parse(tokens?.accessTokenExpiresAt ?? '');
     throw new AuthorizedFetchError('http_error', {
@@ -123,7 +123,7 @@ export async function authorizedFetch<T = undefined>(
   }
 
   try {
-    const data = (parse ? await parse(response) : undefined) as T;
+    const data = (parse ? await whileNotAborted(parse(response), signal) : undefined) as T;
     // A body still to be read stays under the timeout and the caller's signal.
     if (!response.body || response.bodyUsed) unlink();
     return { response, data };
@@ -171,6 +171,8 @@ function resolveAllowedUrl(url: string | URL, allowedBase: string | URL, logger:
 interface Attempt {
   response: Response;
   timeout: AbortSignal;
+  /** The signal the request was sent with: the timeout, linked with the caller's own. */
+  signal: AbortSignal;
   /** Stops listening to the caller's signal, once nobody will read the body. */
   unlink: () => void;
 }
@@ -192,13 +194,37 @@ async function send(
 
   try {
     const response = await fetch(target, { ...init, headers, signal, redirect: 'error' });
-    return { response, timeout, unlink };
+    return { response, timeout, signal, unlink };
   } catch (error) {
     unlink();
     // The caller's own abort is theirs to handle.
     if (init.signal?.aborted) throw error;
     const reason = timeout.aborted ? 'timeout' : 'network_error';
     throw new AuthorizedFetchError(reason, { ...request, cause: error });
+  }
+}
+
+/**
+ * Waits for `reading`, but no longer than `signal` allows, and then rejects
+ * with the signal's reason.
+ *
+ * The signal given to `fetch` should do this alone, and mostly does. But Node's
+ * fetch follows it through an object that nothing holds on to once the
+ * response is back. When that object is garbage collected, an abort no longer
+ * reaches the body, and a body that stalls is read until the connection times
+ * out by itself, minutes later.
+ */
+async function whileNotAborted<T>(reading: T | Promise<T>, signal: AbortSignal): Promise<T> {
+  let onAbort = (): void => undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([reading, aborted]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
   }
 }
 
