@@ -211,7 +211,11 @@ export interface FidesAuthConfig<TData = Record<string, unknown>> {
   ) => Response | undefined | void | Promise<Response | undefined> | Promise<void>;
   /** Where the provider sends the user after logout. Defaults to `applicationUrl`. */
   postLogoutRedirectUri?: string;
-  /** Answers false to make a handler respond 429. */
+  /**
+   * Answers false to refuse a request. The heartbeat then answers 429. A
+   * login or a logout is answered as one that failed, with the code
+   * `rate_limited`.
+   */
   rateLimit?: (request: Request) => boolean | Promise<boolean>;
   /** Creates the loggers. Defaults to JSON lines on the console. */
   logger?: FidesLoggerFactory;
