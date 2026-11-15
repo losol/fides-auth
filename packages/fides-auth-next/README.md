@@ -138,7 +138,8 @@ the token's lifetime, so a token shorter than the window isn't refreshed on
 every request. It sets the new cookies on the response and on the request it
 forwards, so the page renders with the refreshed session. A request without a
 session cookie passes straight through, and a failed refresh leaves a cookie
-session as it is.
+session as it is. A session in a store with `withLock` is ended when the
+provider refuses the refresh for good, and its cookie is deleted with it.
 
 The proxy runs for every request a page makes, prefetches included. With cookie
 sessions, a request sent before the new cookies arrived still carries the old

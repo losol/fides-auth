@@ -897,7 +897,17 @@ describe('session members', () => {
 
       const heartbeat = await auth.handleHeartbeat(post('/api/auth/heartbeat'), cookies);
       expect(heartbeat.status).toBe(401);
-      expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+      expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'no_session_cookie' });
+    });
+
+    it('deletes the cookie of the stored session it ends, so the browser stops sending it', async () => {
+      const { auth, cookies, jar } = setup({ sessionStore: createMemorySessionStore() });
+      await login(auth, cookies);
+      expect(jar.has('__Host-session')).toBe(true);
+      oidc.refresh.mockRejectedValueOnce(oauthError('invalid_grant'));
+
+      expect(await auth.refreshSession(cookies)).toMatchObject({ ok: false, cause: 'invalid_grant' });
+      expect(jar.size).toBe(0);
     });
 
     it('leaves a cookie session for the app to end', async () => {

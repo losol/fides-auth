@@ -205,9 +205,10 @@ authorization. The instance:
   gone and saves nothing;
 - deletes the record when the provider refuses a refresh for good
   (`invalid_grant`) under `withLock`: no other instance can have refreshed, so
-  the session's tokens are dead, and the handle then reads as
-  `session_not_found`. Without `withLock` the record is left, since another
-  instance may hold newer tokens.
+  the session's tokens are dead. The handle's cookie is deleted with it where
+  cookies can be set; where they can only be read, a Next Server Component
+  say, the handle stays and reads as `session_not_found`. Without `withLock`
+  the record is left, since another instance may hold newer tokens.
 
 Implement `withLock` when you run more than one instance, above all with a
 provider that rotates refresh tokens. Without it, two instances can refresh one

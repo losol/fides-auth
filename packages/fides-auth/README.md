@@ -483,7 +483,8 @@ is refreshed once 10 seconds have passed, not on every call.
 A session reads until `expiresAt`, whether or not its tokens still work. When
 the provider refuses a refresh for good, the result has `cause:
 "invalid_grant"` and the user must log in again. A session in a `sessionStore`
-that implements `withLock` is ended there and then. A cookie session, or one in
+that implements `withLock` is ended there and then: its record is deleted, and
+its cookie too where cookies can be set. A cookie session, or one in
 a store without a lock, is left as it is, because another instance may just
 have refreshed it. End it yourself where that can't be the case:
 

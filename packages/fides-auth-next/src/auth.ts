@@ -120,7 +120,8 @@ export interface FidesAuth<TData = Record<string, unknown>> {
    * A failed refresh leaves a cookie session as it is. The next API call or
    * heartbeat shows a session that is over; ending it here could undo a refresh
    * that another instance completed with the same refresh token. A session in
-   * a store with `withLock` is ended when the provider refuses the refresh for good.
+   * a store with `withLock` is ended when the provider refuses the refresh for
+   * good, and its cookie is deleted, on the response and on the request it forwards.
    */
   refreshInProxy(request: NextRequest, options?: RefreshInProxyOptions): Promise<NextResponse>;
 

@@ -461,7 +461,7 @@ describe('the session lifecycle, store storage only', () => {
       return { lifecycle, refreshTokens, events, cookies, jar, set };
     }
 
-    it('ends the session under a store that locks, and writes no cookie', async () => {
+    it('ends the session under a store that locks, and deletes its cookie', async () => {
       const { lifecycle, refreshTokens, events, cookies, jar, set } = over(createMemorySessionStore());
       const created = await lifecycle.create(cookies, tokens(1));
       set.mockClear();
@@ -473,14 +473,37 @@ describe('the session lifecycle, store storage only', () => {
         cause: 'invalid_grant',
         correlationId: created.session.correlationId,
       });
-      expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'session_not_found' });
       expect(events.slice(-2)).toMatchObject([
         { event: 'session.refresh_failed', cause: 'invalid_grant' },
         { event: 'session.cleared', correlationId: created.session.correlationId, trigger: 'rejected' },
       ]);
-      // It may run where cookies can't be set: the handle stays, and finds nothing.
-      expect(set).not.toHaveBeenCalled();
+      // The browser stops sending a handle that finds nothing.
+      expect(set).toHaveBeenCalledTimes(1);
+      expect(set).toHaveBeenCalledWith('__Host-session', '', expect.objectContaining({ maxAge: 0, path: '/' }));
+      expect(jar.size).toBe(0);
+      expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'no_session_cookie' });
+    });
+
+    it('ends the session all the same where cookies can only be read', async () => {
+      const store = createMemorySessionStore();
+      const { lifecycle, refreshTokens, events, cookies, jar, set } = over(store);
+      const created = await lifecycle.create(cookies, tokens(1));
+      // A Next Server Component: a write throws.
+      set.mockImplementation(() => {
+        throw new Error('Cookies can only be modified in a Server Action or Route Handler');
+      });
+      refreshTokens.mockRejectedValueOnce(invalidGrant());
+
+      expect(await lifecycle.refresh(cookies)).toEqual({
+        ok: false,
+        reason: 'refresh_failed',
+        cause: 'invalid_grant',
+        correlationId: created.session.correlationId,
+      });
+      expect(events.at(-1)).toMatchObject({ event: 'session.cleared', trigger: 'rejected' });
+      // The handle stays, and finds nothing.
       expect(jar.get('__Host-session')).toMatch(/^[0-9a-f]{64}$/);
+      expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'session_not_found' });
     });
 
     it('leaves the session under a store without a lock, where another instance may have refreshed', async () => {
