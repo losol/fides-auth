@@ -35,6 +35,11 @@ export interface CreateRecordOptions {
   sessionDurationSeconds: number;
   /** Where the roles are in the ID token. False leaves `user.roles` unset. @default 'roles' */
   rolesClaim?: RolesClaim | false;
+  /**
+   * The scope the login asked for. Used when the token response names none,
+   * which RFC 6749 §5.1 allows only when the two are identical.
+   */
+  requestedScope?: string;
   /** Milliseconds since the epoch. */
   now?: number;
 }
@@ -68,10 +73,14 @@ function lifetimeOf(
   };
 }
 
-function scopesOf(tokens: TokenResponse): string[] | undefined {
-  if (typeof tokens.scope !== 'string') return undefined;
-  const scopes = tokens.scope.split(' ').filter((s) => s.length > 0);
+function splitScope(scope: unknown): string[] | undefined {
+  if (typeof scope !== 'string') return undefined;
+  const scopes = scope.split(' ').filter((s) => s.length > 0);
   return scopes.length > 0 ? scopes : undefined;
+}
+
+function scopesOf(tokens: TokenResponse): string[] | undefined {
+  return splitScope(tokens.scope);
 }
 
 function stringClaim(claims: JWTPayload, name: string): string | undefined {
@@ -125,7 +134,7 @@ export function createRecord(tokens: TokenResponse, options: CreateRecordOptions
     createdAt: new Date(now).toISOString(),
     expiresAt: new Date(now + options.sessionDurationSeconds * 1000).toISOString(),
     user,
-    scopes: scopesOf(tokens),
+    scopes: scopesOf(tokens) ?? splitScope(options.requestedScope),
     idp: claims && iss && sub ? { iss, sub, sid: stringClaim(claims, 'sid') } : undefined,
   };
 

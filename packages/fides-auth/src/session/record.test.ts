@@ -70,6 +70,29 @@ describe('createRecord', () => {
     });
   });
 
+  it('takes the requested scope when the response names none', () => {
+    const record = createRecord(tokens({ scope: undefined }), {
+      sessionDurationSeconds: 1 * 86_400,
+      requestedScope: 'openid email  offline_access',
+      now,
+    });
+    expect(record.session.scopes).toEqual(['openid', 'email', 'offline_access']);
+  });
+
+  it('prefers the scope the response names over the requested one', () => {
+    const record = createRecord(tokens({ scope: 'openid' }), {
+      sessionDurationSeconds: 1 * 86_400,
+      requestedScope: 'openid email',
+      now,
+    });
+    expect(record.session.scopes).toEqual(['openid']);
+  });
+
+  it('has no scopes when neither the response nor the login names any', () => {
+    const record = createRecord(tokens({ scope: undefined }), { sessionDurationSeconds: 1 * 86_400, now });
+    expect(record.session.scopes).toBeUndefined();
+  });
+
   it('mints a new correlation id each time', () => {
     const a = createRecord(tokens(), { sessionDurationSeconds: 30 * 86_400, now });
     const b = createRecord(tokens(), { sessionDurationSeconds: 30 * 86_400, now });

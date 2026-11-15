@@ -104,8 +104,16 @@ export interface SessionLifecycleOptions {
 export interface SessionLifecycle {
   /** The session, or why there is none. Writes nothing. */
   read(cookies: CookieStore): Promise<ReadRecordResult>;
-  /** Starts a new session from a token response, discarding whatever the browser held. */
-  create(cookies: CookieStore, tokens: TokenResponse): Promise<SessionRecord>;
+  /**
+   * Starts a new session from a token response, discarding whatever the browser
+   * held. `requestedScope` is the scope the login asked for: the session's
+   * scopes when the response names none.
+   */
+  create(
+    cookies: CookieStore,
+    tokens: TokenResponse,
+    options?: { requestedScope?: string },
+  ): Promise<SessionRecord>;
   /** Refreshes the tokens, keeping the session's identity and lifetime. */
   refresh(cookies: CookieStore): Promise<RefreshRecordResult>;
   /**
@@ -450,9 +458,13 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
   return {
     read,
 
-    async create(cookies, tokens) {
+    async create(cookies, tokens, options) {
       assertSessionSecret(secret);
-      let record = createRecord(tokens, { sessionDurationSeconds, rolesClaim });
+      let record = createRecord(tokens, {
+        sessionDurationSeconds,
+        rolesClaim,
+        requestedScope: options?.requestedScope,
+      });
       if (mapSession) {
         const mapped = await mapSession(tokens, claimsOf(tokens), record.session);
         checkMappedRoles(record.session, mapped);

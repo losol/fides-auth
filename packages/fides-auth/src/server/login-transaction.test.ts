@@ -246,6 +246,41 @@ describe('login transaction cookie', () => {
     expect(jar.size).toBe(0);
   });
 
+  it('keeps the requested scope through seal and read', async () => {
+    const { store } = memoryStore();
+    const transaction = createTransaction(
+      { ...pkce('st'), parameters: { scope: 'openid profile' } },
+      { logger: quiet },
+    );
+    expect(transaction.scope).toBe('openid profile');
+
+    await persistTransaction(store, transaction, secret);
+
+    expect((await readTransaction(store, 'st', secret, { logger: quiet }))?.scope).toBe('openid profile');
+  });
+
+  it('still reads a transaction without a scope', async () => {
+    const { store } = memoryStore();
+    const transaction = createTransaction(pkce('st'), { logger: quiet });
+    expect(transaction).not.toHaveProperty('scope');
+    expect(createTransaction({ ...pkce('st'), parameters: { scope: '' } }, { logger: quiet })).not.toHaveProperty('scope');
+
+    await persistTransaction(store, transaction, secret);
+
+    const read = await readTransaction(store, 'st', secret, { logger: quiet });
+    expect(read).toEqual(transaction);
+    expect(read?.scope).toBeUndefined();
+  });
+
+  it('rejects a transaction whose scope is not a string', async () => {
+    const { store } = memoryStore();
+    const transaction = { ...createTransaction(pkce('st'), { logger: quiet }), scope: 42 };
+
+    await persistTransaction(store, transaction as unknown as LoginTransaction, secret);
+
+    expect(await readTransaction(store, 'st', secret, { logger: quiet })).toBeNull();
+  });
+
   it('returns null for a missing, tampered or foreign-secret cookie', async () => {
     const { store, jar } = memoryStore();
     expect(await readTransaction(store, 'st', secret, { logger: quiet })).toBeNull();

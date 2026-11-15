@@ -359,6 +359,35 @@ describe('login, session and logout', () => {
     const old = { sessionDurationDays: 30 } as Partial<FidesAuthConfig>;
     expect(() => setup(old)).toThrow(/sessionDurationDays is now sessionDurationSeconds/);
   });
+
+  describe('scopes at login', () => {
+    const asked = {
+      codeVerifier: 'v',
+      codeChallenge: 'c',
+      state: 'state-x',
+      parameters: { scope: 'openid profile offline_access' },
+    };
+
+    it('are the requested scopes when the token response names none', async () => {
+      const { auth, cookies } = setup();
+      oidc.createAuthorizationRequest.mockResolvedValueOnce(asked);
+      oidc.exchangeCode.mockResolvedValueOnce(tokens(1, { scope: undefined }));
+
+      await login(auth, cookies);
+
+      expect((await auth.readSession(cookies))?.scopes).toEqual(['openid', 'profile', 'offline_access']);
+    });
+
+    it('are the ones the response names, when it names any', async () => {
+      const { auth, cookies } = setup();
+      oidc.createAuthorizationRequest.mockResolvedValueOnce(asked);
+      oidc.exchangeCode.mockResolvedValueOnce(tokens(1, { scope: 'openid' }));
+
+      await login(auth, cookies);
+
+      expect((await auth.readSession(cookies))?.scopes).toEqual(['openid']);
+    });
+  });
 });
 
 describe('return paths', () => {

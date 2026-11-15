@@ -303,7 +303,11 @@ export interface FidesAuth<TData = Record<string, unknown>> {
     cookies: CookieStore,
     options?: RefreshSessionOptions,
   ): Promise<FidesRefreshResult<TData>>;
-  /** Starts a session from a token response, for a login that doesn't go through the handlers. */
+  /**
+   * Starts a session from a token response, for a login that doesn't go through
+   * the handlers. `scopes` come from the response's `scope`; when the provider
+   * leaves it out, pass it along, e.g. `{ ...tokens, scope }`.
+   */
   createSession(cookies: CookieStore, tokens: TokenResponse): Promise<Session<TData>>;
   /**
    * Changes the user or data. Null when there is no session. It waits its
@@ -634,7 +638,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
           codeVerifier: transaction.codeVerifier,
           state: transaction.state,
         });
-        const session = await lifecycle.create(cookies, tokens);
+        const session = await lifecycle.create(cookies, tokens, { requestedScope: transaction.scope });
 
         const url = returnUrl(transaction.returnTo);
         if (config.loginSuccessParam !== false) url.searchParams.set('login', 'success');
