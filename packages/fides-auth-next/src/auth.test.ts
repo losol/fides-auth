@@ -3,7 +3,7 @@
  * are small fakes, and fetch answers for the provider's token endpoint and one
  * API, so the protocol and session code run as they do in an app.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 const { jar, render } = vi.hoisted(() => ({
   jar: new Map<string, string>(),
@@ -122,9 +122,9 @@ function stubProvider(): Provider {
   return provider;
 }
 
-function setup(overrides: Partial<FidesAuthConfig> = {}) {
+function setup<TData = Record<string, unknown>>(overrides: Partial<FidesAuthConfig<TData>> = {}) {
   const events: SessionEvent[] = [];
-  const auth = createFidesAuth({
+  const auth = createFidesAuth<TData>({
     oauthConfig: {
       issuer: ISSUER,
       clientId: 'web',
@@ -155,7 +155,7 @@ function newRender(): void {
 const post = (path: string) =>
   new Request(`${APP}${path}`, { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' } });
 
-async function login(auth: FidesAuth): Promise<Response> {
+async function login(auth: Pick<FidesAuth, 'handleOidcLogin' | 'handleOidcCallback'>): Promise<Response> {
   const started = await auth.handleOidcLogin(new Request(`${APP}/api/auth/login?returnTo=%2Faccount`));
   const state = new URL(started.headers.get('location') ?? '').searchParams.get('state');
   newRender();
@@ -279,6 +279,23 @@ describe('createFidesAuth for Next', () => {
     const { session, tokens } = await auth.readSessionWithTokens();
     expect(session?.user?.name).toBe('Ada');
     expect(tokens?.accessToken).toBe('access-1');
+  });
+
+  it('gives session.data the type the instance was created with', async () => {
+    interface AppData {
+      tenant: string;
+    }
+    const { auth } = setup<AppData>({
+      mapSession: (_tokens, _claims, session) => ({ ...session, data: { tenant: 'acme' } }),
+    });
+    await login(auth);
+    newRender();
+
+    const session = await auth.readSession();
+    expectTypeOf(session?.data).toEqualTypeOf<AppData | undefined>();
+    expect(session?.data?.tenant.toUpperCase()).toBe('ACME');
+    const both = await auth.readSessionWithTokens();
+    expectTypeOf(both.session?.data).toEqualTypeOf<AppData | undefined>();
   });
 
   it('keeps the session in a store when given one', async () => {

@@ -32,8 +32,11 @@ export interface RefreshInProxyOptions {
   ifExpiresWithin?: number;
 }
 
-/** The core instance's members, bound to the request's cookies. */
-export interface FidesAuth {
+/**
+ * The core instance's members, bound to the request's cookies. `TData` is the
+ * type of `session.data`.
+ */
+export interface FidesAuth<TData = Record<string, unknown>> {
   /** `GET`, with an optional `?returnTo=`. Redirects to the provider. */
   handleOidcLogin(
     request: Request,
@@ -55,9 +58,9 @@ export interface FidesAuth {
   handleSessionInfo(request: Request): Promise<Response>;
 
   /** The session, or null. Cached per render. */
-  readSession(): Promise<Session | null>;
+  readSession(): Promise<Session<TData> | null>;
   /** The session, or why there is none. Cached per render, together with `readSession`. */
-  tryReadSession(): Promise<FidesReadResult>;
+  tryReadSession(): Promise<FidesReadResult<TData>>;
   /** The session's tokens, or null without a session. The access token may have expired. */
   getTokens(): Promise<Tokens | null>;
   /**
@@ -65,18 +68,20 @@ export interface FidesAuth {
    * per render, since a refresh changes the tokens. The tokens are for the
    * server: hand a Client Component `session`, never this result.
    */
-  readSessionWithTokens(): Promise<FidesSessionWithTokens>;
+  readSessionWithTokens(): Promise<FidesSessionWithTokens<TData>>;
   /**
    * Refreshes the tokens, or with `ifExpiresWithin` only when the access token
    * is about to expire. With cookie sessions this writes cookies, so it works
    * only in Server Actions and Route Handlers; pages get theirs from
    * `refreshInProxy`.
    */
-  refreshSession(options?: RefreshSessionOptions): Promise<FidesRefreshResult>;
+  refreshSession(options?: RefreshSessionOptions): Promise<FidesRefreshResult<TData>>;
   /** Starts a session from a token response, for a login that doesn't go through the handlers. */
-  createSession(tokens: TokenResponse): Promise<Session>;
+  createSession(tokens: TokenResponse): Promise<Session<TData>>;
   /** Changes the user or data. Null when there is no session. */
-  updateSession(update: (session: Session) => Session | Promise<Session>): Promise<Session | null>;
+  updateSession(
+    update: (session: Session<TData>) => Session<TData> | Promise<Session<TData>>,
+  ): Promise<Session<TData> | null>;
   /**
    * Ends the session and revokes its refresh token where the provider has a
    * revocation endpoint. With a store, the record is deleted too. `trigger`
@@ -182,11 +187,13 @@ function forward(request: NextRequest, writes: Map<string, CookieWrite>): NextRe
  * const session = await auth.readSession();
  * ```
  */
-export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
+export function createFidesAuth<TData = Record<string, unknown>>(
+  config: FidesAuthConfig<TData>,
+): FidesAuth<TData> {
   const core = createCoreFidesAuth(config);
 
   const tryReadSession = cache(
-    async (): Promise<FidesReadResult> => core.tryReadSession(await nextCookieStore()),
+    async (): Promise<FidesReadResult<TData>> => core.tryReadSession(await nextCookieStore()),
   );
 
   return {

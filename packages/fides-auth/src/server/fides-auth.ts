@@ -49,10 +49,16 @@ import type { SessionStore, StoreFields } from './session-store.js';
  * one. The correlation id, the timestamps and the IdP session are kept
  * whatever it returns. It runs at login only: a refresh that brings an ID
  * token updates the user's roles, name and email from it, and keeps the rest.
+ *
+ * `TData` is the type of `session.data`, from `createFidesAuth<TData>`.
  */
-export type MapSession = MapRecordSession;
+export type MapSession<TData = Record<string, unknown>> = (
+  tokens: Parameters<MapRecordSession>[0],
+  claims: Parameters<MapRecordSession>[1],
+  session: Session<TData>,
+) => Session<TData> | Promise<Session<TData>>;
 
-export interface FidesAuthConfig {
+export interface FidesAuthConfig<TData = Record<string, unknown>> {
   /** The provider and client. A BFF is a confidential client, so `clientAuth: 'none'` throws. */
   oauthConfig: OidcClientConfig;
   /** Seals the session cookies, the store records and the login transaction. 32 bytes, as hex or raw. */
@@ -65,7 +71,7 @@ export interface FidesAuthConfig {
    * signed in. They are stored in the clear, so return only what the store may
    * show. Runs on every save. Ignored without a `sessionStore`.
    */
-  storeFields?: (session: Session) => StoreFields;
+  storeFields?: (session: Session<TData>) => StoreFields;
   /**
    * How long a session lasts from login, in seconds. Refreshes don't extend
    * it. `createFidesAuth` throws a TypeError unless it is a finite number
@@ -85,7 +91,7 @@ export interface FidesAuthConfig {
   /** The app's public origin, for the CSRF guard and redirects. Defaults to the redirect URI's origin. */
   applicationUrl?: string;
   /** Changes the session built at login. */
-  mapSession?: MapSession;
+  mapSession?: MapSession<TData>;
   /**
    * The ID token claim that holds the user's roles, read at login and on every
    * refresh that brings an ID token.
@@ -123,13 +129,13 @@ export interface FidesAuthConfig {
 }
 
 /** The result of {@link FidesAuth.tryReadSession}. */
-export type FidesReadResult =
-  | { session: Session; reason?: undefined }
+export type FidesReadResult<TData = Record<string, unknown>> =
+  | { session: Session<TData>; reason?: undefined }
   | { session: null; reason: SessionRejectedReason };
 
 /** The result of {@link FidesAuth.readSessionWithTokens}. */
-export type FidesSessionWithTokens =
-  | { session: Session; tokens: Tokens; reason?: undefined }
+export type FidesSessionWithTokens<TData = Record<string, unknown>> =
+  | { session: Session<TData>; tokens: Tokens; reason?: undefined }
   | { session: null; tokens: null; reason: SessionRejectedReason };
 
 /** Options for {@link FidesAuth.refreshSession}. */
@@ -145,10 +151,10 @@ export interface RefreshSessionOptions {
 }
 
 /** The result of {@link FidesAuth.refreshSession}. Only `cause: 'invalid_grant'` means the user must log in again. */
-export type FidesRefreshResult =
+export type FidesRefreshResult<TData = Record<string, unknown>> =
   | {
       ok: true;
-      session: Session;
+      session: Session<TData>;
       /** False when `ifExpiresWithin` found the access token fresh enough. */
       refreshed: boolean;
       rotatedRefreshToken: boolean;
@@ -158,7 +164,11 @@ export type FidesRefreshResult =
 /** Options for {@link FidesAuth.authorizedFetch}. */
 export type FidesAuthorizedFetchOptions<T> = AuthorizedFetchOptions<T>;
 
-export interface FidesAuth {
+/**
+ * The server side of fides-auth. `TData` is the type of `session.data`, and the
+ * same in everything the instance hands out.
+ */
+export interface FidesAuth<TData = Record<string, unknown>> {
   /** `GET`, with an optional `?returnTo=`. Redirects to the provider. */
   handleOidcLogin(
     request: Request,
@@ -185,9 +195,9 @@ export interface FidesAuth {
   handleSessionInfo(request: Request, cookies: CookieStore): Promise<Response>;
 
   /** The session, or null. */
-  readSession(cookies: CookieStore): Promise<Session | null>;
+  readSession(cookies: CookieStore): Promise<Session<TData> | null>;
   /** The session, or why there is none. */
-  tryReadSession(cookies: CookieStore): Promise<FidesReadResult>;
+  tryReadSession(cookies: CookieStore): Promise<FidesReadResult<TData>>;
   /** The session's tokens, or null without a session. */
   getTokens(cookies: CookieStore): Promise<Tokens | null>;
   /**
@@ -196,7 +206,7 @@ export interface FidesAuth {
    * and `getTokens` each read, which with a store is a round trip each. The
    * tokens are for the server: hand the browser `session`, never this result.
    */
-  readSessionWithTokens(cookies: CookieStore): Promise<FidesSessionWithTokens>;
+  readSessionWithTokens(cookies: CookieStore): Promise<FidesSessionWithTokens<TData>>;
   /**
    * Refreshes the tokens, or with `ifExpiresWithin` only when the access token
    * is about to expire. Apart from the heartbeat endpoint, nothing else on the
@@ -208,14 +218,17 @@ export interface FidesAuth {
    * left as it is, since another instance may have refreshed it; end it with
    * `clearSession`.
    */
-  refreshSession(cookies: CookieStore, options?: RefreshSessionOptions): Promise<FidesRefreshResult>;
+  refreshSession(
+    cookies: CookieStore,
+    options?: RefreshSessionOptions,
+  ): Promise<FidesRefreshResult<TData>>;
   /** Starts a session from a token response, for a login that doesn't go through the handlers. */
-  createSession(cookies: CookieStore, tokens: TokenResponse): Promise<Session>;
+  createSession(cookies: CookieStore, tokens: TokenResponse): Promise<Session<TData>>;
   /** Changes the user or data. Null when there is no session. */
   updateSession(
     cookies: CookieStore,
-    update: (session: Session) => Session | Promise<Session>,
-  ): Promise<Session | null>;
+    update: (session: Session<TData>) => Session<TData> | Promise<Session<TData>>,
+  ): Promise<Session<TData> | null>;
   /**
    * Ends the session and revokes its refresh token where the provider has a
    * revocation endpoint. With a store, the record is deleted too. `trigger`
@@ -298,7 +311,9 @@ const forbidden = () => new Response('Forbidden', { status: 403 });
  * @throws TypeError if `clientAuth` is `'none'`, or `refreshGraceSeconds` isn't a
  * finite number, 0 or more. A member throws TypeError if the config has no redirect URI.
  */
-export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
+export function createFidesAuth<TData = Record<string, unknown>>(
+  config: FidesAuthConfig<TData>,
+): FidesAuth<TData> {
   const { oauthConfig, secret, sessionStore, rateLimit } = config;
   if ('sessionDurationDays' in config) {
     // Left unnoticed, the old option would be ignored and its sessions cut to the default.
@@ -344,8 +359,9 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
         secret,
         sessionDurationSeconds,
         rolesClaim: config.rolesClaim,
-        mapSession: config.mapSession,
-        storeFields: config.storeFields,
+        // The lifecycle doesn't know what `data` holds; the type is the app's own.
+        mapSession: config.mapSession as MapRecordSession | undefined,
+        storeFields: config.storeFields as ((session: Session) => StoreFields) | undefined,
         refreshGraceSeconds,
         refreshTokens: (refreshToken) => oidc.refresh(refreshToken),
         logger: loggers.create({ namespace: 'fides-auth:server:session' }),
@@ -393,15 +409,20 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     return redirect(url);
   }
 
-  async function tryReadSession(cookies: CookieStore): Promise<FidesReadResult> {
+  /** The session with `data` as the app typed it: what it holds is what the app put there. */
+  const typed = (session: Session): Session<TData> => session as Session<TData>;
+
+  async function tryReadSession(cookies: CookieStore): Promise<FidesReadResult<TData>> {
     const read = await settings().lifecycle.read(cookies);
-    return read.record ? { session: read.record.session } : { session: null, reason: read.reason };
+    return read.record
+      ? { session: typed(read.record.session) }
+      : { session: null, reason: read.reason };
   }
 
   async function refreshSession(
     cookies: CookieStore,
     { ifExpiresWithin }: RefreshSessionOptions = {},
-  ): Promise<FidesRefreshResult> {
+  ): Promise<FidesRefreshResult<TData>> {
     const { lifecycle } = settings();
     if (ifExpiresWithin !== undefined) {
       if (!(ifExpiresWithin >= 0)) {
@@ -416,7 +437,12 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
         Number.isNaN(expiresAt) ||
         expiresAt - Date.now() > refreshWindowMs(tokens, expiresAt, ifExpiresWithin)
       ) {
-        return { ok: true, session: read.record.session, refreshed: false, rotatedRefreshToken: false };
+        return {
+          ok: true,
+          session: typed(read.record.session),
+          refreshed: false,
+          rotatedRefreshToken: false,
+        };
       }
     }
 
@@ -424,7 +450,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     return result.ok
       ? {
           ok: true,
-          session: result.record.session,
+          session: typed(result.record.session),
           refreshed: true,
           rotatedRefreshToken: result.rotatedRefreshToken,
         }
@@ -654,12 +680,19 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     async readSessionWithTokens(cookies) {
       const read = await settings().lifecycle.read(cookies);
       return read.record
-        ? { session: read.record.session, tokens: read.record.tokens }
+        ? { session: typed(read.record.session), tokens: read.record.tokens }
         : { session: null, tokens: null, reason: read.reason };
     },
     refreshSession,
-    createSession: async (cookies, tokens) => (await settings().lifecycle.create(cookies, tokens)).session,
-    updateSession: async (cookies, update) => (await settings().lifecycle.update(cookies, update))?.session ?? null,
+    createSession: async (cookies, tokens) =>
+      typed((await settings().lifecycle.create(cookies, tokens)).session),
+    async updateSession(cookies, update) {
+      const updated = await settings().lifecycle.update(
+        cookies,
+        update as (session: Session) => Session | Promise<Session>,
+      );
+      return updated ? typed(updated.session) : null;
+    },
     async clearSession(cookies, { trigger = 'logout' } = {}) {
       await revokeRefreshToken(await settings().lifecycle.end(cookies, { trigger }), log.logout);
     },
