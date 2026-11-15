@@ -360,7 +360,7 @@ confidential client.
 | Member | |
 |---|---|
 | `handleOidcLogin(request, cookies, { authorizationParameters? })` | `GET`, with an optional `?returnTo=`. Redirects to the provider. |
-| `handleOidcCallback(request, cookies)` | Starts the session. Redirects to the return path with `?login=success`, unless `loginSuccessParam` is false, or home with `?login=error&error=<code>`. |
+| `handleOidcCallback(request, cookies)` | Starts the session. Redirects to the return path with `?login=success`, unless `loginSuccessParam` is false. A login that fails goes to `defaultRedirectPath` with `?login=error&error=<code>`, see [When a login fails](#when-a-login-fails). |
 | `handleOidcLogout(request, cookies, { state?, logoutHint? })` | `POST` from the app's own pages. Ends the session, revokes its refresh token, and redirects to the provider's end-session endpoint. |
 | `handleSessionInfo(request, cookies)` | `GET`. Whether there is a session, whose, and when it ends (`expiresAt`). Never refreshes, never returns tokens. |
 | `handleHeartbeat(request, cookies)` | `POST`. Refreshes the session: 401 when it is over, 503 when the provider or the store failed. |
@@ -380,6 +380,37 @@ Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
 `mapSession`, `rolesClaim` (`roles`), `validateReturnTo`, `defaultRedirectPath`
 (`/`), `postLogoutRedirectUri` (`applicationUrl`), `rateLimit`, `logger`,
 `onSessionEvent` and `loginSuccessParam` (true).
+
+#### When a login fails
+
+A login that fails never answers with text of its own. The user is sent to
+`defaultRedirectPath` with `?login=error&error=<code>`, for the page to show
+in its own words:
+
+| Code | |
+|---|---|
+| `login_expired` | The callback found no login to finish: it took more than ten minutes, was finished already, or its cookie never arrived. |
+| `invalid_callback` | The callback didn't match the login it belongs to. |
+| `session_too_large` | The session doesn't fit in the cookies. A `sessionStore` is the fix. |
+| `login_failed` | Anything else at the callback, such as a code the provider won't exchange. |
+| `login_unavailable` | The login couldn't be started, most often because the provider couldn't be reached. |
+| `access_denied` and the like | The provider's own error code, when the user cancels say. `idp_error` when the provider sent something that isn't a code. |
+
+The logs have the details. A page that sends users without a session to the
+login must leave a URL with `login=error` alone, or a login that keeps failing
+goes in circles.
+
+To answer in another way, pass `onLoginError`. It gets the code, whether the
+login failed at its `'login'` or `'callback'` stage, and what was thrown. A
+Response it returns is the answer; without one the redirect stands:
+
+```typescript
+const auth = createFidesAuth({
+  oauthConfig,
+  secret,
+  onLoginError: ({ code }) => Response.redirect(`https://app.example.com/login-failed?why=${code}`),
+});
+```
 
 #### Sessions
 

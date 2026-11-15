@@ -50,6 +50,7 @@ of an app is a confidential client.
 | `validateReturnTo` | a path on this origin | Turns `?returnTo=` into a safe path, or null. |
 | `defaultRedirectPath` | `'/'` | Where a login without a return path lands. |
 | `loginSuccessParam` | `true` | Adds `?login=success` to the return path after a login. False leaves the path as it was. |
+| `onLoginError` | none | `(error, request) => Response \| undefined`. Answers a failed login in place of the redirect. |
 | `postLogoutRedirectUri` | `applicationUrl` | Where the provider sends the user after logout. |
 | `rateLimit` | none | `(request) => boolean`. The handlers answer 429 when it returns false. |
 | `logger` | JSON lines on the console | A `FidesLoggerFactory`. |
@@ -74,6 +75,14 @@ export const GET = (request: Request) => auth.handleSessionInfo(request);
 The callback's path must be the redirect URI's. Login takes `?returnTo=/path`
 and lands there with `?login=success`, or on the path as it was with
 `loginSuccessParam: false`.
+
+A login that fails lands on `defaultRedirectPath` with
+`?login=error&error=<code>`: `login_expired` when the login took too long or
+its cookie was lost, `login_unavailable` when the provider couldn't be
+reached, or the provider's own code, such as `access_denied`. The handlers
+never answer with text of their own. See
+[When a login fails](../fides-auth/README.md#when-a-login-fails) for the codes
+and for `onLoginError`.
 
 Logout answers only a `POST` from the app's own pages, so a form does it:
 
@@ -155,7 +164,10 @@ To send users without a session to the login, check the cookie first:
 import { NextResponse, type NextRequest } from "next/server";
 
 export function proxy(request: NextRequest) {
-  if (!request.cookies.has(auth.cookieNames.session)) {
+  // A login that just failed lands here with ?login=error. Sending it to the
+  // login again would go in circles.
+  const failed = request.nextUrl.searchParams.get("login") === "error";
+  if (!failed && !request.cookies.has(auth.cookieNames.session)) {
     return NextResponse.redirect(new URL("/api/auth/login", request.url));
   }
   return auth.refreshInProxy(request);
