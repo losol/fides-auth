@@ -9,7 +9,7 @@ maps every 0.x API to what replaces it.
 - `createFidesAuth` from `/server` is the server side: the handlers, the session members and
   `authorizedFetch` on one instance. The free `/server` functions are gone.
 - One session cookie, `__Host-session`, or a handle with a `SessionStore`. A session ends
-  `sessionDurationDays` after login, and `Session` carries no tokens.
+  `sessionDurationSeconds` after login, 12 hours by default, and `Session` carries no tokens.
 - Nothing refreshes unless asked: `refreshSession({ ifExpiresWithin })`. `authorizedFetch` never
   refreshes, and its error says whether a refresh may help.
 - `createOidcClient` on `/oidc` replaces the free protocol functions and the global settings. Each

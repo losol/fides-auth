@@ -28,7 +28,7 @@ Every handler and session member on `auth` then uses the store. `secret` is
 still required: it seals the records and the login transaction. Next.js apps
 pass the same option to `createFidesAuth` from `@eventuras/fides-auth-next`.
 
-A session lasts `sessionDurationDays` (30 by default) from login, and refreshes
+A session lasts `sessionDurationSeconds` (12 hours by default) from login, and refreshes
 don't extend it. The handle cookie expires with it.
 
 ## The store contract

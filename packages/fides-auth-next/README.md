@@ -42,7 +42,7 @@ of an app is a confidential client.
 |---|---|---|
 | `sessionStore` | none | Keeps sessions in a store, with only a handle in the cookie. See below. |
 | `storeFields` | none | `(session) => fields`. Plain fields to keep next to each stored session, e.g. your own user id. |
-| `sessionDurationDays` | 30 | How long a session lasts from login. Refreshes don't extend it. |
+| `sessionDurationSeconds` | 43200 (12 hours) | How long a session lasts from login, in seconds. Refreshes don't extend it. |
 | `refreshGraceSeconds` | 10 | With cookie sessions: how long after a refresh a request with the old cookie gets that refresh's result. 0 turns it off. |
 | `applicationUrl` | the redirect URI's origin | The app's public origin, for the same-origin check and redirects. |
 | `mapSession` | none | Changes the session built at login, e.g. to add `data`. |

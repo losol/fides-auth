@@ -375,7 +375,7 @@ confidential client.
 | `cookieNames`, `oidc` | The session cookie's name, and the instance's OIDC client. |
 
 Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
-`storeFields`, `sessionDurationDays` (30), `refreshGraceSeconds` (10),
+`storeFields`, `sessionDurationSeconds` (12 hours), `refreshGraceSeconds` (10),
 `applicationUrl` (the redirect URI's origin),
 `mapSession`, `rolesClaim` (`roles`), `validateReturnTo`, `defaultRedirectPath`
 (`/`), `postLogoutRedirectUri` (`applicationUrl`), `rateLimit`, `logger`,
@@ -383,8 +383,9 @@ Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
 
 #### Sessions
 
-A session lasts `sessionDurationDays` from login, and refreshes don't extend it.
-It counts days, and a fraction is fine: `1 / 3` is eight hours.
+A session lasts `sessionDurationSeconds` from login, 12 hours unless you say
+otherwise, and refreshes don't extend it. With a session at the provider, the
+login after that is a redirect without a password.
 It is sealed with AES-256-GCM into the `__Host-session` cookie, in up to three
 chunks (`session` over plain http). A `Session` has `correlationId`,
 `createdAt`, `expiresAt`, `user`, `scopes`, `idp` and `data`. The tokens aren't

@@ -32,25 +32,28 @@ export type MapRecordSession = (
 
 /** Options for {@link createRecord}. */
 export interface CreateRecordOptions {
-  sessionDurationDays: number;
+  sessionDurationSeconds: number;
   /** @default 'roles' */
   rolesClaim?: string;
   /** Milliseconds since the epoch. */
   now?: number;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+/** How long a session lasts when the app doesn't say: 12 hours, a working day. */
+export const DEFAULT_SESSION_DURATION_SECONDS = 12 * 60 * 60;
 
 /**
- * Checks a session lifetime before a login depends on it: one that isn't a
- * number would only show as a failed login, when `expiresAt` can't be written.
+ * The session lifetime in seconds, the default unless given. Checked before a
+ * login depends on it: one that isn't a number would only show as a failed
+ * login, when `expiresAt` can't be written.
  *
- * @throws TypeError unless `days` is undefined or a finite number above 0.
+ * @throws TypeError unless `seconds` is undefined or a finite number above 0.
  */
-export function checkSessionDuration(days: number | undefined): void {
-  if (days !== undefined && !(Number.isFinite(days) && days > 0)) {
-    throw new TypeError(`sessionDurationDays must be a finite number above 0, got ${days}`);
+export function checkSessionDuration(seconds = DEFAULT_SESSION_DURATION_SECONDS): number {
+  if (!(Number.isFinite(seconds) && seconds > 0)) {
+    throw new TypeError(`sessionDurationSeconds must be a finite number above 0, got ${seconds}`);
   }
+  return seconds;
 }
 
 /** The access token's lifetime as two timestamps, or neither when the provider gave none. */
@@ -96,7 +99,7 @@ export function claimsOf(tokens: TokenResponse): JWTPayload | undefined {
 
 /**
  * Builds a new record from a token response, with a new correlation id and a
- * lifetime of `sessionDurationDays`.
+ * lifetime of `sessionDurationSeconds`.
  *
  * Decodes the ID token without verifying it: pass tokens straight from the code
  * exchange, or verify them first.
@@ -117,7 +120,7 @@ export function createRecord(tokens: TokenResponse, options: CreateRecordOptions
   const session: Session = {
     correlationId: newSessionId(),
     createdAt: new Date(now).toISOString(),
-    expiresAt: new Date(now + options.sessionDurationDays * DAY_MS).toISOString(),
+    expiresAt: new Date(now + options.sessionDurationSeconds * 1000).toISOString(),
     user,
     scopes: scopesOf(tokens),
     idp: claims && iss && sub ? { iss, sub, sid: stringClaim(claims, 'sid') } : undefined,

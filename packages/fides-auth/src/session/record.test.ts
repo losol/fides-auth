@@ -46,7 +46,7 @@ function tokens(extra: Partial<TokenResponse> = {}): TokenResponse {
 
 describe('createRecord', () => {
   it('builds the session, the IdP session and the tokens', () => {
-    const record = createRecord(tokens(), { sessionDurationDays: 30, now });
+    const record = createRecord(tokens(), { sessionDurationSeconds: 30 * 86_400, now });
 
     expect(record.v).toBe(1);
     expect(record.session).toEqual({
@@ -67,26 +67,26 @@ describe('createRecord', () => {
   });
 
   it('mints a new correlation id each time', () => {
-    const a = createRecord(tokens(), { sessionDurationDays: 30, now });
-    const b = createRecord(tokens(), { sessionDurationDays: 30, now });
+    const a = createRecord(tokens(), { sessionDurationSeconds: 30 * 86_400, now });
+    const b = createRecord(tokens(), { sessionDurationSeconds: 30 * 86_400, now });
     expect(a.session.correlationId).not.toBe(b.session.correlationId);
   });
 
   it('has no user or IdP session without an ID token', () => {
-    const record = createRecord(tokens({ id_token: undefined }), { sessionDurationDays: 1, now });
+    const record = createRecord(tokens({ id_token: undefined }), { sessionDurationSeconds: 1 * 86_400, now });
     expect(record.session.user).toBeUndefined();
     expect(record.session.idp).toBeUndefined();
   });
 
   it('has no user when the ID token has no sub, and leaves out claims that are not strings', () => {
     const noSub = createRecord(tokens({ id_token: idToken({ iss: 'x', name: 'Ada' }) }), {
-      sessionDurationDays: 1,
+      sessionDurationSeconds: 1 * 86_400,
       now,
     });
     expect(noSub.session.user).toBeUndefined();
 
     const odd = createRecord(tokens({ id_token: idToken({ sub: 'user-1', name: 42 }) }), {
-      sessionDurationDays: 1,
+      sessionDurationSeconds: 1 * 86_400,
       now,
     });
     expect(odd.session.user).toEqual({ sub: 'user-1', roles: [] });
@@ -95,13 +95,13 @@ describe('createRecord', () => {
   it('reads roles from rolesClaim', () => {
     const record = createRecord(
       tokens({ id_token: idToken({ sub: 'user-1', groups: ['a', 'b'] }) }),
-      { sessionDurationDays: 1, rolesClaim: 'groups', now },
+      { sessionDurationSeconds: 1 * 86_400, rolesClaim: 'groups', now },
     );
     expect(record.session.user?.roles).toEqual(['a', 'b']);
   });
 
   it('throws without an access token', () => {
-    expect(() => createRecord(tokens({ access_token: '' }), { sessionDurationDays: 1, now })).toThrow(
+    expect(() => createRecord(tokens({ access_token: '' }), { sessionDurationSeconds: 1 * 86_400, now })).toThrow(
       /access_token/,
     );
   });
@@ -109,7 +109,7 @@ describe('createRecord', () => {
 
 describe('keepIdentity', () => {
   it('takes the contents of the change and the identity of the original', () => {
-    const original = createRecord(tokens(), { sessionDurationDays: 30, now }).session;
+    const original = createRecord(tokens(), { sessionDurationSeconds: 30 * 86_400, now }).session;
     const changed = keepIdentity(original, {
       ...original,
       correlationId: 'forged',
@@ -129,7 +129,7 @@ describe('keepIdentity', () => {
 });
 
 describe('refreshRecord', () => {
-  const record = createRecord(tokens(), { sessionDurationDays: 30, now });
+  const record = createRecord(tokens(), { sessionDurationSeconds: 30 * 86_400, now });
 
   it('replaces the tokens and keeps the session', () => {
     const refreshed = refreshRecord(
@@ -198,13 +198,13 @@ describe('refreshRecord', () => {
   });
 
   it('leaves a session without a user as it is', () => {
-    const anonymous = createRecord(tokens({ id_token: undefined }), { sessionDurationDays: 1, now });
+    const anonymous = createRecord(tokens({ id_token: undefined }), { sessionDurationSeconds: 1 * 86_400, now });
     expect(refreshRecord(anonymous, withIdToken({ roles: ['viewer'] })).session).toBe(anonymous.session);
   });
 });
 
 describe('isSameSubject', () => {
-  const record = createRecord(tokens(), { sessionDurationDays: 30, now });
+  const record = createRecord(tokens(), { sessionDurationSeconds: 30 * 86_400, now });
   const refresh = (claims: Record<string, unknown>): TokenResponse => ({
     access_token: 'access-2',
     token_type: 'bearer',
@@ -225,14 +225,14 @@ describe('isSameSubject', () => {
 
 describe('isExpired', () => {
   it('compares expiresAt with now', () => {
-    const record = createRecord(tokens(), { sessionDurationDays: 1, now });
+    const record = createRecord(tokens(), { sessionDurationSeconds: 1 * 86_400, now });
     expect(isExpired(record, now + DAY - 1)).toBe(false);
     expect(isExpired(record, now + DAY)).toBe(true);
   });
 });
 
 describe('sealRecord and openRecord', () => {
-  const record = createRecord(tokens(), { sessionDurationDays: 30, now });
+  const record = createRecord(tokens(), { sessionDurationSeconds: 30 * 86_400, now });
 
   it('round-trips the record, without the seal’s iat', async () => {
     expect(await openRecord(await sealRecord(record, secret), secret)).toEqual(record);

@@ -67,12 +67,12 @@ export interface FidesAuthConfig {
    */
   storeFields?: (session: Session) => StoreFields;
   /**
-   * How long a session lasts from login, in days. Refreshes don't extend it.
-   * A fraction is fine: `1 / 3` is eight hours. `createFidesAuth` throws a
-   * TypeError unless it is a finite number above 0.
-   * @default 30
+   * How long a session lasts from login, in seconds. Refreshes don't extend
+   * it. `createFidesAuth` throws a TypeError unless it is a finite number
+   * above 0.
+   * @default 43200, which is 12 hours
    */
-  sessionDurationDays?: number;
+  sessionDurationSeconds?: number;
   /**
    * With cookie sessions: for this many seconds after a refresh, a request
    * that still carries the cookie from before it gets that refresh's result,
@@ -300,7 +300,13 @@ const forbidden = () => new Response('Forbidden', { status: 403 });
  */
 export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
   const { oauthConfig, secret, sessionStore, rateLimit } = config;
-  checkSessionDuration(config.sessionDurationDays);
+  if ('sessionDurationDays' in config) {
+    // Left unnoticed, the old option would be ignored and its sessions cut to the default.
+    throw new TypeError(
+      'sessionDurationDays is now sessionDurationSeconds: give the lifetime in seconds, e.g. 30 * 24 * 60 * 60',
+    );
+  }
+  const sessionDurationSeconds = checkSessionDuration(config.sessionDurationSeconds);
   if (oauthConfig.clientAuth === 'none') {
     throw new TypeError(
       "createFidesAuth needs a confidential client: a backend-for-frontend can't use clientAuth 'none'",
@@ -336,7 +342,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
       lifecycle: createSessionLifecycle({
         storage: sessionStore ? storeStorage({ store: sessionStore, secure }) : cookieStorage({ secure }),
         secret,
-        sessionDurationDays: config.sessionDurationDays,
+        sessionDurationSeconds,
         rolesClaim: config.rolesClaim,
         mapSession: config.mapSession,
         storeFields: config.storeFields,
