@@ -15,6 +15,7 @@ import type { TokenResponse } from '../shared/types.js';
 import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { createRecord, sealRecord } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
+import { fetchCookieStore } from './fetch-cookie-store.js';
 import { createFidesAuth, type FidesAuthConfig } from './fides-auth.js';
 import { SessionSecretError } from './session-secret.js';
 import { createMemorySessionStore } from './session-store.js';
@@ -788,5 +789,86 @@ describe('authorizedFetch', () => {
     await expect(
       auth.authorizedFetch(cookies, 'https://evil.test/x', { allowedBase: api }),
     ).rejects.toThrow();
+  });
+});
+
+describe('over Request and Response, with fetchCookieStore', () => {
+  /** A browser tab: keeps the cookies responses set, and sends them with its requests. */
+  function browser() {
+    const jar = new Map<string, string>();
+    return {
+      jar,
+      receive(response: Response): Response {
+        for (const line of response.headers.getSetCookie()) {
+          const [pair = '', ...attributes] = line.split('; ');
+          const name = pair.slice(0, pair.indexOf('='));
+          if (attributes.includes('Max-Age=0')) jar.delete(name);
+          else jar.set(name, pair.slice(name.length + 1));
+        }
+        return response;
+      },
+      request(path: string, init: RequestInit = {}): Request {
+        const headers = new Headers(init.headers);
+        if (jar.size > 0) headers.set('cookie', [...jar].map(([name, value]) => `${name}=${value}`).join('; '));
+        return new Request(`${APP}${path}`, { ...init, headers });
+      },
+    };
+  }
+
+  it('runs login, a read, a refresh and logout', async () => {
+    const { auth } = setup();
+    const tab = browser();
+
+    let request = tab.request('/api/auth/login?returnTo=%2Faccount');
+    let cookies = fetchCookieStore(request);
+    const started = tab.receive(cookies.apply(await auth.handleOidcLogin(request, cookies)));
+    expect(started.status).toBe(302);
+    expect([...tab.jar.keys()]).toEqual([expect.stringMatching(/^__Host-oauth_tx_/)]);
+    // A `__Host-` cookie is only kept when it is Secure and on `/`.
+    for (const line of started.headers.getSetCookie()) {
+      expect(line).toMatch(/; Path=\/;.*; HttpOnly; Secure; SameSite=Lax$/);
+    }
+
+    const state = location(started).searchParams.get('state');
+    request = tab.request(`/api/auth/callback?code=abc&state=${state}`);
+    cookies = fetchCookieStore(request);
+    const landed = tab.receive(cookies.apply(await auth.handleOidcCallback(request, cookies)));
+    expect(location(landed).pathname).toBe('/account');
+    // The login transaction is spent, and the session is in its place.
+    expect([...tab.jar.keys()]).toEqual(['__Host-session']);
+
+    expect((await auth.readSession(fetchCookieStore(tab.request('/account'))))?.user?.name).toBe('Ada');
+
+    // A route that refreshes and builds its own response.
+    request = tab.request('/account');
+    cookies = fetchCookieStore(request);
+    await auth.refreshSession(cookies);
+    // The same store reads the cookies it just wrote.
+    expect((await auth.getTokens(cookies))?.accessToken).toBe('access-2');
+    tab.receive(new Response(null, { headers: cookies.headers() }));
+    expect((await auth.getTokens(fetchCookieStore(tab.request('/account'))))?.accessToken).toBe('access-2');
+
+    request = tab.request('/api/auth/logout', { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' } });
+    cookies = fetchCookieStore(request);
+    const out = tab.receive(cookies.apply(await auth.handleOidcLogout(request, cookies)));
+    expect(out.headers.get('location')).toBe('https://idp.test/logout');
+    expect(tab.jar.size).toBe(0);
+  });
+
+  it('keeps a session too big for one cookie in chunks, and deletes them all at logout', async () => {
+    const { auth } = setup();
+    const tab = browser();
+    let request = tab.request('/');
+    let cookies = fetchCookieStore(request);
+    await auth.createSession(cookies, tokens(1, { access_token: 'x'.repeat(5000) }));
+    tab.receive(new Response(null, { headers: cookies.headers() }));
+    expect([...tab.jar.keys()]).toEqual(['__Host-session', '__Host-session.1']);
+    expect((await auth.getTokens(fetchCookieStore(tab.request('/'))))?.accessToken).toHaveLength(5000);
+
+    request = tab.request('/');
+    cookies = fetchCookieStore(request);
+    await auth.clearSession(cookies);
+    tab.receive(new Response(null, { headers: cookies.headers() }));
+    expect(tab.jar.size).toBe(0);
   });
 });

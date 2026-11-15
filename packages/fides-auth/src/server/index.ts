@@ -2,6 +2,7 @@
 // cookie and session store contracts and the errors it can throw.
 
 export type { CookieStore } from './cookie-store.js';
+export { fetchCookieStore, type FetchCookieStore } from './fetch-cookie-store.js';
 export { CookieTooLargeError } from '../shared/cookies.js';
 
 export {
