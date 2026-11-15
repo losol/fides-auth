@@ -41,6 +41,18 @@ export interface CreateRecordOptions {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Checks a session lifetime before a login depends on it: one that isn't a
+ * number would only show as a failed login, when `expiresAt` can't be written.
+ *
+ * @throws TypeError unless `days` is undefined or a finite number above 0.
+ */
+export function checkSessionDuration(days: number | undefined): void {
+  if (days !== undefined && !(Number.isFinite(days) && days > 0)) {
+    throw new TypeError(`sessionDurationDays must be a finite number above 0, got ${days}`);
+  }
+}
+
 /** The access token's lifetime as two timestamps, or neither when the provider gave none. */
 function lifetimeOf(
   tokens: TokenResponse,

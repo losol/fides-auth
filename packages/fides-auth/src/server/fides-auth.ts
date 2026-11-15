@@ -24,7 +24,7 @@ import type {
 import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { redirectUriOf, type OidcClientConfig } from '../protocol/config.js';
 import { getOAuthErrorLogContext } from '../protocol/logging.js';
-import type { MapRecordSession, SessionRecord } from '../session/record.js';
+import { checkSessionDuration, type MapRecordSession, type SessionRecord } from '../session/record.js';
 import { authorizedFetch as fetchWithTokens, type AuthorizedFetchOptions } from './authorized-fetch.js';
 import type { CookieStore } from './cookie-store.js';
 import { isSameOriginRequest } from './csrf.js';
@@ -67,7 +67,9 @@ export interface FidesAuthConfig {
    */
   storeFields?: (session: Session) => StoreFields;
   /**
-   * How long a session lasts from login. Refreshes don't extend it.
+   * How long a session lasts from login, in days. Refreshes don't extend it.
+   * A fraction is fine: `1 / 3` is eight hours. `createFidesAuth` throws a
+   * TypeError unless it is a finite number above 0.
    * @default 30
    */
   sessionDurationDays?: number;
@@ -289,6 +291,7 @@ const forbidden = () => new Response('Forbidden', { status: 403 });
  */
 export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
   const { oauthConfig, secret, sessionStore, rateLimit } = config;
+  checkSessionDuration(config.sessionDurationDays);
   if (oauthConfig.clientAuth === 'none') {
     throw new TypeError(
       "createFidesAuth needs a confidential client: a backend-for-frontend can't use clientAuth 'none'",
