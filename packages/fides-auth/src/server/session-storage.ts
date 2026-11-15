@@ -115,8 +115,10 @@ export interface SessionStorage {
    */
   readonly exclusive?: boolean;
   /**
-   * Deletes the record and leaves the cookie, which then finds no session.
-   * For where cookies can't be written. Only store storage.
+   * Deletes the record, and the cookie where cookies can be written. Where
+   * they can only be read, the cookie stays and finds no session. For a
+   * session that ends while it is refreshed, which may be in such a place.
+   * Only store storage.
    */
   discard?(cookies: CookieStore): Promise<void>;
   /** The sessions that match. Only store storage, and only over a store that can search. */
@@ -298,6 +300,12 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
     async discard(cookies) {
       const current = await locate(cookies);
       if (current && current !== 'invalid') await store.delete(current.key);
+      try {
+        await deletePresent(cookies, [name, ...otherChunks], cookieOptions(secure, 0));
+      } catch {
+        // Cookies can't be written here, in a Next Server Component say. The
+        // record is gone, so the handle the browser keeps finds nothing.
+      }
     },
   };
 

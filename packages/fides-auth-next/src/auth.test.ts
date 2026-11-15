@@ -488,6 +488,22 @@ describe('refreshInProxy', () => {
     expect(events.at(-1)).toMatchObject({ event: 'session.refresh_failed', cause: 'invalid_grant' });
   });
 
+  it('deletes the cookie of a stored session that the refresh ends, for the browser and for the page', async () => {
+    const { auth, events } = setup({ sessionStore: createMemorySessionStore() });
+    provider.expiresIn = 30;
+    await login(auth);
+    later(20);
+    provider.rejectNextRefresh();
+
+    const response = await auth.refreshInProxy(proxied());
+    expect(events.at(-1)).toMatchObject({ event: 'session.cleared', trigger: 'rejected' });
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).toMatch(/^__Host-session=;/);
+    expect(setCookie).toMatch(/Max-Age=0/i);
+    // The page the request goes on to renders without a session cookie.
+    expect(forwardedCookies(response) ?? '').not.toContain('__Host-session');
+  });
+
   it('does nothing for a session without a refresh token', async () => {
     const { auth } = setup();
     await auth.createSession({ access_token: 'a', token_type: 'bearer', expires_in: 5, id_token: idToken() });

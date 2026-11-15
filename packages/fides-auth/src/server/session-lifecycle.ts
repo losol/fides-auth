@@ -354,8 +354,9 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       if (cause === 'invalid_grant' && storage.exclusive && storage.discard) {
         // Under the store's lock no other instance refreshed in between, so
         // the refresh token the store holds is dead and the session with it.
-        // Left in place it would read as a session until `expiresAt`. Only the
-        // record goes: this may run where cookies can't be written.
+        // Left in place it would read as a session until `expiresAt`. The
+        // cookie goes too where it can be written, so the browser stops
+        // sending a handle that finds nothing.
         await storage.discard(cookies);
         emit({ event: SESSION_EVENT.CLEARED, correlationId, trigger: 'rejected' });
       }
