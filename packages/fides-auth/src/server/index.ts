@@ -12,6 +12,7 @@ export {
   type FidesAuthorizedFetchOptions,
   type FidesReadResult,
   type FidesRefreshResult,
+  type FidesSessionWithTokens,
   type MapSession,
   type RefreshSessionOptions,
 } from './fides-auth.js';

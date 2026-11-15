@@ -685,6 +685,39 @@ describe('session members', () => {
     expect(set.mock.calls[0]?.[2]).toEqual({ continuation: false });
   });
 
+  describe('readSessionWithTokens', () => {
+    it('gives the session and its tokens from one read of the store', async () => {
+      const store = createMemorySessionStore();
+      const { auth, cookies } = setup({ sessionStore: store });
+      await login(auth, cookies);
+      const get = vi.spyOn(store, 'get');
+
+      const result = await auth.readSessionWithTokens(cookies);
+      expect(result.session?.user?.name).toBe('Ada');
+      expect(result.tokens).toMatchObject({ accessToken: 'access-1', refreshToken: 'refresh-1' });
+      expect(result.reason).toBeUndefined();
+      expect(get).toHaveBeenCalledTimes(1);
+      // The session it hands back carries no tokens, as elsewhere.
+      expect(JSON.stringify(result.session)).not.toContain('access-1');
+    });
+
+    it('says why when there is no session', async () => {
+      const { auth, cookies } = setup();
+      expect(await auth.readSessionWithTokens(cookies)).toEqual({
+        session: null,
+        tokens: null,
+        reason: 'no_session_cookie',
+      });
+    });
+
+    it('gives the tokens a refresh saved', async () => {
+      const { auth, cookies } = setup();
+      await login(auth, cookies);
+      await auth.refreshSession(cookies);
+      expect((await auth.readSessionWithTokens(cookies)).tokens?.accessToken).toBe('access-2');
+    });
+  });
+
   it('keeps the session in a store when given one', async () => {
     const store = createMemorySessionStore();
     const { auth, cookies, jar } = setup({ sessionStore: store });

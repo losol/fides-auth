@@ -47,7 +47,7 @@ export const auth = createFidesAuth({
 | `refreshSessionInStore`, `tryRefreshSessionInStore`, `refreshSession(session, config)` | `refreshSession(cookies, { ifExpiresWithin? })` |
 | `persistSession(cookies, session, secret)` | `createSession(cookies, tokenResponse)` |
 | `clearSession(cookies, options)` | `clearSession(cookies, options)` |
-| `readIdToken(cookies, secret)`, `session.tokens` | `getTokens(cookies)` |
+| `readIdToken(cookies, secret)`, `session.tokens` | `getTokens(cookies)`, or `readSessionWithTokens(cookies)` for the session and its tokens in one read |
 | `authorizedFetch(session, url, options)` | `authorizedFetch(cookies, url, options)`, which never refreshes |
 | `serverPersistence({ store, secret })`, `cookiePersistence(secret)` | `sessionStore` in `createFidesAuth`, or nothing for cookies |
 | `buildSessionFromTokens`, `MapSession` from `/oauth` | `mapSession` and `rolesClaim` in `createFidesAuth`; `MapSession` from `/server` |
@@ -91,8 +91,8 @@ argument. Import everything from the package root.
 | `globalGETRateLimit`, `globalPOSTRateLimit`, `TokenBucket` | `rateLimit` in `createFidesAuth`. There is no default limiter |
 | the re-exports of core's `/oauth`, `/logger`, `/utils`, … | import from core's own entries |
 
-New on the instance: `handleSessionInfo`, `getTokens`, `updateSession`,
-`cookieNames` and `oidc`.
+New on the instance: `handleSessionInfo`, `getTokens`, `readSessionWithTokens`,
+`updateSession`, `cookieNames` and `oidc`.
 
 ## OIDC client
 

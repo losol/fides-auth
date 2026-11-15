@@ -108,6 +108,11 @@ export type FidesReadResult =
   | { session: Session; reason?: undefined }
   | { session: null; reason: SessionRejectedReason };
 
+/** The result of {@link FidesAuth.readSessionWithTokens}. */
+export type FidesSessionWithTokens =
+  | { session: Session; tokens: Tokens; reason?: undefined }
+  | { session: null; tokens: null; reason: SessionRejectedReason };
+
 /** Options for {@link FidesAuth.refreshSession}. */
 export interface RefreshSessionOptions {
   /**
@@ -163,6 +168,13 @@ export interface FidesAuth {
   tryReadSession(cookies: CookieStore): Promise<FidesReadResult>;
   /** The session's tokens, or null without a session. */
   getTokens(cookies: CookieStore): Promise<Tokens | null>;
+  /**
+   * The session and its tokens in one read, or why there is none. For server
+   * code that needs both, such as a loader that calls an API: `readSession`
+   * and `getTokens` each read, which with a store is a round trip each. The
+   * tokens are for the server: hand the browser `session`, never this result.
+   */
+  readSessionWithTokens(cookies: CookieStore): Promise<FidesSessionWithTokens>;
   /**
    * Refreshes the tokens, or with `ifExpiresWithin` only when the access token
    * is about to expire. Apart from the heartbeat endpoint, nothing else on the
@@ -608,6 +620,12 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     readSession: async (cookies) => (await tryReadSession(cookies)).session,
     tryReadSession,
     getTokens: async (cookies) => (await settings().lifecycle.read(cookies)).record?.tokens ?? null,
+    async readSessionWithTokens(cookies) {
+      const read = await settings().lifecycle.read(cookies);
+      return read.record
+        ? { session: read.record.session, tokens: read.record.tokens }
+        : { session: null, tokens: null, reason: read.reason };
+    },
     refreshSession,
     createSession: async (cookies, tokens) => (await settings().lifecycle.create(cookies, tokens)).session,
     updateSession: async (cookies, update) => (await settings().lifecycle.update(cookies, update))?.session ?? null,
