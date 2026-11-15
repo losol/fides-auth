@@ -279,7 +279,9 @@ export interface FidesAuth<TData = Record<string, unknown>> {
    * return path, with `?login=success` unless `loginSuccessParam` is false.
    * A login that fails is answered with what `onLoginError` returns, or else
    * redirects to `defaultRedirectPath` with `?login=error&error=<code>`, a
-   * {@link LoginErrorCode}. It never answers with text of its own.
+   * {@link LoginErrorCode}. It never answers with text of its own. Opened again
+   * by a browser that is already logged in (the back button, a reload), it
+   * redirects to `defaultRedirectPath` instead of failing.
    */
   handleOidcCallback(request: Request, cookies: CookieStore): Promise<Response>;
   /**
@@ -665,6 +667,22 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       const failed = (code: LoginErrorCode, cause?: unknown): Promise<Response> =>
         loginFailed(request, { code, stage: 'callback', cause }, log.callback);
 
+      // A callback opened again by a logged-in browser did not fail: the session is fine.
+      const expired = async (): Promise<Response> => {
+        let record: SessionRecord | null = null;
+        try {
+          record = (await lifecycle.read(cookies)).record;
+        } catch {
+          // A store that is down: no session to go by.
+        }
+        if (!record) return failed('login_expired');
+        log.callback.info(
+          { correlationId: record.session.correlationId },
+          'Callback without a live login, but the session is fine; redirecting',
+        );
+        return redirect(returnUrl(undefined));
+      };
+
       try {
         // The public callback URL. Behind a TLS-terminating proxy the request
         // carries the internal origin, but the path must match the authorize call.
@@ -676,7 +694,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         if (!transaction) {
           // The code is fixed: without a live transaction nothing in the query is trusted.
           log.callback.warn({ error: idpError }, 'Missing login transaction');
-          return await failed('login_expired');
+          return await expired();
         }
         validateCallback(currentUrl.searchParams, transaction);
 
@@ -705,7 +723,8 @@ export function createFidesAuth<TData = Record<string, unknown>>(
             return await failed(IDP_ERROR_CODE.test(code) ? code : 'idp_error', error);
           }
           log.callback.warn({ reason: error.reason, error: idpError }, 'Rejected OIDC callback');
-          return await failed(error.reason === 'transaction_expired' ? 'login_expired' : 'invalid_callback', error);
+          if (error.reason === 'transaction_expired') return await expired();
+          return await failed('invalid_callback', error);
         }
         if (error instanceof CookieTooLargeError) {
           // The session doesn't fit in three cookies. A sessionStore is the fix.

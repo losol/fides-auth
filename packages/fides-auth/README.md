@@ -389,7 +389,7 @@ in its own words:
 
 | Code | |
 |---|---|
-| `login_expired` | The callback found no login to finish: it took more than ten minutes, was finished already, or its cookie never arrived. |
+| `login_expired` | The callback found no login to finish: it took more than ten minutes, was finished already, or its cookie never arrived. Only for a browser without a session: a callback opened again by a logged-in browser (the back button, a reload) redirects to `defaultRedirectPath` instead. |
 | `invalid_callback` | The callback didn't match the login it belongs to. |
 | `session_too_large` | The session doesn't fit in the cookies. A `sessionStore` is the fix. |
 | `login_failed` | Anything else at the callback, such as a code the provider won't exchange. |
