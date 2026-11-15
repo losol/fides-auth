@@ -636,6 +636,54 @@ describe('session members', () => {
     expect(await auth.readSession(cookies)).not.toBeNull();
   });
 
+  describe('endUserSessions', () => {
+    it('ends a user\'s sessions in every browser, and revokes their refresh tokens', async () => {
+      const store = createMemorySessionStore();
+      const { auth, cookies, events } = setup({ sessionStore: store });
+      oidc.metadata.mockResolvedValue({ issuer: 'https://idp.test' });
+      const phone = cookieJar();
+      await login(auth, cookies);
+      await login(auth, phone.cookies);
+      await auth.refreshSession(phone.cookies);
+
+      expect(await auth.endUserSessions({ sub: 'user-1' })).toBe(2);
+
+      expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+      expect(await auth.tryReadSession(phone.cookies)).toEqual({ session: null, reason: 'session_not_found' });
+      expect(oidc.revoke.mock.calls.map(([token]) => token).sort()).toEqual(['refresh-1', 'refresh-2']);
+      expect(events.filter((event) => event.event === 'session.cleared')).toHaveLength(2);
+    });
+
+    it('ends nothing for another user, and takes the issuer as an option', async () => {
+      const { auth, cookies } = setup({ sessionStore: createMemorySessionStore() });
+      await login(auth, cookies);
+
+      expect(await auth.endUserSessions({ sub: 'user-2', iss: 'https://idp.test' })).toBe(0);
+      expect(await auth.endUserSessions({ sub: 'user-1', iss: 'https://other.test' })).toBe(0);
+      expect(await auth.readSession(cookies)).not.toBeNull();
+      expect(oidc.metadata).not.toHaveBeenCalled();
+      expect(oidc.revoke).not.toHaveBeenCalled();
+    });
+
+    it('throws with cookie sessions, rather than end nobody\'s', async () => {
+      const { auth, cookies } = setup();
+      await login(auth, cookies);
+      await expect(auth.endUserSessions({ sub: 'user-1', iss: 'https://idp.test' })).rejects.toThrow(TypeError);
+    });
+  });
+
+  it('keeps the app\'s storeFields next to the stored session', async () => {
+    const store = createMemorySessionStore();
+    const set = vi.spyOn(store, 'set');
+    const { auth, cookies } = setup({
+      sessionStore: store,
+      storeFields: (session) => ({ userId: session.user?.sub ?? null }),
+    });
+    await login(auth, cookies);
+    expect(set.mock.calls[0]?.[1].fields).toEqual({ userId: 'user-1' });
+    expect(set.mock.calls[0]?.[2]).toEqual({ continuation: false });
+  });
+
   it('keeps the session in a store when given one', async () => {
     const store = createMemorySessionStore();
     const { auth, cookies, jar } = setup({ sessionStore: store });

@@ -39,6 +39,7 @@ import {
 import type { CookieStore } from './cookie-store.js';
 import { assertSessionSecret, type SessionSecret } from './session-secret.js';
 import type { LookupFields, SaveResult, SessionStorage } from './session-storage.js';
+import type { SessionMatch, StoreFields } from './session-store.js';
 
 export type ReadRecordResult =
   | { record: SessionRecord; reason?: undefined }
@@ -63,6 +64,8 @@ export interface SessionLifecycleOptions {
   /** @default 'roles' */
   rolesClaim?: string;
   mapSession?: MapRecordSession;
+  /** Plain fields to keep next to a stored session. Store storage only. */
+  storeFields?(session: Session): StoreFields;
   /** Runs the refresh token grant, e.g. `oidc.refresh`. */
   refreshTokens(refreshToken: string): Promise<TokenResponse>;
   logger: FidesLogger;
@@ -93,6 +96,18 @@ export interface SessionLifecycle {
     cookies: CookieStore,
     options?: { trigger?: SessionClearedTrigger },
   ): Promise<SessionRecord | undefined>;
+  /**
+   * Ends every stored session of one IdP user or IdP session, without their
+   * cookies. Like {@link end}, it waits for a refresh still running in this
+   * process and deletes under the store's lock.
+   *
+   * @returns The records ended, with the tokens they held last, so they can be revoked.
+   * @throws TypeError without `sub` or `sid`, or when the storage can't search.
+   */
+  endMatching(
+    match: { iss: string; sub?: string; sid?: string },
+    options?: { trigger?: SessionClearedTrigger },
+  ): Promise<SessionRecord[]>;
 }
 
 const LOOKUP_KEY_INFO = 'fides-auth session lookup v1';
@@ -151,16 +166,20 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     }
   }
 
+  /** The keyed hash a store keeps in place of `sub` or `sid`. */
+  async function lookupHash(value: string): Promise<string> {
+    lookupKeyPromise ??= lookupKey(secret);
+    return hmacHex(await lookupKeyPromise, value);
+  }
+
   /** The store's lookup fields. Cookie storage has no use for them. */
   async function lookupFields(record: SessionRecord): Promise<LookupFields | undefined> {
     const idp = record.session.idp;
     if (storage.mode !== 'server' || !idp) return undefined;
-    lookupKeyPromise ??= lookupKey(secret);
-    const key = await lookupKeyPromise;
     return {
       iss: idp.iss,
-      subHash: await hmacHex(key, idp.sub),
-      idpSidHash: idp.sid ? await hmacHex(key, idp.sid) : undefined,
+      subHash: await lookupHash(idp.sub),
+      idpSidHash: idp.sid ? await lookupHash(idp.sid) : undefined,
     };
   }
 
@@ -174,6 +193,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       expiresAt: record.session.expiresAt,
       correlationId: record.session.correlationId,
       lookup: await lookupFields(record),
+      fields: storage.mode === 'server' ? options.storeFields?.(record.session) : undefined,
       continuation,
     });
   }
@@ -366,6 +386,49 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
           correlationId: current?.session.correlationId,
           trigger,
         });
+      }
+      return ended;
+    },
+
+    async endMatching({ iss, sub, sid }, { trigger } = {}) {
+      assertSessionSecret(secret);
+      if (!storage.findMatching) {
+        throw new TypeError('Ending sessions without their cookies needs a sessionStore with findMatching');
+      }
+      if (!sub && !sid) throw new TypeError('Ending sessions needs a sub or a sid to match');
+
+      // Only the keys to compare, so an adapter can hand the match to its query as it is.
+      const match: SessionMatch = { iss };
+      if (sub) match.subHash = await lookupHash(sub);
+      if (sid) match.idpSidHash = await lookupHash(sid);
+      const found = await storage.findMatching(match);
+
+      const ended: SessionRecord[] = [];
+      for (const entry of found) {
+        // The plain fields are the store's word. Check them against the sealed
+        // record, so a search that matches too much can't end someone else's session.
+        const idp = (await openRecord(entry.sealed, secret))?.session.idp;
+        if (idp && (idp.iss !== iss || (sub && idp.sub !== sub) || (sid && idp.sid !== sid))) {
+          logger.warn(
+            { correlationId: entry.correlationId },
+            'findMatching returned a session that does not match; left alone',
+          );
+          continue;
+        }
+
+        // As in `end`: the tokens a running refresh brings back are the ones ended.
+        const running = entry.correlationId ? inflight.get(entry.correlationId) : undefined;
+        if (running) await running.catch(() => undefined);
+        const sealed = await entry.remove();
+        const record = sealed ? await openRecord(sealed, secret) : null;
+        if (record) ended.push(record);
+        if (trigger && sealed) {
+          emit({
+            event: SESSION_EVENT.CLEARED,
+            correlationId: record?.session.correlationId ?? entry.correlationId,
+            trigger,
+          });
+        }
       }
       return ended;
     },

@@ -419,13 +419,169 @@ describe('the session lifecycle, store storage only', () => {
     refreshTokens.mockImplementationOnce(async () => {
       const stored = await store.get(key);
       const rotated = { ...created, tokens: { ...created.tokens, accessToken: 'other', refreshToken: 'refresh-x' } };
-      await store.set(key, { ...stored!, data: await sealRecord(rotated, secret) });
+      await store.set(key, { ...stored!, data: await sealRecord(rotated, secret) }, { continuation: true });
       throw invalidGrant();
     });
 
     const result = await lifecycle.refresh(cookies);
     expect(result).toMatchObject({ ok: true, rotatedRefreshToken: true });
     expect(result.ok && result.record.tokens.accessToken).toBe('other');
+  });
+
+  it('hands the store the app\'s fields, and says whether the session is new', async () => {
+    const store = createMemorySessionStore();
+    const set = vi.spyOn(store, 'set');
+    const lifecycle = createSessionLifecycle({
+      storage: storeStorage({ store, secure: true }),
+      secret,
+      refreshTokens: async () => tokens(2),
+      storeFields: (session) => ({ name: session.user?.name ?? null, team: (session.data?.team as string) ?? null }),
+      logger: quiet,
+    });
+    const { cookies } = cookieJar();
+
+    await lifecycle.create(cookies, tokens(1));
+    await lifecycle.refresh(cookies);
+    await lifecycle.update(cookies, (session) => ({ ...session, data: { team: 'blue' } }));
+
+    expect(set.mock.calls.map(([, record, context]) => [record.fields, context])).toEqual([
+      [{ name: 'Ada', team: null }, { continuation: false }],
+      [{ name: 'Ada', team: null }, { continuation: true }],
+      [{ name: 'Ada', team: 'blue' }, { continuation: true }],
+    ]);
+    // One key throughout: a refresh and an update keep the handle.
+    expect(new Set(set.mock.calls.map(([key]) => key)).size).toBe(1);
+  });
+
+  it('leaves fields out without storeFields', async () => {
+    const { store, lifecycle, cookies } = setup();
+    const set = vi.spyOn(store, 'set');
+    await lifecycle.create(cookies, tokens(1));
+    expect(set.mock.calls[0]?.[1]).not.toHaveProperty('fields');
+  });
+
+  describe('endMatching', () => {
+    const forUser = (sub: string, sid: string) =>
+      tokens(1, {
+        refresh_token: `refresh-${sid}`,
+        id_token: new UnsecuredJWT({ iss: 'https://idp.test', sub, sid }).encode(),
+      });
+
+    /** Ada signed in on a laptop and a phone, and Bob once. */
+    async function threeSessions(adapt: (store: SessionStore) => SessionStore = (store) => store) {
+      const base = setup();
+      const events: SessionEvent[] = [];
+      const lifecycle = createSessionLifecycle({
+        storage: storeStorage({ store: adapt(base.store), secure: true }),
+        secret,
+        refreshTokens: base.refreshTokens,
+        logger: quiet,
+        onSessionEvent: (event) => events.push(event),
+      });
+      const laptop = cookieJar();
+      const phone = cookieJar();
+      const bob = cookieJar();
+      await lifecycle.create(laptop.cookies, forUser('ada', 'sid-laptop'));
+      await lifecycle.create(phone.cookies, forUser('ada', 'sid-phone'));
+      await lifecycle.create(bob.cookies, forUser('bob', 'sid-bob'));
+      return { ...base, lifecycle, events, laptop, phone, bob };
+    }
+
+    it('ends every session of one user, and hands back their tokens', async () => {
+      const { lifecycle, events, laptop, phone, bob } = await threeSessions();
+
+      const ended = await lifecycle.endMatching({ iss: 'https://idp.test', sub: 'ada' }, { trigger: 'logout' });
+
+      expect(ended.map((record) => record.tokens.refreshToken).sort()).toEqual([
+        'refresh-sid-laptop',
+        'refresh-sid-phone',
+      ]);
+      expect(await lifecycle.read(laptop.cookies)).toEqual({ record: null, reason: 'session_not_found' });
+      expect(await lifecycle.read(phone.cookies)).toEqual({ record: null, reason: 'session_not_found' });
+      expect((await lifecycle.read(bob.cookies)).record?.session.idp?.sub).toBe('bob');
+      expect(events.filter((event) => event.event === 'session.cleared')).toHaveLength(2);
+    });
+
+    it('ends one IdP session by its sid, and asks the store only for the keys to compare', async () => {
+      const { store, lifecycle, laptop, phone } = await threeSessions();
+      const find = vi.spyOn(store, 'findMatching');
+      const ended = await lifecycle.endMatching({ iss: 'https://idp.test', sid: 'sid-phone' });
+      expect(ended).toHaveLength(1);
+      expect(Object.keys(find.mock.calls[0]?.[0] ?? {})).toEqual(['iss', 'idpSidHash']);
+      expect((await lifecycle.read(laptop.cookies)).record).not.toBeNull();
+      expect((await lifecycle.read(phone.cookies)).record).toBeNull();
+    });
+
+    it('finds nothing for another issuer or an unknown user', async () => {
+      const { lifecycle } = await threeSessions();
+      expect(await lifecycle.endMatching({ iss: 'https://other.test', sub: 'ada' })).toEqual([]);
+      expect(await lifecycle.endMatching({ iss: 'https://idp.test', sub: 'eve' })).toEqual([]);
+    });
+
+    it('leaves alone a session the store returns that does not match', async () => {
+      const { store, refreshTokens, bob } = await threeSessions();
+      // An adapter whose search ignores the hashes and returns the issuer's every session.
+      const sloppy: SessionStore = {
+        ...store,
+        findMatching: ({ iss }) => store.findMatching?.({ iss }) ?? [],
+      };
+      const lifecycle = createSessionLifecycle({
+        storage: storeStorage({ store: sloppy, secure: true }),
+        secret,
+        refreshTokens,
+        logger: quiet,
+      });
+
+      const ended = await lifecycle.endMatching({ iss: 'https://idp.test', sub: 'ada' });
+      expect(ended).toHaveLength(2);
+      expect((await lifecycle.read(bob.cookies)).record?.session.idp?.sub).toBe('bob');
+    });
+
+    // With a lock the delete queues behind the refresh; without one, the wait in this process does it.
+    it.each([
+      ['with', (store: SessionStore) => store],
+      ['without', (store: SessionStore): SessionStore => ({ ...store, withLock: undefined })],
+    ])('waits for a refresh still running, and ends the tokens it brought back, %s a lock', async (_, adapt) => {
+      const { lifecycle, refreshTokens, laptop } = await threeSessions(adapt);
+      const finish = holdRefresh(refreshTokens);
+
+      const refreshing = lifecycle.refresh(laptop.cookies);
+      await vi.waitFor(() => expect(refreshTokens).toHaveBeenCalled());
+      const ending = lifecycle.endMatching({ iss: 'https://idp.test', sub: 'ada' });
+      // Long enough for the search to find the refresh, which it then waits for.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      finish({ ...forUser('ada', 'sid-laptop'), access_token: 'access-2', refresh_token: 'refresh-rotated' });
+
+      expect((await refreshing).ok).toBe(true);
+      expect((await ending).map((record) => record.tokens.refreshToken).sort()).toEqual([
+        'refresh-rotated',
+        'refresh-sid-phone',
+      ]);
+      expect((await lifecycle.read(laptop.cookies)).record).toBeNull();
+    });
+
+    it('needs a store that can search, and a sub or a sid', async () => {
+      const { store, lifecycle, refreshTokens } = setup();
+      await expect(lifecycle.endMatching({ iss: 'https://idp.test' })).rejects.toThrow(TypeError);
+
+      const cannotSearch = createSessionLifecycle({
+        storage: storeStorage({ store: { ...store, findMatching: undefined }, secure: true }),
+        secret,
+        refreshTokens,
+        logger: quiet,
+      });
+      await expect(cannotSearch.endMatching({ iss: 'https://idp.test', sub: 'ada' })).rejects.toThrow(
+        /needs a sessionStore with findMatching/,
+      );
+
+      const inCookies = createSessionLifecycle({
+        storage: cookieStorage({ secure: true }),
+        secret,
+        refreshTokens,
+        logger: quiet,
+      });
+      await expect(inCookies.endMatching({ iss: 'https://idp.test', sub: 'ada' })).rejects.toThrow(TypeError);
+    });
   });
 
   it('fails a refresh whose lock it can\'t take as a store failure, and keeps the session', async () => {

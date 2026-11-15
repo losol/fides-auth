@@ -77,6 +77,17 @@ export interface FidesAuth {
    */
   clearSession(options?: { trigger?: SessionClearedTrigger }): Promise<void>;
   /**
+   * Ends every session of one user, wherever they are signed in, and revokes
+   * their refresh tokens. `sub` is the provider's, from the ID token. Needs a
+   * `sessionStore` with `findMatching`.
+   *
+   * @returns How many sessions it ended.
+   */
+  endUserSessions(
+    user: { sub: string; iss?: string },
+    options?: { trigger?: SessionClearedTrigger },
+  ): Promise<number>;
+  /**
    * Calls an API with the session's access token. It never refreshes, so it is
    * safe in a Server Component; a 401 is an `http_error`.
    */
@@ -186,6 +197,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     createSession: async (tokens) => core.createSession(await nextCookieStore(), tokens),
     updateSession: async (update) => core.updateSession(await nextCookieStore(), update),
     clearSession: async (options) => core.clearSession(await nextCookieStore(), options),
+    endUserSessions: (user, options) => core.endUserSessions(user, options),
     authorizedFetch: async (url, options) =>
       core.authorizedFetch(await nextCookieStore(), url, options),
 

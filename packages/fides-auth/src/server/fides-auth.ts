@@ -41,7 +41,7 @@ import { validateReturnUrl } from './return-to.js';
 import { createSessionLifecycle } from './session-lifecycle.js';
 import { assertSessionSecret, type SessionSecret } from './session-secret.js';
 import { cookieStorage, sessionCookieName, storeStorage } from './session-storage.js';
-import type { SessionStore } from './session-store.js';
+import type { SessionStore, StoreFields } from './session-store.js';
 
 /**
  * Changes the session built at login, e.g. to add `data` or look the user up.
@@ -59,6 +59,13 @@ export interface FidesAuthConfig {
   secret: SessionSecret;
   /** Keeps sessions in a store, with only a handle in the cookie. Without it, sessions live in the cookies. */
   sessionStore?: SessionStore;
+  /**
+   * Plain fields to keep next to each stored session, as `fields` on the
+   * record the store gets: your own user id, say, to list or count who is
+   * signed in. They are stored in the clear, so return only what the store may
+   * show. Runs on every save. Ignored without a `sessionStore`.
+   */
+  storeFields?: (session: Session) => StoreFields;
   /**
    * How long a session lasts from login. Refreshes don't extend it.
    * @default 30
@@ -177,6 +184,20 @@ export interface FidesAuth {
    */
   clearSession(cookies: CookieStore, options?: { trigger?: SessionClearedTrigger }): Promise<void>;
   /**
+   * Ends every session of one user, wherever they are signed in, and revokes
+   * their refresh tokens: for "sign out everywhere", or when an account is
+   * closed. `sub` is the provider's, from the ID token (`session.idp.sub`),
+   * and `iss` defaults to the provider's issuer. The browsers keep their
+   * cookies, which then find no session.
+   *
+   * @returns How many sessions it ended.
+   * @throws TypeError without a `sessionStore` that has `findMatching`.
+   */
+  endUserSessions(
+    user: { sub: string; iss?: string },
+    options?: { trigger?: SessionClearedTrigger },
+  ): Promise<number>;
+  /**
    * Calls an API with the session's access token. It never refreshes, so a 401
    * is an `http_error`; call `refreshSession({ ifExpiresWithin })` first where
    * the new tokens can be saved.
@@ -277,6 +298,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
         sessionDurationDays: config.sessionDurationDays,
         rolesClaim: config.rolesClaim,
         mapSession: config.mapSession,
+        storeFields: config.storeFields,
         refreshTokens: (refreshToken) => oidc.refresh(refreshToken),
         logger: loggers.create({ namespace: 'fides-auth:server:session' }),
         onSessionEvent: config.onSessionEvent,
@@ -586,6 +608,18 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     updateSession: async (cookies, update) => (await settings().lifecycle.update(cookies, update))?.session ?? null,
     async clearSession(cookies, { trigger = 'logout' } = {}) {
       await revokeRefreshToken(await settings().lifecycle.end(cookies, { trigger }), log.logout);
+    },
+
+    async endUserSessions({ sub, iss }, { trigger = 'logout' } = {}) {
+      // The ID token's `iss`, which a session's lookup fields are stored under.
+      const issuer = iss ?? (await oidc.metadata()).issuer;
+      if (!issuer) {
+        throw new TypeError("endUserSessions needs iss: the provider's metadata has no issuer");
+      }
+      const ended = await settings().lifecycle.endMatching({ iss: issuer, sub }, { trigger });
+      for (const record of ended) await revokeRefreshToken(record, log.logout);
+      log.logout.info({ sessions: ended.length }, "Ended a user's sessions");
+      return ended.length;
     },
 
     async authorizedFetch(cookies, url, options) {

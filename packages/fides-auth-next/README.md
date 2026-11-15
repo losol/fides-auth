@@ -41,6 +41,7 @@ of an app is a confidential client.
 | Option | Default | |
 |---|---|---|
 | `sessionStore` | none | Keeps sessions in a store, with only a handle in the cookie. See below. |
+| `storeFields` | none | `(session) => fields`. Plain fields to keep next to each stored session, e.g. your own user id. |
 | `sessionDurationDays` | 30 | How long a session lasts from login. Refreshes don't extend it. |
 | `applicationUrl` | the redirect URI's origin | The app's public origin, for the same-origin check and redirects. |
 | `mapSession` | none | Changes the session built at login, e.g. to add `data`. |
@@ -202,6 +203,10 @@ const sessionStore: SessionStore = {
 
 export const auth = createFidesAuth({ oauthConfig, secret, sessionStore });
 ```
+
+With a store that implements `findMatching`, `auth.endUserSessions({ sub })`
+ends every session of one user, wherever they are signed in, and revokes their
+refresh tokens.
 
 Use a store that every instance shares, such as a database, and add `withLock`
 when you run more than one instance. `createMemorySessionStore()` from
