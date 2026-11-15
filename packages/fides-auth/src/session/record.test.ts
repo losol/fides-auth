@@ -197,6 +197,20 @@ describe('refreshRecord', () => {
     expect(refreshed.session.data).toEqual({ theme: 'dark' });
   });
 
+  it('takes the scopes a refresh grants, so one that was taken away goes', () => {
+    const refreshed = refreshRecord(record, { access_token: 'access-2', token_type: 'bearer', scope: 'openid' });
+    expect(record.session.scopes).toEqual(['openid', 'profile']);
+    expect(refreshed.session.scopes).toEqual(['openid']);
+    expect(refreshed.session.user).toEqual(record.session.user);
+  });
+
+  it('keeps the scopes when the refresh names none', () => {
+    const silent = refreshRecord(record, { access_token: 'access-2', token_type: 'bearer' });
+    expect(silent.session.scopes).toEqual(['openid', 'profile']);
+    const empty = refreshRecord(record, { access_token: 'access-2', token_type: 'bearer', scope: '' });
+    expect(empty.session.scopes).toEqual(['openid', 'profile']);
+  });
+
   it('leaves a session without a user as it is', () => {
     const anonymous = createRecord(tokens({ id_token: undefined }), { sessionDurationSeconds: 1 * 86_400, now });
     expect(refreshRecord(anonymous, withIdToken({ roles: ['viewer'] })).session).toBe(anonymous.session);

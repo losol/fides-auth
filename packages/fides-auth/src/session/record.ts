@@ -180,6 +180,9 @@ export function isSameSubject(record: SessionRecord, tokens: TokenResponse): boo
  * A new ID token updates the user as at login: the roles follow `rolesClaim`,
  * the name and email change when the token carries them, and `sub` and the
  * fields `mapSession` added stay. Check {@link isSameSubject} first.
+ *
+ * A response that names its `scope` updates the session's scopes too: a
+ * provider must name it when it grants something else than before.
  */
 export function refreshRecord(
   record: SessionRecord,
@@ -189,9 +192,13 @@ export function refreshRecord(
   const { user, idp } = record.session;
   const claims = claimsOf(tokens);
   const fresh = claims && user && idp ? userOf(claims, rolesClaim) : undefined;
+  const scopes = scopesOf(tokens);
+  let session = record.session;
+  if (fresh && user) session = { ...session, user: { ...user, ...fresh, sub: user.sub } };
+  if (scopes) session = { ...session, scopes };
   return {
     v: 1,
-    session: fresh && user ? { ...record.session, user: { ...user, ...fresh, sub: user.sub } } : record.session,
+    session,
     tokens: {
       ...record.tokens,
       accessToken: tokens.access_token,
