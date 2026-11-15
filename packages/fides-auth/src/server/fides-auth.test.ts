@@ -684,6 +684,35 @@ describe('session members', () => {
     expect(set.mock.calls[0]?.[2]).toEqual({ continuation: false });
   });
 
+  describe('a refresh the provider refuses for good', () => {
+    it('ends a stored session, so later reads find none', async () => {
+      const { auth, cookies } = setup({ sessionStore: createMemorySessionStore() });
+      await login(auth, cookies);
+      oidc.refresh.mockRejectedValueOnce(oauthError('invalid_grant'));
+
+      const heartbeat = await auth.handleHeartbeat(post('/api/auth/heartbeat'), cookies);
+      expect(heartbeat.status).toBe(401);
+      expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+    });
+
+    it('leaves a cookie session for the app to end', async () => {
+      const { auth, cookies, jar } = setup();
+      await login(auth, cookies);
+      oidc.refresh.mockRejectedValueOnce(oauthError('invalid_grant'));
+
+      const result = await auth.refreshSession(cookies);
+      expect(result).toMatchObject({ ok: false, cause: 'invalid_grant' });
+      expect(await auth.readSession(cookies)).not.toBeNull();
+
+      // The recipe from the README.
+      if (!result.ok && result.cause === 'invalid_grant') {
+        await auth.clearSession(cookies, { trigger: 'rejected' });
+      }
+      expect(jar.size).toBe(0);
+      expect(await auth.readSession(cookies)).toBeNull();
+    });
+  });
+
   it('keeps the session in a store when given one', async () => {
     const store = createMemorySessionStore();
     const { auth, cookies, jar } = setup({ sessionStore: store });

@@ -102,9 +102,10 @@ export interface FidesAuth {
    * Sets the new cookies on the response and on the request it forwards, so
    * the page reads the refreshed session.
    *
-   * A failed refresh leaves the session as it is. The next API call or
+   * A failed refresh leaves a cookie session as it is. The next API call or
    * heartbeat shows a session that is over; ending it here could undo a refresh
-   * that another instance completed with the same refresh token.
+   * that another instance completed with the same refresh token. A session in
+   * a store with `withLock` is ended when the provider refuses the refresh for good.
    */
   refreshInProxy(request: NextRequest, options?: RefreshInProxyOptions): Promise<NextResponse>;
 

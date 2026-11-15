@@ -7,6 +7,9 @@
 // 4. A session is read whole or not at all.
 // 5. Concurrent refreshes of one session in one process share one provider call.
 // 6. A rejected reason means the same thing in both storages.
+// 7. A refresh the provider refuses for good ends the session where that is
+//    certain: under a store's lock. Elsewhere another instance may have
+//    refreshed with the same token, so the session is left for the app to end.
 //
 // One difference can't be hidden: a store drops an expired record with its TTL,
 // after which store storage answers `session_not_found` where cookie storage
@@ -248,6 +251,14 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         accessTokenExpiresAt: current.tokens.accessTokenExpiresAt,
         error: context,
       });
+      if (cause === 'invalid_grant' && storage.exclusive && storage.discard) {
+        // Under the store's lock no other instance refreshed in between, so
+        // the refresh token the store holds is dead and the session with it.
+        // Left in place it would read as a session until `expiresAt`. Only the
+        // record goes: this may run where cookies can't be written.
+        await storage.discard(cookies);
+        emit({ event: SESSION_EVENT.CLEARED, correlationId, trigger: 'rejected' });
+      }
       return { ok: false, reason: 'refresh_failed', cause, correlationId };
     }
 

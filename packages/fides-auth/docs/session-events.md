@@ -28,6 +28,11 @@ nothing. Write queries that tolerate absence.
 `correlationId` is absent when no session was read to take it from, as for a
 request rejected with `no_session_cookie` or `unreadable_session`.
 
+`session.cleared` has `trigger: "logout"` for a logout, `clearSession` or
+`endUserSessions`, and `trigger: "rejected"` when the library ended a stored
+session because the provider refused its refresh for good. That one follows a
+`session.refresh_failed` with `cause: "invalid_grant"`.
+
 Import the names rather than typing them, so a rename is a compile error instead
 of a silently dead dashboard:
 

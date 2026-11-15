@@ -395,6 +395,20 @@ await auth.refreshSession(cookies, { ifExpiresWithin: 60 });
 The window never covers more than half the token's lifetime. A 20-second token
 is refreshed once 10 seconds have passed, not on every call.
 
+A session reads until `expiresAt`, whether or not its tokens still work. When
+the provider refuses a refresh for good, the result has `cause:
+"invalid_grant"` and the user must log in again. A session in a `sessionStore`
+that implements `withLock` is ended there and then. A cookie session, or one in
+a store without a lock, is left as it is, because another instance may just
+have refreshed it. End it yourself where that can't be the case:
+
+```typescript
+const result = await auth.refreshSession(cookies, { ifExpiresWithin: 60 });
+if (!result.ok && result.cause === "invalid_grant") {
+  await auth.clearSession(cookies, { trigger: "rejected" });
+}
+```
+
 With cookie storage a refresh writes cookies, so call it where they can be set.
 Reads and `authorizedFetch` never refresh, so they are safe anywhere. The
 heartbeat endpoint refreshes when the browser asks it to.
@@ -432,6 +446,7 @@ const auth = createFidesAuth({
 | Refresh | Writes cookies, so it runs where they can be set: a proxy, a route handler or a Server Action | Keeps the handle and writes no cookie, so it also runs in a Server Component |
 | Concurrent refreshes | Shared within one process. A request sent before the new cookies arrived holds the old refresh token | Shared across instances too, when the store implements `withLock` |
 | Logout | Clears the cookie and revokes the refresh token. A copy of the cookie still reads as a session, and its access token works until it expires | Deletes the record, so a copied cookie stops working |
+| A refresh refused for good | The session reads until `expiresAt`, unless the app ends it | Ended at once, when the store implements `withLock` |
 | Ending a user's sessions elsewhere | No | `endUserSessions`, when the store implements `findMatching` |
 | To run | Nothing | A store every instance shares, with a TTL on `expiresAt` |
 
