@@ -13,6 +13,7 @@ vi.mock('openid-client', () => ({
     this.server = server;
   }),
   refreshTokenGrant: vi.fn(),
+  allowInsecureRequests: vi.fn(),
   ClientSecretPost: vi.fn(() => () => undefined),
   ClientSecretBasic: vi.fn(() => () => undefined),
   None: vi.fn(() => () => undefined),
@@ -24,7 +25,7 @@ import * as openid from 'openid-client';
 import type { FidesLogger } from '../shared/logger.js';
 import { createOidcClient } from './client.js';
 import type { OidcClientConfig } from './config.js';
-import { checkTtl, createDiscoveryCache, type DiscoveryCache } from './discovery.js';
+import { checkTtl, createDiscoveryCache, type DiscoveryCache, isLoopback } from './discovery.js';
 
 const quietLogger: FidesLogger = { debug() {}, info() {}, warn() {}, error() {} };
 const quiet = { create: () => quietLogger };
@@ -53,8 +54,9 @@ function keyConfig(privateKey: CryptoKey | openid.PrivateKey): OidcClientConfig 
 }
 
 /** A distinct object per call, so tests can tell one discovery from another. */
-function discovered(tag: string) {
-  return { tag } as unknown as openid.Configuration;
+const noMetadata = () => ({});
+function discovered(tag: string, metadata?: Record<string, unknown>) {
+  return { tag, serverMetadata: metadata ? () => metadata : noMetadata } as unknown as openid.Configuration;
 }
 
 let cache: DiscoveryCache;
@@ -292,6 +294,62 @@ describe('createDiscoveryCache — failures', () => {
     vi.mocked(openid.discovery).mockRejectedValue(cause);
 
     await expect(cache.discover(config)).rejects.toBe(cause);
+  });
+});
+
+describe('createDiscoveryCache — http', () => {
+  const local: OidcClientConfig = { ...config, issuer: 'http://localhost:3000' };
+
+  it('refuses an http issuer, and says what to set', async () => {
+    await expect(cache.discover(local)).rejects.toThrow(
+      'The issuer http://localhost:3000 uses http, and fides-auth reaches the provider only over https. ' +
+        'For a provider on a loopback address in development or CI, set allowInsecureRequests: true.',
+    );
+    expect(openid.discovery).not.toHaveBeenCalled();
+  });
+
+  it('discovers a loopback issuer over http with allowInsecureRequests', async () => {
+    vi.mocked(openid.discovery).mockResolvedValue(
+      discovered('local', { token_endpoint: 'http://localhost:3000/token' }),
+    );
+    await cache.discover({ ...local, allowInsecureRequests: true });
+    expect(vi.mocked(openid.discovery).mock.calls[0]?.[4]).toEqual({
+      execute: [openid.allowInsecureRequests],
+    });
+  });
+
+  it('refuses an http issuer that is not loopback, even with allowInsecureRequests', async () => {
+    await expect(
+      cache.discover({ ...config, issuer: 'http://idp.internal:8080', allowInsecureRequests: true }),
+    ).rejects.toThrow(/allows http only to a loopback address/);
+    expect(openid.discovery).not.toHaveBeenCalled();
+  });
+
+  it('refuses discovered metadata that names an http endpoint', async () => {
+    vi.mocked(openid.discovery).mockResolvedValue(
+      discovered('mixed', { token_endpoint: 'http://auth.example.test/token' }),
+    );
+    await expect(cache.discover(config)).rejects.toThrow(
+      /token_endpoint http:\/\/auth\.example\.test\/token uses http/,
+    );
+  });
+
+  it('allows loopback http in serverMetadata with allowInsecureRequests', async () => {
+    const configuration = await cache.discover({
+      ...local,
+      allowInsecureRequests: true,
+      serverMetadata: { issuer: 'http://127.0.0.1:3000', token_endpoint: 'http://127.0.0.1:3000/token' },
+    });
+    expect(openid.allowInsecureRequests).toHaveBeenCalledWith(configuration);
+  });
+
+  it('tells loopback addresses from the rest', () => {
+    for (const url of ['http://localhost', 'http://app.localhost:3000', 'http://127.0.0.1', 'http://127.1.2.3', 'http://[::1]:8080']) {
+      expect(isLoopback(new URL(url)), url).toBe(true);
+    }
+    for (const url of ['http://example.com', 'http://localhost.example.com', 'http://127.0.0.1.example.com', 'http://10.0.0.1']) {
+      expect(isLoopback(new URL(url)), url).toBe(false);
+    }
   });
 });
 

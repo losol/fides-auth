@@ -112,6 +112,61 @@ function sameInputs(a: readonly unknown[], b: readonly unknown[]): boolean {
   return a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
 }
 
+/** `localhost`, a `*.localhost` name, `127.0.0.0/8` or `[::1]`. */
+export function isLoopback(url: URL): boolean {
+  const host = url.hostname;
+  return (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '[::1]' ||
+    /^127(?:\.\d{1,3}){3}$/.test(host)
+  );
+}
+
+/** The metadata URLs fides-auth or openid-client may send a request or the browser to. */
+const ENDPOINTS = [
+  'authorization_endpoint',
+  'token_endpoint',
+  'userinfo_endpoint',
+  'jwks_uri',
+  'end_session_endpoint',
+  'revocation_endpoint',
+  'introspection_endpoint',
+  'pushed_authorization_request_endpoint',
+] as const;
+
+/**
+ * Refuses an http URL, or with `allowInsecureRequests` one that isn't
+ * loopback, with an error that names it. openid-client would refuse it later,
+ * at the request, with only the code `OAUTH_HTTP_REQUEST_FORBIDDEN`.
+ */
+function checkTransport(label: string, value: unknown, allowInsecure: boolean): void {
+  if (typeof value !== 'string') return;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return; // Not a URL: openid-client reports that itself.
+  }
+  if (url.protocol !== 'http:') return;
+  if (!allowInsecure) {
+    throw new TypeError(
+      `${label} ${value} uses http, and fides-auth reaches the provider only over https. ` +
+        'For a provider on a loopback address in development or CI, set allowInsecureRequests: true.',
+    );
+  }
+  if (!isLoopback(url)) {
+    throw new TypeError(
+      `${label} ${value} uses http, and allowInsecureRequests allows http only to a loopback address ` +
+        '(localhost, *.localhost, 127.0.0.0/8 or [::1]).',
+    );
+  }
+}
+
+function checkMetadata(metadata: openid.ServerMetadata, allowInsecure: boolean): void {
+  for (const name of ENDPOINTS) checkTransport(name, metadata[name], allowInsecure);
+}
+
 /** Unset scope means `defaultScope`, which includes `openid`. */
 function requestsOpenId(scope: string | string[] | undefined): boolean {
   if (scope === undefined) return true;
@@ -123,14 +178,19 @@ function requestsOpenId(scope: string | string[] | undefined): boolean {
 async function buildConfiguration(config: OidcClientConfig): Promise<openid.Configuration> {
   const { clientSecret, clientAuthentication } = resolveClientAuth(config);
   const metadata = config.serverMetadata;
+  const allowInsecure = config.allowInsecureRequests === true;
 
   if (!metadata) {
-    return openid.discovery(
+    checkTransport('The issuer', config.issuer, allowInsecure);
+    const discovered = await openid.discovery(
       new URL(config.issuer),
       config.clientId,
       clientSecret,
       clientAuthentication,
+      ...(allowInsecure ? [{ execute: [openid.allowInsecureRequests] }] : []),
     );
+    checkMetadata(discovered.serverMetadata(), allowInsecure);
+    return discovered;
   }
 
   // Don't fall back to `config.issuer`: the ID token's `iss` must match the server's own.
@@ -140,7 +200,15 @@ async function buildConfiguration(config: OidcClientConfig): Promise<openid.Conf
     );
   }
 
-  return new openid.Configuration(metadata, config.clientId, clientSecret, clientAuthentication);
+  checkMetadata(metadata, allowInsecure);
+  const configuration = new openid.Configuration(
+    metadata,
+    config.clientId,
+    clientSecret,
+    clientAuthentication,
+  );
+  if (allowInsecure) openid.allowInsecureRequests(configuration);
+  return configuration;
 }
 
 /** A discovery cache. Each OIDC client has its own. */

@@ -153,6 +153,26 @@ const oidc = createOidcClient({
 With `openid` in the scope the metadata must include `issuer`, so the ID token's
 `iss` can be checked.
 
+#### A provider over http in development
+
+The client reaches the provider only over https. An http issuer, or an http
+endpoint in the provider's metadata, throws a `TypeError` that names it at the
+first call to the provider. For a provider on a loopback address, in
+development or CI, opt in:
+
+```typescript
+const oidc = createOidcClient({
+  issuer: "http://localhost:3000",
+  allowInsecureRequests: true,
+  // …
+});
+```
+
+That allows http to `localhost`, a `*.localhost` name, `127.0.0.0/8` and
+`[::1]`, for the issuer and every endpoint in its metadata. Any other http URL
+still throws. A provider in another container isn't loopback: publish its port
+on localhost, or put it behind https.
+
 #### Scope and extra authorization parameters
 
 `scope` takes a string or an array. Other authorization parameters (`prompt`,
