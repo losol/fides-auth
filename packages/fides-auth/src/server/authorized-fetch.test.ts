@@ -7,6 +7,8 @@ import { getEventListeners } from 'node:events';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { inspect } from 'node:util';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FidesLogger } from '../shared/logger.js';
@@ -253,6 +255,74 @@ describe('authorizedFetch — timeout', () => {
     );
 
     expect(error.reason).toBe('timeout');
+  });
+
+  it('times out a body that stalls after the garbage collector has run', async () => {
+    // What a long-running server meets sooner or later: once Node's fetch has
+    // lost its request object to the collector, the signal no longer reaches
+    // the body. Without a timeout of its own, this read hangs every time.
+    setFlagsFromString('--expose-gc');
+    const collect = runInNewContext('gc') as () => void;
+
+    const error = await failure(
+      authorizedFetch(tokens(), 'stall-body', {
+        allowedBase: base,
+        timeoutMs: 100,
+        parse: async (r) => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          collect();
+          return r.json();
+        },
+      }),
+    );
+
+    expect(error.reason).toBe('timeout');
+  });
+
+  describe('when fetch no longer passes the abort on to the body', () => {
+    // Node's fetch follows the signal through an object that can be garbage
+    // collected once the response is back, and then nothing stops a body that
+    // stalls. A response whose body ignores the signal stands in for that.
+    const deaf = () => new Response(new ReadableStream({ start() {} }), { status: 200 });
+
+    it('times the body read out all the same', async () => {
+      fetchSpy.mockResolvedValueOnce(deaf());
+      const started = Date.now();
+
+      const error = await failure(
+        authorizedFetch(tokens(), 'ok', { allowedBase: base, timeoutMs: 50, parse: (r) => r.json() }),
+      );
+
+      expect(error.reason).toBe('timeout');
+      expect(Date.now() - started).toBeLessThan(1000);
+    });
+
+    it("stops for the caller's own abort, with the caller's reason", async () => {
+      fetchSpy.mockResolvedValueOnce(deaf());
+      const controller = new AbortController();
+      const reason = new Error('navigated away');
+      setTimeout(() => controller.abort(reason), 20);
+
+      const error = await authorizedFetch(tokens(), 'ok', {
+        allowedBase: base,
+        signal: controller.signal,
+        parse: (r) => r.text(),
+      }).catch((e: unknown) => e);
+
+      expect(error).toBe(reason);
+    });
+
+    it('leaves a parse that finishes in time alone, and stops listening', async () => {
+      const controller = new AbortController();
+      const result = await authorizedFetch(tokens(), 'ok', {
+        allowedBase: base,
+        signal: controller.signal,
+        parse: (r) => r.json(),
+      });
+
+      expect(result.data).toEqual({ hello: 'world' });
+      expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+    });
   });
 
   it('defaults to 10 seconds', async () => {
