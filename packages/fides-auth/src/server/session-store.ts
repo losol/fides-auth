@@ -39,8 +39,10 @@ export interface SessionStore {
   /**
    * Optional: runs `fn` while holding a lock on `key`, so refreshes of one
    * session are serialized across instances. Without it they are serialized
-   * within the process only. Implementations should expire the lock if the
-   * holder dies.
+   * within the process only. `fn` calls `get` and `set` while the lock is held,
+   * and the lock is held across the call to the provider. Implementations
+   * should expire the lock if the holder dies. A rejection fails the refresh
+   * with `cause: 'store'`, which the heartbeat answers with 503.
    */
   withLock?<T>(key: string, fn: () => Promise<T>): Promise<T>;
 }

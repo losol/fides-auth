@@ -284,16 +284,29 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
       const run = async (): Promise<RefreshRecordResult> => {
         if (!storage.lock) return refreshNow(cookies, current, refreshToken);
-        return storage.lock(cookies, async () => {
-          // Re-read under the lock: another instance may have refreshed, or
-          // ended, this session while we waited.
-          const latest = await read(cookies);
-          if (!latest.record) return { ok: false, reason: latest.reason, correlationId };
-          if (refreshedSince(current, latest.record)) return alreadyRefreshed(current, latest.record);
-          const latestToken = latest.record.tokens.refreshToken;
-          if (!latestToken) return { ok: false, reason: 'no_refresh_token', correlationId };
-          return refreshNow(cookies, latest.record, latestToken);
-        });
+        try {
+          return await storage.lock(cookies, async () => {
+            // Re-read under the lock: another instance may have refreshed, or
+            // ended, this session while we waited.
+            const latest = await read(cookies);
+            if (!latest.record) return { ok: false, reason: latest.reason, correlationId };
+            if (refreshedSince(current, latest.record)) return alreadyRefreshed(current, latest.record);
+            const latestToken = latest.record.tokens.refreshToken;
+            if (!latestToken) return { ok: false, reason: 'no_refresh_token', correlationId };
+            return refreshNow(cookies, latest.record, latestToken);
+          });
+        } catch (error) {
+          // The store failed, or the lock couldn't be had in time. That says
+          // nothing about the session, so it is a failure to retry, not a throw.
+          emit({
+            event: SESSION_EVENT.REFRESH_FAILED,
+            correlationId,
+            cause: 'store',
+            accessTokenExpiresAt: current.tokens.accessTokenExpiresAt,
+            error: getOAuthErrorLogContext(error),
+          });
+          return { ok: false, reason: 'refresh_failed', cause: 'store', correlationId };
+        }
       };
 
       const shared = run().finally(() => inflight.delete(correlationId));

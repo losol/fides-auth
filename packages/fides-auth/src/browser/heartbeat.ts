@@ -298,8 +298,9 @@ export function createHeartbeat(config: HeartbeatConfig = {}): HeartbeatHandle {
       }
 
       if (!response.ok) {
-        // 503 means the server could not reach the provider — the session is
-        // probably still valid, so this is a retry, not a logout.
+        // 503 means the server could not reach the provider, or its session
+        // store failed — the session is probably still valid, so this is a
+        // retry, not a logout.
         emit({
           event: SESSION_EVENT.REFRESH_FAILED,
           source: 'heartbeat',

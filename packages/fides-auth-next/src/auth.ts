@@ -48,7 +48,7 @@ export interface FidesAuth {
     request: Request,
     options?: { state?: string; logoutHint?: string },
   ): Promise<Response>;
-  /** `POST`. Refreshes the session. 401 means it is over; 503 means the provider couldn't be reached. */
+  /** `POST`. Refreshes the session. 401 means it is over; 503 means the provider or the store failed. */
   handleHeartbeat(request: Request): Promise<Response>;
   /** `GET`. Whether there is a session, and whose. Never refreshes, never returns tokens. */
   handleSessionInfo(request: Request): Promise<Response>;
