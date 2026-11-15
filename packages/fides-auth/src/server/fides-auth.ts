@@ -101,9 +101,11 @@ export type FidesReadResult =
 /** Options for {@link FidesAuth.refreshSession}. */
 export interface RefreshSessionOptions {
   /**
-   * Refresh only when the access token expires within this many seconds.
-   * Without it, the session is refreshed at once. A token whose lifetime the
-   * provider didn't give counts as fresh.
+   * Refresh only when the access token expires within this many seconds, or
+   * within half its lifetime if that is shorter: a window as long as the
+   * token's lifetime would refresh on every call. Without it, the session is
+   * refreshed at once. A token whose lifetime the provider didn't give counts
+   * as fresh.
    */
   ifExpiresWithin?: number;
 }
@@ -182,6 +184,18 @@ export interface FidesAuth {
 }
 
 const NO_STORE = { 'Cache-Control': 'private, no-store' };
+
+/**
+ * How long before `expiresAt` a refresh with `ifExpiresWithin` is due, in
+ * milliseconds: the window, but never more than half the token's lifetime, so
+ * a token that lives shorter than the window isn't refreshed on every call.
+ */
+function refreshWindowMs(tokens: Tokens, expiresAt: number, ifExpiresWithin: number): number {
+  const window = ifExpiresWithin * 1000;
+  const issuedAt = Date.parse(tokens.accessTokenIssuedAt ?? '');
+  // A session saved before the lifetime was recorded gets the plain window until it is refreshed.
+  return Number.isNaN(issuedAt) ? window : Math.min(window, (expiresAt - issuedAt) / 2);
+}
 
 /**
  * A path on this origin: one leading `/`, printable ASCII only, and no
@@ -295,9 +309,13 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
       }
       const read = await lifecycle.read(cookies);
       if (!read.record) return { ok: false, reason: read.reason };
-      const expiresAt = Date.parse(read.record.tokens.accessTokenExpiresAt ?? '');
+      const { tokens } = read.record;
+      const expiresAt = Date.parse(tokens.accessTokenExpiresAt ?? '');
       // Without a lifetime to judge by, refreshing on every call would only load the provider.
-      if (Number.isNaN(expiresAt) || expiresAt - Date.now() > ifExpiresWithin * 1000) {
+      if (
+        Number.isNaN(expiresAt) ||
+        expiresAt - Date.now() > refreshWindowMs(tokens, expiresAt, ifExpiresWithin)
+      ) {
         return { ok: true, session: read.record.session, refreshed: false, rotatedRefreshToken: false };
       }
     }

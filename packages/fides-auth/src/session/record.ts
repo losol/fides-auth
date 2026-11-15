@@ -41,8 +41,16 @@ export interface CreateRecordOptions {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function expiresIn(tokens: TokenResponse, now: number): string | undefined {
-  return tokens.expires_in ? new Date(now + tokens.expires_in * 1000).toISOString() : undefined;
+/** The access token's lifetime as two timestamps, or neither when the provider gave none. */
+function lifetimeOf(
+  tokens: TokenResponse,
+  now: number,
+): Pick<Tokens, 'accessTokenExpiresAt' | 'accessTokenIssuedAt'> {
+  if (!tokens.expires_in) return { accessTokenExpiresAt: undefined, accessTokenIssuedAt: undefined };
+  return {
+    accessTokenExpiresAt: new Date(now + tokens.expires_in * 1000).toISOString(),
+    accessTokenIssuedAt: new Date(now).toISOString(),
+  };
 }
 
 function scopesOf(tokens: TokenResponse): string[] | undefined {
@@ -103,7 +111,7 @@ export function createRecord(tokens: TokenResponse, options: CreateRecordOptions
     session,
     tokens: {
       accessToken: tokens.access_token,
-      accessTokenExpiresAt: expiresIn(tokens, now),
+      ...lifetimeOf(tokens, now),
       refreshToken: tokens.refresh_token,
       idToken: tokens.id_token,
     },
@@ -140,7 +148,7 @@ export function refreshRecord(
     tokens: {
       ...record.tokens,
       accessToken: tokens.access_token,
-      accessTokenExpiresAt: expiresIn(tokens, now),
+      ...lifetimeOf(tokens, now),
       refreshToken: tokens.refresh_token ?? record.tokens.refreshToken,
       // A refresh doesn't always return an ID token, and a stale hint still works.
       idToken: tokens.id_token ?? record.tokens.idToken,

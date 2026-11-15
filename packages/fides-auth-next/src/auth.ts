@@ -24,7 +24,8 @@ import { nextCookieStore } from './cookie-store.js';
 /** Options for {@link FidesAuth.refreshInProxy}. */
 export interface RefreshInProxyOptions {
   /**
-   * Refresh when the access token expires within this many seconds.
+   * Refresh when the access token expires within this many seconds, or within
+   * half its lifetime if that is shorter.
    * @default 60
    */
   ifExpiresWithin?: number;
@@ -78,9 +79,10 @@ export interface FidesAuth {
   ): Promise<{ response: Response; data: T }>;
   /**
    * For `proxy.ts`. Refreshes a session whose access token expires within
-   * `ifExpiresWithin` seconds, before the page renders, since a Server Component
-   * can't save a refresh. Sets the new cookies on the response and on the
-   * request it forwards, so the page reads the refreshed session.
+   * `ifExpiresWithin` seconds, or within half its lifetime if that is shorter,
+   * before the page renders, since a Server Component can't save a refresh.
+   * Sets the new cookies on the response and on the request it forwards, so
+   * the page reads the refreshed session.
    *
    * A failed refresh leaves the session as it is. The next API call or
    * heartbeat shows a session that is over; ending it here could undo a refresh

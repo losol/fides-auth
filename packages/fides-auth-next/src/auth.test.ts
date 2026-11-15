@@ -178,7 +178,13 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
+
+/** Moves the clock on, for a token to age. */
+function later(seconds: number): void {
+  vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + seconds * 1000 });
+}
 
 describe('createFidesAuth for Next', () => {
   it('runs login, the callback, session info and logout on the request cookies', async () => {
@@ -310,6 +316,7 @@ describe('authorizedFetch and refreshSession', () => {
     const { auth } = setup();
     provider.expiresIn = 30;
     await login(auth);
+    later(20);
 
     newRender();
     expect(await auth.refreshSession({ ifExpiresWithin: 60 })).toMatchObject({ ok: true, refreshed: true });
@@ -357,6 +364,7 @@ describe('refreshInProxy', () => {
     const { auth } = setup();
     provider.expiresIn = 30;
     await login(auth);
+    later(20);
     const before = jar.get('__Host-session');
 
     const response = await auth.refreshInProxy(proxied());
@@ -382,14 +390,34 @@ describe('refreshInProxy', () => {
   it('takes the refresh window as an option', async () => {
     const { auth } = setup();
     await login(auth);
-    const response = await auth.refreshInProxy(proxied(), { ifExpiresWithin: 600 });
+    later(200);
+    expect((await auth.refreshInProxy(proxied())).headers.get('set-cookie')).toBeNull();
+    const response = await auth.refreshInProxy(proxied(), { ifExpiresWithin: 120 });
     expect(response.headers.get('set-cookie')).toMatch(/^__Host-session=/);
+  });
+
+  it('refreshes a token that lives shorter than the window once, not on every request', async () => {
+    const { auth } = setup();
+    provider.expiresIn = 20;
+    await login(auth);
+
+    for (let i = 0; i < 3; i += 1) {
+      expect((await auth.refreshInProxy(proxied())).headers.get('set-cookie')).toBeNull();
+    }
+    later(9);
+    expect((await auth.refreshInProxy(proxied())).headers.get('set-cookie')).toBeNull();
+    expect(provider.tokenRequests).toHaveLength(1);
+
+    later(2);
+    expect((await auth.refreshInProxy(proxied())).headers.get('set-cookie')).toMatch(/^__Host-session=/);
+    expect(provider.tokenRequests).toHaveLength(2);
   });
 
   it('leaves the session as it is when the refresh fails', async () => {
     const { auth, events } = setup();
     provider.expiresIn = 30;
     await login(auth);
+    later(20);
     provider.rejectNextRefresh();
 
     const response = await auth.refreshInProxy(proxied());

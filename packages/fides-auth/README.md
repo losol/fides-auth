@@ -361,9 +361,21 @@ that many seconds, and the result says whether it `refreshed`:
 await auth.refreshSession(cookies, { ifExpiresWithin: 60 });
 ```
 
+The window never covers more than half the token's lifetime. A 20-second token
+is refreshed once 10 seconds have passed, not on every call.
+
 With cookie storage a refresh writes cookies, so call it where they can be set.
 Reads and `authorizedFetch` never refresh, so they are safe anywhere. The
 heartbeat endpoint refreshes when the browser asks it to.
+
+Refreshes that overlap in one process share one call to the provider. With
+cookie storage, a request the browser sent before the new cookies arrived still
+carries the old refresh token, and so does a request that another instance
+refreshes at the same time. If the provider rotates refresh tokens, a refresh
+from such a request fails with `invalid_grant`, and some providers, OpenIddict
+among them, then revoke the whole authorization. Refreshing seldom keeps this
+rare. A `sessionStore` avoids it: a later request reads the new tokens from the
+store, and `withLock` covers instances that refresh at once.
 
 #### Cookie or store
 
@@ -387,7 +399,7 @@ const auth = createFidesAuth({
 | Size | At most three cookies of 4 kB. A session that doesn't fit fails at login with 431 | No limit; the cookie holds a 64-character handle |
 | Sent on every request | The whole sealed session | The handle |
 | Refresh | Writes cookies, so it runs where they can be set: a proxy, a route handler or a Server Action | Keeps the handle and writes no cookie, so it also runs in a Server Component |
-| Concurrent refreshes | Shared within one process | Shared across instances too, when the store implements `withLock` |
+| Concurrent refreshes | Shared within one process. A request sent before the new cookies arrived holds the old refresh token | Shared across instances too, when the store implements `withLock` |
 | Logout | Clears the cookie. A copy of it stays valid until `expiresAt`, or until a refresh fails | Deletes the record, so a copied cookie stops working |
 | To run | Nothing | A store every instance shares, with a TTL on `expiresAt` |
 

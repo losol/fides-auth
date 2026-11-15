@@ -5,7 +5,7 @@
  * tested here is how the instance drives it and the session lifecycle.
  */
 import { UnsecuredJWT } from 'jose';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../protocol/client.js', () => ({ createOidcClient: vi.fn() }));
 
@@ -13,6 +13,7 @@ import type { FidesLogger } from '../shared/logger.js';
 import type { SessionEvent } from '../shared/session-events.js';
 import type { TokenResponse } from '../shared/types.js';
 import { createOidcClient, type OidcClient } from '../protocol/client.js';
+import { createRecord, sealRecord } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
 import { createFidesAuth, type FidesAuthConfig } from './fides-auth.js';
 import { SessionSecretError } from './session-secret.js';
@@ -482,6 +483,15 @@ describe('session members', () => {
   });
 
   describe('refreshSession with ifExpiresWithin', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** Moves the clock on, for a token to age. */
+    function later(seconds: number): void {
+      vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + seconds * 1000 });
+    }
+
     it('leaves a token that lasts longer alone', async () => {
       const { auth, cookies } = setup();
       await auth.createSession(cookies, tokens(1));
@@ -497,12 +507,40 @@ describe('session members', () => {
     it('refreshes a token that expires within the window', async () => {
       const { auth, cookies } = setup();
       await auth.createSession(cookies, tokens(1));
-      expect(await auth.refreshSession(cookies, { ifExpiresWithin: 600 })).toMatchObject({
+      later(200);
+      expect(await auth.refreshSession(cookies, { ifExpiresWithin: 120 })).toMatchObject({
         ok: true,
         refreshed: true,
       });
       expect(oidc.refresh).toHaveBeenCalledWith('refresh-1');
       expect((await auth.getTokens(cookies))?.accessToken).toBe('access-2');
+    });
+
+    it('waits for half the lifetime of a token shorter than the window', async () => {
+      const { auth, cookies } = setup();
+      await auth.createSession(cookies, tokens(1, { expires_in: 20 }));
+      expect(await auth.refreshSession(cookies, { ifExpiresWithin: 60 })).toMatchObject({
+        refreshed: false,
+      });
+      later(9);
+      expect(await auth.refreshSession(cookies, { ifExpiresWithin: 60 })).toMatchObject({
+        refreshed: false,
+      });
+      expect(oidc.refresh).not.toHaveBeenCalled();
+      later(2);
+      expect(await auth.refreshSession(cookies, { ifExpiresWithin: 60 })).toMatchObject({
+        refreshed: true,
+      });
+    });
+
+    it('gives a session saved without the time it got its token the plain window', async () => {
+      const { auth, cookies, jar } = setup();
+      const record = createRecord(tokens(1, { expires_in: 20 }), { sessionDurationDays: 1 });
+      delete record.tokens.accessTokenIssuedAt;
+      jar.set('__Host-session', await sealRecord(record, secret));
+      expect(await auth.refreshSession(cookies, { ifExpiresWithin: 60 })).toMatchObject({
+        refreshed: true,
+      });
     });
 
     it('treats a token without a known lifetime as fresh', async () => {
@@ -586,7 +624,7 @@ describe('authorizedFetch', () => {
     await login(auth, cookies);
     const seen = stubApi();
     try {
-      await auth.refreshSession(cookies, { ifExpiresWithin: 600 });
+      await auth.refreshSession(cookies);
       const result = await auth.authorizedFetch(cookies, `${api}items`, {
         allowedBase: api,
         parse: (response) => response.json() as Promise<{ ok: boolean }>,
