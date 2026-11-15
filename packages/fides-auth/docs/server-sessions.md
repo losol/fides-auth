@@ -80,6 +80,7 @@ import type { SessionStore, StoredSession } from "@eventuras/fides-auth/server";
 type Doc = Omit<StoredSession, "expiresAt"> & { _id: string; expiresAt: Date };
 const sessions = db.collection<Doc>("sessions");
 await sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+await sessions.createIndex({ iss: 1, subHash: 1 }); // for findMatching
 
 export const sessionStore: SessionStore = {
   async get(key) {
@@ -89,9 +90,10 @@ export const sessionStore: SessionStore = {
     return { ...record, expiresAt: expiresAt.toISOString() };
   },
   async set(key, record) {
+    // On an insert, the new document takes its `_id` from the filter.
     await sessions.replaceOne(
       { _id: key },
-      { _id: key, ...record, expiresAt: new Date(record.expiresAt) },
+      { ...record, expiresAt: new Date(record.expiresAt) },
       { upsert: true },
     );
   },
@@ -156,7 +158,7 @@ records, and for each one:
 The browsers keep their handle cookies, which then read as `session_not_found`.
 It needs a store with `findMatching` and throws a `TypeError` without one,
 cookie sessions included, rather than answer that it ended nobody's. Index
-`iss` with `subHash` for it.
+`iss` with `subHash` for it, as the MongoDB example does.
 
 ## Refresh under concurrency
 
