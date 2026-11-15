@@ -1,5 +1,38 @@
 # @eventuras/fides-auth-next
 
+## 1.0.0-beta.1
+
+### Minor Changes
+
+- 2487c72: `endUserSessions({ sub, iss? })` ends every stored session of one user, wherever they are signed in,
+  and revokes their refresh tokens: for "sign out everywhere" and closed accounts. It needs a
+  `SessionStore` with the new optional `findMatching`, and throws without one.
+  
+  A store can now tell whose session a record is, and whether it is new: `storeFields` in the config
+  puts plain fields of your choice on the record as `fields`, and `set` gets `{ continuation }` as a
+  third argument. `createMemorySessionStore` implements `findMatching`.
+
+### Patch Changes
+
+- a5f8160: `refreshSession({ ifExpiresWithin })` and `refreshInProxy` never count more than half the access
+  token's lifetime as about to expire. A token that lived shorter than the window, 60 seconds by
+  default in the proxy, was refreshed on every request. The session now records when its access token
+  arrived, as `accessTokenIssuedAt` on `Tokens`, and the READMEs describe how a refresh from a stale
+  cookie fails when the provider rotates refresh tokens.
+- 8813d4a: Logout and `clearSession` revoke the session's refresh token (RFC 7009) when the provider has a
+  `revocation_endpoint`, so a refresh that was running at logout, or a copy of the cookie, can't renew
+  the session. A refresh running in the same process is waited for, and the token it brought back is
+  the one revoked. With a `sessionStore`, the session ends under `withLock`, so a refresh on another
+  instance can't save it again. `OidcClient` gets `revoke(token, { tokenTypeHint })`.
+- Updated dependencies [2487c72]
+- Updated dependencies [c15514e]
+- Updated dependencies [4445da7]
+- Updated dependencies [948e89a]
+- Updated dependencies [a5f8160]
+- Updated dependencies [8813d4a]
+- Updated dependencies [dd7aac5]
+  - @eventuras/fides-auth@1.0.0-beta.1
+
 ## 1.0.0-beta.0
 
 ### Major Changes

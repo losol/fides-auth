@@ -1,5 +1,48 @@
 # @eventuras/fides-auth
 
+## 1.0.0-beta.1
+
+### Minor Changes
+
+- 2487c72: `endUserSessions({ sub, iss? })` ends every stored session of one user, wherever they are signed in,
+  and revokes their refresh tokens: for "sign out everywhere" and closed accounts. It needs a
+  `SessionStore` with the new optional `findMatching`, and throws without one.
+  
+  A store can now tell whose session a record is, and whether it is new: `storeFields` in the config
+  puts plain fields of your choice on the record as `fields`, and `set` gets `{ continuation }` as a
+  third argument. `createMemorySessionStore` implements `findMatching`.
+
+### Patch Changes
+
+- c15514e: An http issuer, or an http endpoint in the provider's metadata, throws a `TypeError` that names the
+  URL and says what to set, where openid-client only answered `OAUTH_HTTP_REQUEST_FORBIDDEN` and login
+  failed with a bare 500. `allowInsecureRequests: true` in the OIDC config allows http to a provider on a
+  loopback address (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) for development and CI; any
+  other http URL still throws.
+- 4445da7: A refresh sends no `scope`, so the provider keeps the scope it granted at login. Sending the
+  configured scope failed with `invalid_scope` whenever the provider granted less, e.g. without
+  `offline_access`, and the session could never be refreshed.
+- 948e89a: A refresh that brings an ID token updates `session.user` from it, as at login, so roles taken away at
+  the provider go with the next refresh instead of the next login. The roles follow `rolesClaim`, the
+  name and email change when the token carries them, and `sub`, `data` and the fields `mapSession`
+  added stay. An ID token whose `iss` or `sub` differs from the login's fails the refresh with
+  `cause: 'idp_error'` and saves nothing (OIDC Core §12.2).
+- a5f8160: `refreshSession({ ifExpiresWithin })` and `refreshInProxy` never count more than half the access
+  token's lifetime as about to expire. A token that lived shorter than the window, 60 seconds by
+  default in the proxy, was refreshed on every request. The session now records when its access token
+  arrived, as `accessTokenIssuedAt` on `Tokens`, and the READMEs describe how a refresh from a stale
+  cookie fails when the provider rotates refresh tokens.
+- 8813d4a: Logout and `clearSession` revoke the session's refresh token (RFC 7009) when the provider has a
+  `revocation_endpoint`, so a refresh that was running at logout, or a copy of the cookie, can't renew
+  the session. A refresh running in the same process is waited for, and the token it brought back is
+  the one revoked. With a `sessionStore`, the session ends under `withLock`, so a refresh on another
+  instance can't save it again. `OidcClient` gets `revoke(token, { tokenTypeHint })`.
+- dd7aac5: A refresh whose store lock fails, or whose store throws, returns `{ ok: false, reason:
+  'refresh_failed', cause: 'store' }` instead of throwing, and emits `session.refresh_failed`. The
+  heartbeat answers it with 503, so the browser retries. `docs/server-sessions.md` spells out the
+  `withLock` contract: `fn` uses the store while the lock is held, the lock is held across the call to
+  the provider, and why more than one instance with a rotating provider needs it.
+
 ## 1.0.0-beta.0
 
 ### Major Changes
