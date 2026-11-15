@@ -9,8 +9,6 @@ export interface Tokens {
    */
   accessTokenIssuedAt?: string;
   refreshToken?: string;
-  /** ISO 8601 string — see {@link accessTokenExpiresAt}. */
-  refreshTokenExpiresAt?: string;
   /** Raw (encoded) ID token, sent as `id_token_hint` on RP-initiated logout. */
   idToken?: string;
 }

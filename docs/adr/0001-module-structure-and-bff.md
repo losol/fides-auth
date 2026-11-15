@@ -306,7 +306,7 @@ There is one session model. It doesn't know where a session is kept.
     user, scopes, idp, data,
   },
   tokens: {             // what only the library and getTokens see
-    accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt, idToken,
+    accessToken, accessTokenExpiresAt, accessTokenIssuedAt, refreshToken, idToken,
   },
 }
 ```
