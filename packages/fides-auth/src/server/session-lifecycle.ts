@@ -15,6 +15,9 @@
 // 7. A refresh the provider refuses for good ends the session where that is
 //    certain: under a store's lock. Elsewhere another instance may have
 //    refreshed with the same token, so the session is left for the app to end.
+//    Every request whose refresh learns that the stored session is over has
+//    its cookie deleted: the one that ended it, those that shared its call to
+//    the provider, and those that waited for the lock and found the record gone.
 //
 // One difference can't be hidden: a store drops an expired record with its TTL,
 // after which store storage answers `session_not_found` where cookie storage
@@ -63,6 +66,12 @@ export type RefreshRecordResult =
     /** Set only when the provider was asked, that is when `reason` is `refresh_failed`. */
     cause?: RefreshFailureCause;
     correlationId?: string;
+    /**
+     * The stored session is over for good: this refresh ended it, or read it
+     * and then found it gone. Every request that gets this result has its
+     * session cookie deleted, where cookies can be written.
+     */
+    ended?: true;
   };
 
 export interface SessionLifecycleOptions {
@@ -467,10 +476,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         // Under the store's lock no other instance refreshed in between, so
         // the refresh token the store holds is dead and the session with it.
         // Left in place it would read as a session until `expiresAt`. The
-        // cookie goes too where it can be written, so the browser stops
-        // sending a handle that finds nothing.
+        // cookie goes with it, on every request that waits for this result.
         await storage.discard(cookies);
         emit({ event: SESSION_EVENT.CLEARED, correlationId, trigger: 'rejected' });
+        return { ok: false, reason: 'refresh_failed', cause, correlationId, ended: true };
       }
       return { ok: false, reason: 'refresh_failed', cause, correlationId };
     }
@@ -509,7 +518,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     const written = await save(cookies, updated, 'refresh');
     if (!written.saved) {
       logger.info({ correlationId }, 'Session ended during refresh; not saved');
-      return { ok: false, reason: 'session_not_found', correlationId };
+      return { ok: false, reason: 'session_not_found', correlationId, ended: true };
     }
     remember(refreshToken, updated);
     emit({
@@ -560,8 +569,16 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       const refreshToken = current.tokens.refreshToken;
       if (!refreshToken) return { ok: false, reason: 'no_refresh_token', correlationId };
 
+      // A stored session that a refresh finds over leaves no cookie behind, on
+      // any request that asked: the handle would find nothing from here on.
+      const settle = async (pending: Promise<RefreshRecordResult>): Promise<RefreshRecordResult> => {
+        const result = await pending;
+        if (!result.ok && result.ended) await storage.forget?.(cookies);
+        return result;
+      };
+
       const running = inflight.get(correlationId);
-      if (running) return running;
+      if (running) return settle(running);
 
       // The refresh token in this request's cookie was spent a moment ago.
       // Sending it again would fail, and a provider that takes reuse for theft
@@ -578,7 +595,12 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       // instance may have refreshed or ended it.
       const attempt = async (): Promise<RefreshRecordResult> => {
         const latest = await read(cookies);
-        if (!latest.record) return { ok: false, reason: latest.reason, correlationId };
+        if (!latest.record) {
+          // It was there a moment ago: a logout or a refresh that was refused
+          // ended it while this one waited.
+          const gone = latest.reason === 'session_not_found';
+          return { ok: false, reason: latest.reason, correlationId, ...(gone && { ended: true as const }) };
+        }
         if (refreshedSince(current, latest.record)) return alreadyRefreshed(current, latest.record);
         const latestToken = latest.record.tokens.refreshToken;
         if (!latestToken) return { ok: false, reason: 'no_refresh_token', correlationId };
@@ -605,7 +627,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
       const shared = inTurn(correlationId, run).finally(() => inflight.delete(correlationId));
       inflight.set(correlationId, shared);
-      return shared;
+      return settle(shared);
     },
 
     async update(cookies, update) {
