@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 
 import { userFromClaims } from './user-claims.js';
 
@@ -40,5 +40,26 @@ describe('userFromClaims', () => {
 
   it('gives an empty sub when the claims have none', () => {
     expect(userFromClaims({}).sub).toBe('');
+  });
+
+  it('gives undefined name and email when the claims have none', () => {
+    const user = userFromClaims({ sub: 'user-1' });
+
+    expect(user.name).toBeUndefined();
+    expect(user.email).toBeUndefined();
+  });
+
+  it('gives undefined name and email when they are not strings', () => {
+    const user = userFromClaims({ sub: 'user-2', name: 42, email: ['a@example.com'] });
+
+    expect(user.name).toBeUndefined();
+    expect(user.email).toBeUndefined();
+  });
+
+  it('types name and email as optional strings', () => {
+    const user = userFromClaims({ sub: 'user-3' });
+
+    expectTypeOf(user.name).toEqualTypeOf<string | undefined>();
+    expectTypeOf(user.email).toEqualTypeOf<string | undefined>();
   });
 });

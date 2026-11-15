@@ -244,7 +244,7 @@ metadata and the audience is the client ID:
 import { userFromClaims } from "@eventuras/fides-auth/oidc";
 
 const claims = await oidc.verifyIdToken(tokens.id_token!);
-const user = userFromClaims(claims, "roles"); // { sub, name, email, roles }
+const user = userFromClaims(claims, "roles"); // { sub, name?, email?, roles }
 ```
 
 `algorithms` defaults to `RS*`, `PS*`, `ES*` and `EdDSA`. The JWKS is cached on

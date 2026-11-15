@@ -3,8 +3,10 @@ import type { JWTPayload } from 'jose';
 /** The user from ID token claims, as {@link userFromClaims} reads them. */
 export interface OidcUserInfo {
   sub: string;
-  name: string;
-  email: string;
+  /** Absent when the ID token has no `name` claim. */
+  name?: string;
+  /** Absent when the ID token has no `email` claim. */
+  email?: string;
   roles: string[];
 }
 
@@ -20,8 +22,8 @@ export function userFromClaims(idToken: JWTPayload, rolesClaim = 'roles'): OidcU
 
   return {
     sub: idToken.sub ?? '',
-    name: idToken.name as string,
-    email: idToken.email as string,
+    name: typeof idToken.name === 'string' ? idToken.name : undefined,
+    email: typeof idToken.email === 'string' ? idToken.email : undefined,
     roles,
   };
 }
