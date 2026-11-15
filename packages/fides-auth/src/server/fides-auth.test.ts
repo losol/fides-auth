@@ -5,18 +5,18 @@
  * tested here is how the instance drives it and the session lifecycle.
  */
 import { UnsecuredJWT } from 'jose';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 vi.mock('../protocol/client.js', () => ({ createOidcClient: vi.fn() }));
 
 import type { FidesLogger } from '../shared/logger.js';
 import type { SessionEvent } from '../shared/session-events.js';
-import type { TokenResponse } from '../shared/types.js';
+import type { Session, TokenResponse } from '../shared/types.js';
 import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { createRecord, sealRecord } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
 import { fetchCookieStore } from './fetch-cookie-store.js';
-import { createFidesAuth, type FidesAuthConfig } from './fides-auth.js';
+import { createFidesAuth, type FidesAuth, type FidesAuthConfig } from './fides-auth.js';
 import { SessionSecretError } from './session-secret.js';
 import { createMemorySessionStore } from './session-store.js';
 
@@ -101,9 +101,9 @@ beforeEach(() => {
   vi.mocked(createOidcClient).mockReturnValue(oidc as unknown as OidcClient);
 });
 
-function setup(overrides: Partial<FidesAuthConfig> = {}) {
+function setup<TData = Record<string, unknown>>(overrides: Partial<FidesAuthConfig<TData>> = {}) {
   const events: SessionEvent[] = [];
-  const auth = createFidesAuth({
+  const auth = createFidesAuth<TData>({
     oauthConfig: {
       issuer: 'https://idp.test',
       clientId: 'web',
@@ -126,7 +126,7 @@ const post = (path: string, headers: Record<string, string> = { 'sec-fetch-site'
 
 /** Logs in through the handlers and returns the callback's response. */
 async function login(
-  auth: ReturnType<typeof setup>['auth'],
+  auth: Pick<FidesAuth, 'handleOidcLogin' | 'handleOidcCallback'>,
   cookies: CookieStore,
   returnTo?: string,
 ): Promise<Response> {
@@ -980,5 +980,65 @@ describe('over Request and Response, with fetchCookieStore', () => {
     await auth.clearSession(cookies);
     tab.receive(new Response(null, { headers: cookies.headers() }));
     expect(tab.jar.size).toBe(0);
+  });
+});
+
+describe('typed session data', () => {
+  interface AppData {
+    tenant: string;
+    visits: number;
+  }
+
+  function typedSetup() {
+    return setup<AppData>({
+      sessionStore: createMemorySessionStore(),
+      mapSession: (_tokens, claims, session) => ({
+        ...session,
+        data: { tenant: String(claims?.sub), visits: 1 },
+      }),
+      storeFields: (session) => ({ tenant: session.data?.tenant ?? null }),
+    });
+  }
+
+  it('gives session.data the type the instance was created with', async () => {
+    const { auth, cookies } = typedSetup();
+    await login(auth, cookies);
+
+    const session = await auth.readSession(cookies);
+    expectTypeOf(session).toEqualTypeOf<Session<AppData> | null>();
+    expect(session?.data).toEqual({ tenant: 'user-1', visits: 1 });
+    // No cast: `tenant` is a string to the compiler.
+    expect(session?.data?.tenant.toUpperCase()).toBe('USER-1');
+
+    expectTypeOf((await auth.tryReadSession(cookies)).session).toEqualTypeOf<Session<AppData> | null>();
+    expectTypeOf((await auth.readSessionWithTokens(cookies)).session).toEqualTypeOf<Session<AppData> | null>();
+    const refreshed = await auth.refreshSession(cookies);
+    if (refreshed.ok) expectTypeOf(refreshed.session.data).toEqualTypeOf<AppData | undefined>();
+
+    const updated = await auth.updateSession(cookies, (current) => ({
+      ...current,
+      data: { tenant: current.data?.tenant ?? '', visits: (current.data?.visits ?? 0) + 1 },
+    }));
+    expectTypeOf(updated).toEqualTypeOf<Session<AppData> | null>();
+    expect(updated?.data).toEqual({ tenant: 'user-1', visits: 2 });
+  });
+
+  it('refuses data of another shape at compile time', async () => {
+    const { auth, cookies } = typedSetup();
+    // With no session nothing is written; the line is here for the compiler.
+    const result = await auth.updateSession(cookies, (current) => ({
+      ...current,
+      // @ts-expect-error visits is a number
+      data: { tenant: 'a', visits: 'many' },
+    }));
+    expect(result).toBeNull();
+  });
+
+  it('leaves data an open record without a type argument', async () => {
+    const { auth, cookies } = setup();
+    await login(auth, cookies);
+    const session = await auth.readSession(cookies);
+    expectTypeOf(session).toEqualTypeOf<Session | null>();
+    expectTypeOf(session?.data).toEqualTypeOf<Record<string, unknown> | undefined>();
   });
 });

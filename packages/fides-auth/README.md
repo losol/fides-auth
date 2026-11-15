@@ -403,15 +403,28 @@ page do, read it once per request and pass it on, e.g. from a middleware
 through the request's context. Keep `tokens` on the server, and hand the
 browser `session`.
 
-To keep more of the token response or the ID token claims, pass `mapSession`:
+To keep more of the token response or the ID token claims, pass `mapSession`.
+A type argument to `createFidesAuth` types `data` in every session the instance
+hands out. It is your own promise: the library doesn't check what a stored
+session holds.
 
 ```typescript
-const auth = createFidesAuth({
+interface AppData {
+  tenant: string;
+}
+
+const auth = createFidesAuth<AppData>({
   oauthConfig,
   secret,
   rolesClaim: "groups",
-  mapSession: (tokens, claims, session) => ({ ...session, data: { tenant: claims?.tenant } }),
+  mapSession: (tokens, claims, session) => ({
+    ...session,
+    data: { tenant: String(claims?.tenant) },
+  }),
 });
+
+const session = await auth.readSession(cookies);
+session?.data?.tenant; // string | undefined, without a cast
 ```
 
 `claims` are decoded, not verified. Without an `id_token` (no `openid` scope),

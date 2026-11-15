@@ -117,7 +117,7 @@ A store sees a sealed record and hashes, so it can't tell whose session a
 record is. `storeFields` puts fields of your choice next to it, in the clear:
 
 ```ts
-export const auth = createFidesAuth({
+export const auth = createFidesAuth<{ userId: string }>({
   oauthConfig,
   secret,
   sessionStore,
@@ -125,7 +125,7 @@ export const auth = createFidesAuth({
     ...session,
     data: { userId: await userIdFor(claims?.sub) },
   }),
-  storeFields: (session) => ({ userId: (session.data?.userId as string | undefined) ?? null }),
+  storeFields: (session) => ({ userId: session.data?.userId ?? null }),
 });
 ```
 

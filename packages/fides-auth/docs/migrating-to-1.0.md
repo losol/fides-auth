@@ -58,7 +58,8 @@ export const auth = createFidesAuth({
 | a `CookieStore` written by hand over a Fetch `Request` | `fetchCookieStore(request)` from `/server`, with `apply(response)` and `headers()` for the `Set-Cookie` lines |
 
 **The session.** `Session` has `correlationId`, `createdAt`, `expiresAt`,
-`user`, `scopes`, `idp` and `data`. `user.sub` is required and `user.name`
+`user`, `scopes`, `idp` and `data`. A type argument,
+`createFidesAuth<AppData>(…)`, types `data`. `user.sub` is required and `user.name`
 optional. The tokens aren't on it: use `getTokens`. `LegacySession` and
 `CreateSessionOptions` are gone.
 

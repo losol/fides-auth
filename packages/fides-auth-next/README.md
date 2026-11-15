@@ -102,7 +102,8 @@ const both = await auth.readSessionWithTokens(); // { session, tokens } in one r
 `user`, `scopes`, `data`, `idp`, `correlationId`, `createdAt` and `expiresAt`.
 The tokens aren't on it: `getTokens` returns them, and `authorizedFetch` uses
 them. `getTokens` and `readSessionWithTokens` read every time, since a refresh
-changes the tokens.
+changes the tokens. A type argument, `createFidesAuth<AppData>(…)`, types
+`data`.
 
 `createSession`, `updateSession`, `refreshSession` and `clearSession` write
 cookies, so they work in Server Actions and Route Handlers.
