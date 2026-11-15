@@ -78,7 +78,12 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   refreshSession(options?: RefreshSessionOptions): Promise<FidesRefreshResult<TData>>;
   /** Starts a session from a token response, for a login that doesn't go through the handlers. */
   createSession(tokens: TokenResponse): Promise<Session<TData>>;
-  /** Changes the user or data. Null when there is no session. */
+  /**
+   * Changes the user or data. Null when there is no session. It waits its
+   * turn after a refresh or another update of the session, and `update` gets
+   * the session as it is then, so `update` must not refresh or update the
+   * same session itself.
+   */
   updateSession(
     update: (session: Session<TData>) => Session<TData> | Promise<Session<TData>>,
   ): Promise<Session<TData> | null>;

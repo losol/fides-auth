@@ -8,6 +8,9 @@
 // 5. Concurrent refreshes of one session in one process share one provider call.
 //    Under cookie storage, so does a refresh that comes just after, from a
 //    request that still carries the cookie from before.
+// 8. A refresh and an update of one session take turns, in this process and
+//    under a store's lock, and each starts from what the other saved. Saved
+//    from an older read, an update would put a spent refresh token back.
 // 6. A rejected reason means the same thing in both storages.
 // 7. A refresh the provider refuses for good ends the session where that is
 //    certain: under a store's lock. Elsewhere another instance may have
@@ -94,7 +97,13 @@ export interface SessionLifecycle {
   create(cookies: CookieStore, tokens: TokenResponse): Promise<SessionRecord>;
   /** Refreshes the tokens, keeping the session's identity and lifetime. */
   refresh(cookies: CookieStore): Promise<RefreshRecordResult>;
-  /** Changes the user, scopes or data. Null when there is no session to change. */
+  /**
+   * Changes the user, scopes or data. Null when there is no session to change.
+   * It takes its turn after a refresh or an update of the session that is
+   * running, under the store's lock where there is one, and `update` gets the
+   * session as it is then. So `update` must not refresh or update the same
+   * session: that call would wait for this one.
+   */
   update(
     cookies: CookieStore,
     update: (session: Session) => Session | Promise<Session>,
@@ -199,6 +208,25 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
   // an old cookie holds the same handle, and reads the new record.
   const recent = new Map<string, RecentRefresh>();
   let lookupKeyPromise: Promise<CryptoKey> | undefined;
+  // By correlation id: the end of the last refresh or update queued for a session.
+  const turns = new Map<string, Promise<void>>();
+
+  /**
+   * Runs `fn` when the refreshes and updates of this session that were asked
+   * for earlier in this process have finished, whether they failed or not.
+   */
+  function inTurn<T>(correlationId: string, fn: () => Promise<T>): Promise<T> {
+    const run = (turns.get(correlationId) ?? Promise.resolve()).then(fn);
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    turns.set(correlationId, settled);
+    void settled.then(() => {
+      if (turns.get(correlationId) === settled) turns.delete(correlationId);
+    });
+    return run;
+  }
 
   /** Remembers a refresh that rotated the refresh token, until the grace period or the access token ends. */
   function remember(spent: string, record: SessionRecord): void {
@@ -415,19 +443,22 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         return alreadyRefreshed(current, already);
       }
 
+      // Read again when it is this refresh's turn, and under the lock: an
+      // update may have changed the session while it waited, and another
+      // instance may have refreshed or ended it.
+      const attempt = async (): Promise<RefreshRecordResult> => {
+        const latest = await read(cookies);
+        if (!latest.record) return { ok: false, reason: latest.reason, correlationId };
+        if (refreshedSince(current, latest.record)) return alreadyRefreshed(current, latest.record);
+        const latestToken = latest.record.tokens.refreshToken;
+        if (!latestToken) return { ok: false, reason: 'no_refresh_token', correlationId };
+        return refreshNow(cookies, latest.record, latestToken);
+      };
+
       const run = async (): Promise<RefreshRecordResult> => {
-        if (!storage.lock) return refreshNow(cookies, current, refreshToken);
+        if (!storage.lock) return attempt();
         try {
-          return await storage.lock(cookies, async () => {
-            // Re-read under the lock: another instance may have refreshed, or
-            // ended, this session while we waited.
-            const latest = await read(cookies);
-            if (!latest.record) return { ok: false, reason: latest.reason, correlationId };
-            if (refreshedSince(current, latest.record)) return alreadyRefreshed(current, latest.record);
-            const latestToken = latest.record.tokens.refreshToken;
-            if (!latestToken) return { ok: false, reason: 'no_refresh_token', correlationId };
-            return refreshNow(cookies, latest.record, latestToken);
-          });
+          return await storage.lock(cookies, attempt);
         } catch (error) {
           // The store failed, or the lock couldn't be had in time. That says
           // nothing about the session, so it is a failure to retry, not a throw.
@@ -442,18 +473,35 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         }
       };
 
-      const shared = run().finally(() => inflight.delete(correlationId));
+      const shared = inTurn(correlationId, run).finally(() => inflight.delete(correlationId));
       inflight.set(correlationId, shared);
       return shared;
     },
 
     async update(cookies, update) {
-      const current = await read(cookies);
-      if (!current.record) return null;
-      const changed = await update(current.record.session);
-      const updated = { ...current.record, session: keepIdentity(current.record.session, changed) };
-      const written = await save(cookies, updated, true);
-      return written.saved ? updated : null;
+      const first = await read(cookies);
+      if (!first.record) return null;
+      const { correlationId } = first.record.session;
+
+      const change = async (): Promise<SessionRecord | null> => {
+        // Read again: a refresh may have saved new tokens while this waited.
+        const latest = (await read(cookies)).record;
+        if (!latest) return null;
+        // Under cookie storage the refresh may have been another request's,
+        // and this one still carries the cookie from before it.
+        const refreshed = refreshedAfter(latest);
+        const current = refreshed ?? latest;
+        const changed = await update(current.session);
+        const updated = { ...current, session: keepIdentity(current.session, changed) };
+        const written = await save(cookies, updated, true);
+        if (!written.saved) return null;
+        // The next request with the old cookie gets the update too.
+        const entry = recent.get(correlationId);
+        if (entry && entry.record === refreshed) entry.record = updated;
+        return updated;
+      };
+
+      return inTurn(correlationId, () => (storage.lock ? storage.lock(cookies, change) : change()));
     },
 
     async end(cookies, { trigger } = {}) {

@@ -227,7 +227,13 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   ): Promise<FidesRefreshResult<TData>>;
   /** Starts a session from a token response, for a login that doesn't go through the handlers. */
   createSession(cookies: CookieStore, tokens: TokenResponse): Promise<Session<TData>>;
-  /** Changes the user or data. Null when there is no session. */
+  /**
+   * Changes the user or data. Null when there is no session. It waits its
+   * turn after a refresh or another update of the session, under the store's
+   * lock where there is one, and `update` gets the session as it is then. So
+   * `update` must not refresh or update the same session itself: that call
+   * would wait for this one.
+   */
   updateSession(
     cookies: CookieStore,
     update: (session: Session<TData>) => Session<TData> | Promise<Session<TData>>,

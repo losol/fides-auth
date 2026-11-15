@@ -165,6 +165,103 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
     expect(await lifecycle.read(cookies)).toEqual({ record: updated });
   });
 
+  describe('rule 8: a refresh and an update of one session take turns', () => {
+    /** A promise that waits until it is opened. */
+    function gate() {
+      let open = (): void => {};
+      const closed = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      return { closed, open };
+    }
+
+    it('an update that started before a refresh does not put the old tokens back', async () => {
+      const { lifecycle, cookies, refreshTokens } = setup();
+      await lifecycle.create(cookies, tokens(1));
+
+      // The update has read the session and is still at work when the refresh comes.
+      const working = gate();
+      const started = gate();
+      const updating = lifecycle.update(cookies, async (session) => {
+        started.open();
+        await working.closed;
+        return { ...session, data: { theme: 'dark' } };
+      });
+      await started.closed;
+      const refreshing = lifecycle.refresh(cookies);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(refreshTokens).not.toHaveBeenCalled();
+      working.open();
+
+      expect((await updating)?.tokens.refreshToken).toBe('refresh-1');
+      expect(await refreshing).toMatchObject({ ok: true, rotatedRefreshToken: true });
+      const { record } = await lifecycle.read(cookies);
+      expect(record?.tokens).toMatchObject({ accessToken: 'access-2', refreshToken: 'refresh-2' });
+      expect(record?.session.data).toEqual({ theme: 'dark' });
+    });
+
+    it('an update that comes during a refresh starts from what the refresh saved', async () => {
+      const atProvider = gate();
+      const asked = gate();
+      const { lifecycle, cookies } = setup({
+        refreshTokens: vi.fn(async () => {
+          asked.open();
+          await atProvider.closed;
+          return tokens(2, { scope: 'openid' });
+        }),
+      });
+      await lifecycle.create(cookies, tokens(1, { scope: 'openid profile' }));
+
+      const refreshing = lifecycle.refresh(cookies);
+      await asked.closed;
+      const seen: Array<string[] | undefined> = [];
+      const updating = lifecycle.update(cookies, (session) => {
+        seen.push(session.scopes);
+        return { ...session, data: { theme: 'dark' } };
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(seen).toEqual([]);
+      atProvider.open();
+
+      expect(await refreshing).toMatchObject({ ok: true });
+      expect((await updating)?.tokens.refreshToken).toBe('refresh-2');
+      // The update got the session the refresh left, not the one from before it.
+      expect(seen).toEqual([['openid']]);
+      const { record } = await lifecycle.read(cookies);
+      expect(record?.tokens.refreshToken).toBe('refresh-2');
+      expect(record?.session).toMatchObject({ scopes: ['openid'], data: { theme: 'dark' } });
+    });
+
+    it('two updates at once both land', async () => {
+      const { lifecycle, cookies } = setup();
+      await lifecycle.create(cookies, tokens(1));
+
+      await Promise.all([
+        lifecycle.update(cookies, async (session) => {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return { ...session, data: { ...session.data, first: true } };
+        }),
+        lifecycle.update(cookies, (session) => ({ ...session, data: { ...session.data, second: true } })),
+      ]);
+
+      expect((await lifecycle.read(cookies)).record?.session.data).toEqual({ first: true, second: true });
+    });
+
+    it('an update that throws does not hold up the next one', async () => {
+      const { lifecycle, cookies } = setup();
+      await lifecycle.create(cookies, tokens(1));
+
+      await expect(
+        lifecycle.update(cookies, () => {
+          throw new Error('no');
+        }),
+      ).rejects.toThrow('no');
+      const updated = await lifecycle.update(cookies, (session) => ({ ...session, data: { ok: true } }));
+      expect(updated?.session.data).toEqual({ ok: true });
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: true });
+    });
+  });
+
   it('rule 3: mapSession at login can change the user and data, not the identity', async () => {
     const { lifecycle, cookies } = setup({
       mapSession: async (_tokens, claims, session) => ({
@@ -334,6 +431,27 @@ describe('the session lifecycle, cookie storage only', () => {
     return copy;
   }
 
+  it('an update from a request that still carries the old cookie keeps the refreshed tokens', async () => {
+    const { lifecycle, cookies, jar, refreshTokens } = setup();
+    await lifecycle.create(cookies, tokens(1));
+    const late = sentBefore(jar);
+    const later = sentBefore(jar);
+    await lifecycle.refresh(cookies);
+
+    const updated = await lifecycle.update(late.cookies, (session) => ({ ...session, data: { theme: 'dark' } }));
+    expect(updated?.tokens.refreshToken).toBe('refresh-2');
+    // Whichever response the browser takes last, it holds the live refresh token.
+    expect((await lifecycle.read(late.cookies)).record?.tokens.refreshToken).toBe('refresh-2');
+
+    // Another request from before the refresh gets the update along with it.
+    expect(await lifecycle.refresh(later.cookies)).toMatchObject({ ok: true });
+    expect((await lifecycle.read(later.cookies)).record).toMatchObject({
+      tokens: { refreshToken: 'refresh-2' },
+      session: { data: { theme: 'dark' } },
+    });
+    expect(refreshTokens).toHaveBeenCalledTimes(1);
+  });
+
   it('hands a request that still carries the old cookie the refresh that was just done', async () => {
     const { lifecycle, cookies, jar, refreshTokens, events } = setup();
     await lifecycle.create(cookies, tokens(1));
@@ -443,6 +561,41 @@ describe('the session lifecycle, store storage only', () => {
     });
     return { store, lifecycle, refreshTokens, ...cookieJar() };
   }
+
+  it('an update on one instance and a refresh on another take turns under the store\'s lock', async () => {
+    const { store, lifecycle, cookies } = setup();
+    const other = createSessionLifecycle({
+      storage: storeStorage({ store, secure: true }),
+      secret,
+      refreshTokens: vi.fn(async () => tokens(2)),
+      logger: quiet,
+    });
+    await lifecycle.create(cookies, tokens(1));
+
+    let finish = (): void => {};
+    const working = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let started = (): void => {};
+    const begun = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const updating = lifecycle.update(cookies, async (session) => {
+      started();
+      await working;
+      return { ...session, data: { theme: 'dark' } };
+    });
+    await begun;
+    const refreshing = other.refresh(cookies);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    finish();
+
+    await updating;
+    expect(await refreshing).toMatchObject({ ok: true, rotatedRefreshToken: true });
+    const { record } = await lifecycle.read(cookies);
+    expect(record?.tokens.refreshToken).toBe('refresh-2');
+    expect(record?.session.data).toEqual({ theme: 'dark' });
+  });
 
   describe('a refresh the provider refuses for good', () => {
     /** A lifecycle over `store`, with its events, and a jar that counts its writes. */
