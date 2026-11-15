@@ -119,11 +119,13 @@ export const sessionStore: SessionStore = {
 };
 ```
 
-An adapter can use `reason` to record when a session was last refreshed:
+An adapter can use `reason` to record when a session was last refreshed. It
+must then merge the record into what it has, since a `set` that replaces would
+drop the stamp at the next update:
 
 ```ts
 async set(key, record, { reason }) {
-  await db.sessions.save(key, {
+  await db.sessions.merge(key, {
     ...record,
     ...(reason === "refresh" && { refreshedAt: new Date() }),
   });
