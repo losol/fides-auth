@@ -58,10 +58,13 @@ export interface StoreSetContext {
 /**
  * Which sessions {@link SessionStore.findMatching} looks for. A record must
  * match every key that is given, each against the field of the same name. A
- * key that isn't compared is left out, never set to undefined.
+ * key that isn't compared is left out, never set to undefined. At least one
+ * of the hashes is given. `iss` is given only when the caller named an issuer:
+ * a user's sessions are found by `subHash` alone, since the hash is keyed with
+ * the session secret and so already belongs to this app.
  */
 export interface SessionMatch {
-  iss: string;
+  iss?: string;
   subHash?: string;
   idpSidHash?: string;
 }
@@ -129,7 +132,7 @@ export function createMemorySessionStore(): SessionStore {
     findMatching({ iss, subHash, idpSidHash }) {
       return Array.from(records, ([key, record]) => ({ key, record })).filter(
         ({ record }) =>
-          record.iss === iss &&
+          (iss === undefined || record.iss === iss) &&
           (subHash === undefined || record.subHash === subHash) &&
           (idpSidHash === undefined || record.idpSidHash === idpSidHash),
       );

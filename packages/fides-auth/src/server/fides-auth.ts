@@ -329,12 +329,14 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   /**
    * Ends every session of one user, wherever they are signed in, and revokes
    * their refresh tokens: for "sign out everywhere", or when an account is
-   * closed. `sub` is the provider's, from the ID token (`session.idp.sub`),
-   * and `iss` defaults to the provider's issuer from its metadata. When the
-   * provider can't be reached, it is the issuer this instance last saw, or else
-   * `oauthConfig.issuer`: pass `iss` when your ID tokens spell the issuer
-   * differently from your config. The browsers keep their cookies, which then
-   * find no session.
+   * closed. `sub` is the provider's, from the ID token (`session.idp.sub`).
+   * It doesn't ask the provider, so it works while the provider is down.
+   *
+   * Without `iss`, every session with that `sub` is ended. Pass `iss` only
+   * when sessions from more than one provider share the store and the secret:
+   * it must then be the ID token's `iss` to the letter (`session.idp.iss`),
+   * and a session whose issuer is spelled any other way is left alone. The
+   * browsers keep their cookies, which then find no session.
    *
    * @returns How many sessions it ended.
    * @throws TypeError without a `sessionStore` that has `findMatching`.
@@ -466,8 +468,6 @@ export function createFidesAuth<TData = Record<string, unknown>>(
   }
   let resolved: ReturnType<typeof resolveSettings> | undefined;
   const settings = () => (resolved ??= resolveSettings());
-  /** The issuer from the last metadata this instance read, for when the provider is down. */
-  let knownIssuer: string | undefined;
 
   /**
    * Revokes the refresh token of a session that has ended, so neither a copy
@@ -806,25 +806,10 @@ export function createFidesAuth<TData = Record<string, unknown>>(
     },
 
     async endUserSessions({ sub, iss }, { trigger = 'logout' } = {}) {
-      // The ID token's `iss`, which a session's lookup fields are stored under.
-      let issuer = iss;
-      if (!issuer) {
-        try {
-          issuer = (await oidc.metadata()).issuer;
-          if (issuer) knownIssuer = issuer;
-        } catch (error) {
-          // Ending local sessions should not depend on the provider being up.
-          issuer = knownIssuer ?? oauthConfig.issuer;
-          log.logout.warn(
-            { issuer, error: getOAuthErrorLogContext(error) },
-            "Could not read the provider's metadata; using the issuer last seen or configured",
-          );
-        }
-      }
-      if (!issuer) {
-        throw new TypeError("endUserSessions needs iss: the provider's metadata has no issuer");
-      }
-      const ended = await settings().lifecycle.endMatching({ iss: issuer, sub }, { trigger });
+      // By `sub` alone unless the caller names an issuer. The lookup hash is
+      // keyed with the session secret, so it already belongs to this app, and
+      // an issuer spelled another way than in the ID token would find nothing.
+      const ended = await settings().lifecycle.endMatching(iss ? { iss, sub } : { sub }, { trigger });
       for (const record of ended) await revokeRefreshToken(record, log.logout);
       log.logout.info({ sessions: ended.length }, "Ended a user's sessions");
       return ended.length;

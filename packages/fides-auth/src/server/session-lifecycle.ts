@@ -141,13 +141,14 @@ export interface SessionLifecycle {
   /**
    * Ends every stored session of one IdP user or IdP session, without their
    * cookies. Like {@link end}, it waits for a refresh still running in this
-   * process and deletes under the store's lock.
+   * process and deletes under the store's lock. With `iss`, only sessions
+   * whose ID token had exactly that issuer.
    *
    * @returns The records ended, with the tokens they held last, so they can be revoked.
    * @throws TypeError without `sub` or `sid`, or when the storage can't search.
    */
   endMatching(
-    match: { iss: string; sub?: string; sid?: string },
+    match: { iss?: string; sub?: string; sid?: string },
     options?: { trigger?: SessionClearedTrigger },
   ): Promise<SessionRecord[]>;
 }
@@ -608,7 +609,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       if (!sub && !sid) throw new TypeError('Ending sessions needs a sub or a sid to match');
 
       // Only the keys to compare, so an adapter can hand the match to its query as it is.
-      const match: SessionMatch = { iss };
+      const match: SessionMatch = {};
+      if (iss) match.iss = iss;
       if (sub) match.subHash = await lookupHash(sub);
       if (sid) match.idpSidHash = await lookupHash(sid);
       const found = await storage.findMatching(match);
@@ -618,7 +620,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         // The plain fields are the store's word. Check them against the sealed
         // record, so a search that matches too much can't end someone else's session.
         const idp = (await openRecord(entry.sealed, secret))?.session.idp;
-        if (idp && (idp.iss !== iss || (sub && idp.sub !== sub) || (sid && idp.sid !== sid))) {
+        if (idp && ((iss && idp.iss !== iss) || (sub && idp.sub !== sub) || (sid && idp.sid !== sid))) {
           logger.warn(
             { correlationId: entry.correlationId },
             'findMatching returned a session that does not match; left alone',

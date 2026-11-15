@@ -44,6 +44,9 @@ describe('createMemorySessionStore', () => {
     expect(await keys({ iss: 'idp', idpSidHash: 'sid-2' })).toEqual(['b']);
     expect(await keys({ iss: 'idp', subHash: 'ada', idpSidHash: 'sid-3' })).toEqual([]);
     expect(await keys({ iss: 'idp' })).toEqual(['a', 'b', 'c']);
+    // Without an issuer, the hash is the whole question.
+    expect(await keys({ subHash: 'ada' })).toEqual(['a', 'b', 'd']);
+    expect(await keys({ idpSidHash: 'sid-1' })).toEqual(['a', 'd']);
   });
 
   it('withLock runs holders of one key in turn and keys independently', async () => {

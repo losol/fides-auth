@@ -67,7 +67,8 @@ optional. The tokens aren't on it: use `getTokens`. `LegacySession` and
 `correlationId`, `iss`, `subHash`, `idpSidHash` and `fields`. `sid` is gone.
 `set` gets a third argument, `{ continuation, reason }`, where `reason` is
 `'login'`, `'refresh'` or `'update'`, and an optional `findMatching`
-lets `endUserSessions` end a user's sessions.
+lets `endUserSessions` end a user's sessions. Its match holds `subHash`, and
+`iss` only when the caller named an issuer.
 
 ## Next.js
 

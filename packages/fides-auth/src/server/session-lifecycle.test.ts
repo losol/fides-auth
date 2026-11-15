@@ -1003,6 +1003,29 @@ describe('the session lifecycle, store storage only', () => {
       expect((await lifecycle.read(bob.cookies)).record?.session.idp?.sub).toBe('bob');
     });
 
+    it('finds a user by sub alone, and narrows to one issuer only when it is named', async () => {
+      const { store, lifecycle, refreshTokens, laptop } = await threeSessions();
+      const find = vi.spyOn(store, 'findMatching');
+
+      // An adapter whose search ignores the issuer: the sealed record still decides.
+      const sloppy: SessionStore = {
+        ...store,
+        findMatching: ({ iss: _iss, ...rest }) => store.findMatching?.(rest) ?? [],
+      };
+      const lenient = createSessionLifecycle({
+        storage: storeStorage({ store: sloppy, secure: true }),
+        secret,
+        refreshTokens,
+        logger: quiet,
+      });
+      expect(await lenient.endMatching({ iss: 'https://IDP.test', sub: 'ada' })).toEqual([]);
+      expect((await lifecycle.read(laptop.cookies)).record).not.toBeNull();
+
+      expect(await lifecycle.endMatching({ sub: 'ada' })).toHaveLength(2);
+      expect(Object.keys(find.mock.calls.at(-1)?.[0] ?? {})).toEqual(['subHash']);
+      expect((await lifecycle.read(laptop.cookies)).record).toBeNull();
+    });
+
     // With a lock the delete queues behind the refresh; without one, the wait in this process does it.
     it.each([
       ['with', (store: SessionStore) => store],

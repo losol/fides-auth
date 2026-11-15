@@ -57,7 +57,7 @@ interface StoreSetContext {
   reason: "login" | "refresh" | "update";
 }
 
-interface SessionMatch { iss: string; subHash?: string; idpSidHash?: string }
+interface SessionMatch { iss?: string; subHash?: string; idpSidHash?: string }
 interface StoredSessionEntry { key: string; record: StoredSession }
 ```
 
@@ -88,7 +88,7 @@ import type { SessionStore, StoredSession } from "@eventuras/fides-auth/server";
 type Doc = Omit<StoredSession, "expiresAt"> & { _id: string; expiresAt: Date };
 const sessions = db.collection<Doc>("sessions");
 await sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-await sessions.createIndex({ iss: 1, subHash: 1 }); // for findMatching
+await sessions.createIndex({ subHash: 1 }); // for findMatching
 
 export const sessionStore: SessionStore = {
   async get(key) {
@@ -109,7 +109,8 @@ export const sessionStore: SessionStore = {
     await sessions.deleteOne({ _id: key });
   },
   async findMatching(match) {
-    // `match` holds only the keys to compare: iss, and subHash or idpSidHash.
+    // `match` holds only the keys to compare: subHash or idpSidHash, and iss
+    // when the caller named one.
     const docs = await sessions.find(match).toArray();
     return docs.map(({ _id, expiresAt, ...record }) => ({
       key: _id,
@@ -167,15 +168,22 @@ const ended = await auth.endUserSessions({ sub }); // how many it ended
 ```
 
 `sub` is the provider's, from the ID token: `session.idp.sub`, which stays the
-same whatever `mapSession` does to `user`. `iss` defaults to the provider's
-issuer from its metadata. If the provider can't be reached, it is the issuer
-this instance last saw, or else `oauthConfig.issuer`, so ending sessions works
-while the provider is down; pass `iss` if your ID tokens spell the issuer
-differently from your config. The instance hashes `sub`, asks the store's `findMatching` for the
-records, and for each one:
+same whatever `mapSession` does to `user`. The sessions are found by `sub`
+alone. The lookup hash is keyed with the session secret, so it already belongs
+to this app, and nothing is asked of the provider: it works while the provider
+is down.
 
-- checks the sealed record's own `iss` and `sub` against the request, so a
-  search that returns too much can't end someone else's session;
+Pass `iss` only when sessions from more than one provider share the store and
+the secret, and two of them could use the same `sub`. It must then be the ID
+token's `iss` to the letter, as in `session.idp.iss`: an issuer spelled any
+other way, with another case or a trailing slash, matches no session.
+
+The instance hashes `sub`, asks the store's `findMatching` for the records,
+and for each one:
+
+- checks the sealed record's own `sub`, and `iss` when one was given, against
+  the request, so a search that returns too much can't end someone else's
+  session;
 - waits for a refresh of it still running in this process, and deletes it under
   `withLock`, like a logout;
 - revokes the refresh token it held last, where the provider has a
@@ -184,7 +192,8 @@ records, and for each one:
 The browsers keep their handle cookies, which then read as `session_not_found`.
 It needs a store with `findMatching` and throws a `TypeError` without one,
 cookie sessions included, rather than answer that it ended nobody's. Index
-`iss` with `subHash` for it, as the MongoDB example does.
+`subHash` for it, as the MongoDB example does: the match may hold no `iss`, so
+an index that starts with `iss` wouldn't serve it.
 
 ## Refresh under concurrency
 

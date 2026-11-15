@@ -904,7 +904,6 @@ describe('session members', () => {
     it('ends a user\'s sessions in every browser, and revokes their refresh tokens', async () => {
       const store = createMemorySessionStore();
       const { auth, cookies, events } = setup({ sessionStore: store });
-      oidc.metadata.mockResolvedValue({ issuer: 'https://idp.test' });
       const phone = cookieJar();
       await login(auth, cookies);
       await login(auth, phone.cookies);
@@ -935,45 +934,73 @@ describe('session members', () => {
       await expect(auth.endUserSessions({ sub: 'user-1', iss: 'https://idp.test' })).rejects.toThrow(TypeError);
     });
 
-    it('ends the sessions while the provider is unreachable, using oauthConfig.issuer', async () => {
+    it('asks the provider for nothing, so it works while the provider is down', async () => {
       const store = createMemorySessionStore();
       const { auth, cookies } = setup({ sessionStore: store });
       await login(auth, cookies);
 
-      // A second instance over the same store, whose discovery fails from the start.
-      const warn = vi.fn();
-      const cold = setup({ sessionStore: store, logger: { create: () => ({ ...quiet, warn }) } });
+      // Another instance over the same store, whose provider can't be reached.
+      const cold = setup({ sessionStore: store });
       oidc.metadata.mockRejectedValue(new Error('provider down'));
 
       expect(await cold.auth.endUserSessions({ sub: 'user-1' })).toBe(1);
+      expect(oidc.metadata).not.toHaveBeenCalled();
       expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
-      expect(warn).toHaveBeenCalledWith(
-        expect.objectContaining({ issuer: 'https://idp.test', error: expect.anything() }),
-        expect.stringContaining('metadata'),
-      );
     });
 
-    it('uses the issuer it last saw, not oauthConfig.issuer, when the provider goes down', async () => {
-      const store = createMemorySessionStore();
-      const { auth, cookies } = setup({
-        sessionStore: store,
-        oauthConfig: {
-          issuer: 'https://idp.test/',
-          clientId: 'web',
-          clientSecret: 'shh',
-          redirectUri: `${APP}/api/auth/callback`,
-          scope: 'openid profile offline_access',
-        },
-      });
-      const phone = cookieJar();
-      await login(auth, cookies);
-      await login(auth, phone.cookies);
+    it('finds the sessions however the config spells the issuer', async () => {
+      // The ID tokens say `https://idp.test`. Each of these is the same issuer to
+      // a person, and another string to a store.
+      for (const issuer of ['https://IDP.test', 'https://idp.test/', 'https://idp.test:443']) {
+        const { auth, cookies } = setup({
+          sessionStore: createMemorySessionStore(),
+          oauthConfig: {
+            issuer,
+            clientId: 'web',
+            clientSecret: 'shh',
+            redirectUri: `${APP}/api/auth/callback`,
+            scope: 'openid profile offline_access',
+          },
+        });
+        const phone = cookieJar();
+        await login(auth, cookies);
+        await login(auth, phone.cookies);
 
-      oidc.metadata.mockResolvedValueOnce({ issuer: 'https://idp.test' });
-      expect(await auth.endUserSessions({ sub: 'user-2' })).toBe(0);
-      oidc.metadata.mockRejectedValue(new Error('provider down'));
+        expect(await auth.endUserSessions({ sub: 'user-1' })).toBe(2);
+        expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+      }
+    });
+
+    it('ends only one provider\'s sessions when the issuer is named', async () => {
+      // Two providers that share a store and a secret, each with a `user-1`.
+      const store = createMemorySessionStore();
+      const { auth, cookies } = setup({ sessionStore: store });
+      const elsewhere = cookieJar();
+      await login(auth, cookies);
+      oidc.exchangeCode.mockResolvedValueOnce(
+        tokens(1, { id_token: new UnsecuredJWT({ iss: 'https://other.test', sub: 'user-1' }).encode() }),
+      );
+      await login(auth, elsewhere.cookies);
+
+      expect(await auth.endUserSessions({ sub: 'user-1', iss: 'https://other.test' })).toBe(1);
+      expect(await auth.readSession(cookies)).not.toBeNull();
+      expect(await auth.tryReadSession(elsewhere.cookies)).toEqual({ session: null, reason: 'session_not_found' });
+
+      // Without one, the sub is the whole question.
+      await login(auth, elsewhere.cookies);
       expect(await auth.endUserSessions({ sub: 'user-1' })).toBe(2);
-      expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+    });
+
+    it('hands the store only the keys to compare', async () => {
+      const store = createMemorySessionStore();
+      const findMatching = vi.spyOn(store, 'findMatching');
+      const { auth, cookies } = setup({ sessionStore: store });
+      await login(auth, cookies);
+
+      await auth.endUserSessions({ sub: 'nobody' });
+      expect(Object.keys(findMatching.mock.calls[0]![0])).toEqual(['subHash']);
+      await auth.endUserSessions({ sub: 'nobody', iss: 'https://idp.test' });
+      expect(Object.keys(findMatching.mock.calls[1]![0]).sort()).toEqual(['iss', 'subHash']);
     });
   });
 
