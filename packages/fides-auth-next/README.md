@@ -92,12 +92,14 @@ In Server Components, Server Actions and Route Handlers:
 const session = await auth.readSession(); // Session | null
 const { session, reason } = await auth.tryReadSession();
 const tokens = await auth.getTokens(); // Tokens | null
+const both = await auth.readSessionWithTokens(); // { session, tokens } in one read
 ```
 
 `readSession` and `tryReadSession` share one read per render. A `Session` has
 `user`, `scopes`, `data`, `idp`, `correlationId`, `createdAt` and `expiresAt`.
 The tokens aren't on it: `getTokens` returns them, and `authorizedFetch` uses
-them.
+them. `getTokens` and `readSessionWithTokens` read every time, since a refresh
+changes the tokens.
 
 `createSession`, `updateSession`, `refreshSession` and `clearSession` write
 cookies, so they work in Server Actions and Route Handlers.

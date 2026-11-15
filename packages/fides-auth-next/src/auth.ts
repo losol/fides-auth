@@ -13,6 +13,7 @@ import {
   type FidesAuthorizedFetchOptions,
   type FidesReadResult,
   type FidesRefreshResult,
+  type FidesSessionWithTokens,
   type RefreshSessionOptions,
 } from '@eventuras/fides-auth/server';
 import type { SessionClearedTrigger } from '@eventuras/fides-auth/session-events';
@@ -59,6 +60,12 @@ export interface FidesAuth {
   tryReadSession(): Promise<FidesReadResult>;
   /** The session's tokens, or null without a session. The access token may have expired. */
   getTokens(): Promise<Tokens | null>;
+  /**
+   * The session and its tokens in one read, or why there is none. Not cached
+   * per render, since a refresh changes the tokens. The tokens are for the
+   * server: hand a Client Component `session`, never this result.
+   */
+  readSessionWithTokens(): Promise<FidesSessionWithTokens>;
   /**
    * Refreshes the tokens, or with `ifExpiresWithin` only when the access token
    * is about to expire. With cookie sessions this writes cookies, so it works
@@ -193,6 +200,7 @@ export function createFidesAuth(config: FidesAuthConfig): FidesAuth {
     readSession: cache(async () => (await tryReadSession()).session),
     tryReadSession,
     getTokens: async () => core.getTokens(await nextCookieStore()),
+    readSessionWithTokens: async () => core.readSessionWithTokens(await nextCookieStore()),
     refreshSession: async (options) => core.refreshSession(await nextCookieStore(), options),
     createSession: async (tokens) => core.createSession(await nextCookieStore(), tokens),
     updateSession: async (update) => core.updateSession(await nextCookieStore(), update),

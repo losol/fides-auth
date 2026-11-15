@@ -13,6 +13,7 @@ export type {
   FidesAuthorizedFetchOptions,
   FidesReadResult,
   FidesRefreshResult,
+  FidesSessionWithTokens,
   MapSession,
   RefreshSessionOptions,
   SessionMatch,

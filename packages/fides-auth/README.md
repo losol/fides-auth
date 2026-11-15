@@ -338,6 +338,7 @@ confidential client.
 | `handleHeartbeat(request, cookies)` | `POST`. Refreshes the session: 401 when it is over, 503 when the provider or the store failed. |
 | `readSession`, `tryReadSession` | The session or null, or why there is none. |
 | `getTokens` | The tokens, which the session doesn't carry. |
+| `readSessionWithTokens` | The session and its tokens in one read, or why there is none. |
 | `refreshSession(cookies, { ifExpiresWithin? })` | Refreshes the tokens, or only when the access token is about to expire. |
 | `createSession`, `updateSession` | |
 | `clearSession(cookies, { trigger? })` | Ends the session and revokes its refresh token, without the redirect. |
@@ -358,6 +359,19 @@ It is sealed with AES-256-GCM into the `__Host-session` cookie, in up to three
 chunks (`session` over plain http). A `Session` has `correlationId`,
 `createdAt`, `expiresAt`, `user`, `scopes`, `idp` and `data`. The tokens aren't
 on it: `getTokens` returns them.
+
+Every read opens the session again, and with a `sessionStore` it is a round
+trip to the store. Code that needs both the session and its tokens reads them
+together:
+
+```typescript
+const { session, tokens, reason } = await auth.readSessionWithTokens(cookies);
+```
+
+Where several parts of one request need the session, as the loaders of one
+page do, read it once per request and pass it on, e.g. from a middleware
+through the request's context. Keep `tokens` on the server, and hand the
+browser `session`.
 
 To keep more of the token response or the ID token claims, pass `mapSession`:
 

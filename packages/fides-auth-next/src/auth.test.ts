@@ -266,6 +266,21 @@ describe('createFidesAuth for Next', () => {
     expect(events.at(-1)).toMatchObject({ event: 'session.cleared', trigger: 'logout' });
   });
 
+  it('reads the session and its tokens together', async () => {
+    const { auth } = setup();
+    expect(await auth.readSessionWithTokens()).toEqual({
+      session: null,
+      tokens: null,
+      reason: 'no_session_cookie',
+    });
+
+    await login(auth);
+    newRender();
+    const { session, tokens } = await auth.readSessionWithTokens();
+    expect(session?.user?.name).toBe('Ada');
+    expect(tokens?.accessToken).toBe('access-1');
+  });
+
   it('keeps the session in a store when given one', async () => {
     const sessionStore = createMemorySessionStore();
     const { auth } = setup({ sessionStore });
