@@ -109,6 +109,13 @@ export interface SessionLifecycleOptions {
    * @default 10
    */
   refreshGraceSeconds?: number;
+  /**
+   * Store storage only. How long to wait before each new try at saving what a
+   * refresh got, in milliseconds. The provider has spent the old refresh token
+   * by then, so tokens that aren't saved are lost.
+   * @default [200, 1000]
+   */
+  saveRetryDelaysMs?: readonly number[];
   /** Runs the refresh token grant, e.g. `oidc.refresh`. */
   refreshTokens(refreshToken: string): Promise<TokenResponse>;
   logger: FidesLogger;
@@ -285,6 +292,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
   // By correlation id, oldest first. A store has no use for it: a request with
   // an old cookie holds the same handle, and reads the new record.
   const recent = new Map<string, RecentRefresh>();
+  // By correlation id: what a refresh got from the provider and the store
+  // didn't take. The store still holds the refresh token that refresh spent.
+  const unsaved = new Map<string, RecentRefresh>();
+  const saveRetryDelaysMs = options.saveRetryDelaysMs ?? [200, 1000];
   let lookupKeyPromise: Promise<CryptoKey> | undefined;
   // By correlation id: the end of the last refresh or update queued for a session.
   const turns = new Map<string, Promise<void>>();
@@ -369,6 +380,44 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     if (!entry || entry.spent !== stale.tokens.refreshToken) return undefined;
     if (entry.until <= Date.now()) {
       recent.delete(stale.session.correlationId);
+      return undefined;
+    }
+    return entry.record;
+  }
+
+  /** At most this many refreshes are kept while the store can't take them. The oldest goes first. */
+  const MAX_UNSAVED = 1000;
+
+  /**
+   * Keeps what a refresh got when the store didn't take it, for as long as
+   * the session lasts: the next refresh or update of the session in this
+   * process saves it. Without it, that refresh would send the provider a
+   * refresh token it has spent, and the session would end there.
+   */
+  function keepUnsaved(spent: string, record: SessionRecord): void {
+    const now = Date.now();
+    for (const [id, entry] of unsaved) {
+      if (entry.until <= now) unsaved.delete(id);
+    }
+    unsaved.delete(record.session.correlationId);
+    if (unsaved.size >= MAX_UNSAVED) {
+      const [oldest] = unsaved.keys();
+      if (oldest !== undefined) unsaved.delete(oldest);
+    }
+    unsaved.set(record.session.correlationId, { spent, record, until: Date.parse(record.session.expiresAt) });
+  }
+
+  /**
+   * What a refresh in this process got for the session `stored` belongs to
+   * and couldn't save, when `stored` still holds the refresh token it spent.
+   */
+  function unsavedAfter(stored: SessionRecord): SessionRecord | undefined {
+    const { correlationId } = stored.session;
+    const entry = unsaved.get(correlationId);
+    if (!entry) return undefined;
+    if (entry.spent !== stored.tokens.refreshToken || entry.until <= Date.now()) {
+      // The store has moved on, or the session is over.
+      unsaved.delete(correlationId);
       return undefined;
     }
     return entry.record;
@@ -543,13 +592,48 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         );
       }
     }
-    const rotatedRefreshToken = updated.tokens.refreshToken !== current.tokens.refreshToken;
-    const written = await save(cookies, updated, 'refresh');
+    return saveRefreshed(cookies, refreshToken, updated);
+  }
+
+  /**
+   * Saves what a refresh got, and reports it. A store that fails is tried
+   * again: the provider has spent `spent`, so the new tokens are all the
+   * session has. If the store still won't take them they are kept in memory,
+   * and the failure is thrown for the refresh to report.
+   */
+  async function saveRefreshed(
+    cookies: CookieStore,
+    spent: string,
+    updated: SessionRecord,
+  ): Promise<RefreshRecordResult> {
+    const correlationId = updated.session.correlationId;
+    const rotatedRefreshToken = updated.tokens.refreshToken !== spent;
+    // Cookies that can't be written won't be writable a second later.
+    const delays = storage.mode === 'server' ? saveRetryDelaysMs : [];
+    let written: SaveResult;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        written = await save(cookies, updated, 'refresh');
+        break;
+      } catch (error) {
+        const delay = delays[attempt];
+        if (delay === undefined) {
+          if (storage.mode === 'server' && rotatedRefreshToken) keepUnsaved(spent, updated);
+          throw error;
+        }
+        logger.warn(
+          { correlationId, attempt: attempt + 1, error: getOAuthErrorLogContext(error) },
+          'Could not save the refreshed session; trying again',
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    unsaved.delete(correlationId);
     if (!written.saved) {
       logger.info({ correlationId }, 'Session ended during refresh; not saved');
       return { ok: false, reason: 'session_not_found', correlationId, ended: true };
     }
-    remember(refreshToken, updated);
+    remember(spent, updated);
     emit({
       event: SESSION_EVENT.REFRESHED,
       correlationId,
@@ -643,6 +727,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         if (refreshedSince(current, latest.record)) return alreadyRefreshed(current, latest.record);
         const latestToken = latest.record.tokens.refreshToken;
         if (!latestToken) return { ok: false, reason: 'no_refresh_token', correlationId };
+        // An earlier refresh here got new tokens that the store never took.
+        // Save those: the token the store holds is one the provider has spent.
+        const kept = unsavedAfter(latest.record);
+        if (kept) return saveRefreshed(cookies, latestToken, kept);
         return refreshNow(cookies, latest.record, latestToken);
       };
 
@@ -672,7 +760,9 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         if (!latest) return null;
         // Under cookie storage the refresh may have been another request's,
         // and this one still carries the cookie from before it.
-        const refreshed = refreshedAfter(latest);
+        // Or, under store storage, the store never took what a refresh here
+        // got: this save brings those tokens with it.
+        const refreshed = refreshedAfter(latest) ?? unsavedAfter(latest);
         const current = refreshed ?? latest;
         const changed = await within(correlationId, 'updateSession', () => update(current.session));
         const updated = { ...current, session: keepIdentity(current.session, changed) };
@@ -681,6 +771,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         // The next request with the old cookie gets the update too.
         const entry = recent.get(correlationId);
         if (entry && entry.record === refreshed) entry.record = updated;
+        if (unsaved.get(correlationId)?.record === refreshed) unsaved.delete(correlationId);
         return updated;
       };
 
@@ -698,8 +789,16 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       const running = current && inflight.get(current.session.correlationId);
       const refreshed = running ? await running.catch(() => undefined) : undefined;
       // Or one that finished just before, when this request still carries the cookie from before it.
-      let ended = (refreshed?.ok ? refreshed.record : current && refreshedAfter(current)) ?? current;
-      if (current) recent.delete(current.session.correlationId);
+      // Or one whose tokens the store never took: those are the ones to revoke.
+      const kept = current && unsaved.get(current.session.correlationId);
+      let ended =
+        (refreshed?.ok
+          ? refreshed.record
+          : current && (refreshedAfter(current) ?? unsavedAfter(current))) ?? current;
+      if (current) {
+        recent.delete(current.session.correlationId);
+        unsaved.delete(current.session.correlationId);
+      }
 
       if (storage.lock) {
         // A refresh on another instance holds the same lock: it either saved
@@ -707,6 +806,9 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         ended = await storage.lock(cookies, async () => {
           const latest = (await read(cookies).catch(() => undefined))?.record;
           await storage.remove(cookies);
+          // What the store holds is the last word, unless it still holds the
+          // refresh token of a refresh whose tokens it never took.
+          if (latest && kept && latest.tokens.refreshToken === kept.spent) return kept.record;
           return latest ?? ended;
         });
       } else {

@@ -408,7 +408,8 @@ What a lock must allow:
   on one pooled connection, and needs another for each query, deadlocks once as
   many sessions refresh at once as the pool has connections.
 - The lock is held across the call to the provider, which openid-client gives
-  up on after 30 seconds. A lock that expires sooner lets a second holder
+  up on after 30 seconds, and a second or so more when the save has to be
+  tried again. A lock that expires sooner lets a second holder
   refresh with the same token.
 - Give the lock a timeout, so a crashed holder doesn't wedge the session. What
   happens when `withLock` rejects, for a timeout or anything else, is the same
@@ -440,6 +441,15 @@ something else, and the session it couldn't refresh is probably fine.
 
 Each failed refresh is a `session.refresh_failed` event with `cause: 'store'`,
 logged at `error`.
+
+One moment is worse than the others: the provider has answered a refresh, and
+the store won't take the new tokens. With a provider that rotates refresh
+tokens, the one the store holds is then spent. So the save is tried twice
+more, after 0.2 and 1 second, and if the store still fails the instance keeps
+the tokens in memory. The next refresh or update of that session on the same
+instance saves them, and a logout revokes them. They don't survive a restart,
+and another instance doesn't have them: a refresh there sends the spent token,
+and the session ends as for any refresh the provider refuses.
 
 ## Security notes
 
