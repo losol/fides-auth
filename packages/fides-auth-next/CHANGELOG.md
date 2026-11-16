@@ -1,5 +1,23 @@
 # @eventuras/fides-auth-next
 
+## 1.0.0-beta.5
+
+### Patch Changes
+
+- 8d6694e: `tokenStatus` says whether a session's access token can still be used: `active`, `refreshable` or `expired`. A
+  session reads until `expiresAt` whatever its tokens are worth, so a login without a refresh token stayed
+  `authenticated: true` for hours after its access token had died, with nothing to tell the two apart.
+  `tryReadSession`, `readSessionWithTokens` and the session info endpoint now give the status. The session itself
+  is left as it is; an app that wants "a session is no better than its token" ends it on `expired`.
+- Updated dependencies [8a172ba]
+- Updated dependencies [3081c1d]
+- Updated dependencies [27ccacd]
+- Updated dependencies [b0ec765]
+- Updated dependencies [8110116]
+- Updated dependencies [8d6694e]
+- Updated dependencies [a03ae17]
+  - @eventuras/fides-auth@1.0.0-beta.5
+
 ## 1.0.0-beta.4
 
 ### Patch Changes
