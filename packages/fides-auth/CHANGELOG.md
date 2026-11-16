@@ -1,5 +1,38 @@
 # @eventuras/fides-auth
 
+## 1.0.0-beta.6
+
+### Minor Changes
+
+- b3d0f1e: `checkAuth` no longer logs the user out when the session check fails. A network error or a 5xx, such as the 503
+  `handleSessionInfo` answers while the session store is down, is not an answer, so a session the browser store holds
+  is kept, with the failure as `error`, until a check answers. That is what the session monitor already did. A check
+  that answers "no session" logs out as before, and a store without a session still ends logged out with the `error`.
+
+### Patch Changes
+
+- 93e7a6e: `docs/server-sessions.md` has a PostgreSQL store next to the MongoDB one, and it is the first example with
+  `withLock`: an advisory lock on a connection from a pool of its own, with what that relies on spelled out. The
+  docs also say plainly that the library never deletes an expired record, so a store without a TTL index has to
+  sweep them itself.
+- dd337be: A session store that fails once, just after the provider has answered a refresh, no longer costs the user the
+  session. With a provider that rotates refresh tokens, the store was left holding a spent one: the next refresh got
+  `invalid_grant`, and under `withLock` the session was deleted. Now the save is tried twice more, after 0.2 and 1
+  second. If the store still fails, the refresh answers `cause: 'store'` as before, and the instance keeps the new
+  tokens in memory: the next refresh or update of that session on the same instance saves them without asking the
+  provider, and a logout revokes them. Another instance doesn't have them, so a store that stays down can still cost
+  a session whose next refresh lands elsewhere.
+- 1cd8a5f: A session store that can't be reached no longer makes the heartbeat, the session info and a refresh throw. Only a
+  `withLock` that rejected was handled; a `get` that threw went straight through, since the read a refresh starts
+  with was outside the handling. Now `refreshSession` answers `{ ok: false, reason: 'refresh_failed', cause: 'store' }`
+  for any call to the store that fails, with or without `ifExpiresWithin`, `handleHeartbeat` answers 503 as
+  documented, and `refreshInProxy` passes the request on instead of failing every page. `handleSessionInfo` answers
+  503 without a body: whether there is a session isn't known, so it says neither.
+  
+  The reads (`readSession`, `tryReadSession`, `getTokens`, `readSessionWithTokens`, `authorizedFetch`) still reject
+  with what the store threw, as `updateSession` does: null would send a logged-in user to a login that fails on the
+  same store. `docs/server-sessions.md` has a table of what each call answers.
+
 ## 1.0.0-beta.5
 
 ### Minor Changes
