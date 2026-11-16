@@ -247,13 +247,36 @@ What a lock must allow:
 - The lock is held across the call to the provider, which openid-client gives
   up on after 30 seconds. A lock that expires sooner lets a second holder
   refresh with the same token.
-- Give the lock a timeout, so a crashed holder doesn't wedge the session. When
-  `withLock` rejects, for a timeout or anything else, the refresh fails with
-  `cause: 'store'` and the heartbeat answers `503`, so the browser retries. A
-  logout that can't take the lock answers `500`.
+- Give the lock a timeout, so a crashed holder doesn't wedge the session. What
+  happens when `withLock` rejects, for a timeout or anything else, is the same
+  as for any other call to the store that fails, see below.
 
 A refresh keeps the handle, so it writes no cookie. It works where cookies
 can't be set, such as a Next.js Server Component.
+
+## When the store can't be reached
+
+A store that throws, from `get`, `set`, `delete` or `withLock`, says nothing
+about the session, so nothing is ended and no cookie is deleted. What the
+caller gets depends on what it asked for:
+
+| Call | Answer |
+|---|---|
+| `refreshSession`, `refreshInProxy` | `{ ok: false, reason: 'refresh_failed', cause: 'store' }`. The proxy passes the request on. |
+| `handleHeartbeat` | `503`, so the browser retries |
+| `handleSessionInfo` | `503` without a body: whether there is a session isn't known |
+| `handleOidcCallback` | The login fails with `login_failed`, see [When a login fails](../README.md#when-a-login-fails) |
+| `handleOidcLogout` | The user stays logged in, and the logout fails with `logout_failed` |
+| `readSession`, `tryReadSession`, `getTokens`, `readSessionWithTokens`, `authorizedFetch`, `updateSession`, `clearSession`, `endUserSessions` | Rejects with what the store threw |
+
+The reads reject rather than answer null: null would send a logged-in user to
+the login page, and that login would fail on the same store. Let the error
+reach the app's error page, or catch it where a page can do without the
+session. A refresh answers instead, since it is asked for on the way to
+something else, and the session it couldn't refresh is probably fine.
+
+Each failed refresh is a `session.refresh_failed` event with `cause: 'store'`,
+logged at `error`.
 
 ## Security notes
 

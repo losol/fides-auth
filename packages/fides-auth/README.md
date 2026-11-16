@@ -384,7 +384,7 @@ confidential client.
 | `handleOidcLogin(request, cookies, { authorizationParameters? })` | `GET`, with an optional `?returnTo=`. Redirects to the provider. |
 | `handleOidcCallback(request, cookies)` | Starts the session. Redirects to the return path with `?login=success`, unless `loginSuccessParam` is false. A login that fails goes to `defaultRedirectPath` with `?login=error&error=<code>`, see [When a login fails](#when-a-login-fails). |
 | `handleOidcLogout(request, cookies, { state?, logoutHint? })` | `POST` from the app's own pages. Ends the session, revokes its refresh token, and redirects to the provider's end-session endpoint. |
-| `handleSessionInfo(request, cookies)` | `GET`. Whether there is a session, whose, when it ends (`expiresAt`), and whether its access token still works (`tokenStatus`). Never refreshes, never returns tokens. |
+| `handleSessionInfo(request, cookies)` | `GET`. Whether there is a session, whose, when it ends (`expiresAt`), and whether its access token still works (`tokenStatus`). Never refreshes, never returns tokens. 503 when the session store failed. |
 | `handleHeartbeat(request, cookies)` | `POST`. Refreshes the session: 401 when it is over, 503 when the provider or the store failed. |
 | `readSession`, `tryReadSession` | The session or null, or why there is none. `tryReadSession` also gives `tokenStatus`. |
 | `getTokens` | The tokens, which the session doesn't carry. |

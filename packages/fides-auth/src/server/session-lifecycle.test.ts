@@ -109,6 +109,27 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
     expect(created.session.user).toEqual({ sub: 'user-1', name: 'Ada', roles: [] });
   });
 
+  it('hands the session back as it is when `unless` says it needs no refresh', async () => {
+    const { lifecycle, cookies, refreshTokens, events } = setup();
+    const created = await lifecycle.create(cookies, tokens(1));
+    const seen: unknown[] = [];
+
+    const skipped = await lifecycle.refresh(cookies, {
+      unless: (record) => {
+        seen.push(record);
+        return true;
+      },
+    });
+    expect(skipped).toEqual({ ok: true, record: created, rotatedRefreshToken: false, skipped: true });
+    expect(seen).toEqual([created]);
+    expect(refreshTokens).not.toHaveBeenCalled();
+    expect(events.map((e) => e.event)).toEqual(['session.created']);
+
+    const refreshed = await lifecycle.refresh(cookies, { unless: () => false });
+    expect(refreshed).toMatchObject({ ok: true, rotatedRefreshToken: true });
+    expect(refreshed).not.toHaveProperty('skipped');
+  });
+
   it('rule 1: a login discards the session the browser arrived with', async () => {
     const { lifecycle, cookies } = setup();
     const first = await lifecycle.create(cookies, tokens(1));
@@ -623,6 +644,21 @@ describe('the session lifecycle, cookie storage only', () => {
     for (const [name, value] of jar) copy.jar.set(name, value);
     return copy;
   }
+
+  it('rejects a refresh whose cookies can\'t be read: without a store, that is the caller\'s mistake', async () => {
+    const { lifecycle, refreshTokens, events } = setup();
+    const outside = new Error('cookies() was called outside a request scope');
+    const cookies: CookieStore = {
+      get: () => {
+        throw outside;
+      },
+      set: () => undefined,
+    };
+
+    await expect(lifecycle.refresh(cookies)).rejects.toBe(outside);
+    expect(refreshTokens).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+  });
 
   it('an update from a request that still carries the old cookie keeps the refreshed tokens', async () => {
     const { lifecycle, cookies, jar, refreshTokens } = setup();
@@ -1301,6 +1337,79 @@ describe('the session lifecycle, store storage only', () => {
     refreshTokens.mockResolvedValueOnce(tokens(3));
     await lifecycle.refresh(late.cookies);
     expect(refreshTokens.mock.calls.map(([token]) => token)).toEqual(['refresh-1', 'refresh-2']);
+  });
+
+  describe.each([
+    ['with', (store: SessionStore): SessionStore => store],
+    ['without', (store: SessionStore): SessionStore => ({ ...store, withLock: undefined })],
+  ])('a store that can\'t be reached, %s a lock', (_, locking) => {
+    function failing(broken: 'get' | 'set') {
+      const base = createMemorySessionStore();
+      const down = new Error('db down');
+      const state = { down: false };
+      const store = locking({
+        ...base,
+        get: async (key) => {
+          if (state.down && broken === 'get') throw down;
+          return base.get(key);
+        },
+        set: async (key, record, context) => {
+          if (state.down && broken === 'set') throw down;
+          return base.set(key, record, context);
+        },
+      });
+      const events: SessionEvent[] = [];
+      const refreshTokens = vi.fn(async () => tokens(2));
+      const lifecycle = createSessionLifecycle({
+        storage: storeStorage({ store, secure: true }),
+        secret,
+        refreshTokens,
+        logger: quiet,
+        onSessionEvent: (event) => events.push(event),
+      });
+      return { lifecycle, refreshTokens, events, state, down, ...cookieJar() };
+    }
+
+    it('fails a refresh that can\'t read the session as a store failure, before the provider is asked', async () => {
+      const { lifecycle, refreshTokens, events, state, cookies } = failing('get');
+      const created = await lifecycle.create(cookies, tokens(1));
+      state.down = true;
+
+      expect(await lifecycle.refresh(cookies)).toEqual({ ok: false, reason: 'refresh_failed', cause: 'store' });
+      expect(await lifecycle.refresh(cookies, { unless: () => true })).toMatchObject({ ok: false, cause: 'store' });
+      expect(refreshTokens).not.toHaveBeenCalled();
+      expect(events.at(-1)).toMatchObject({
+        event: 'session.refresh_failed',
+        cause: 'store',
+        error: { message: 'db down' },
+      });
+
+      state.down = false;
+      expect((await lifecycle.read(cookies)).record).toEqual(created);
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: true });
+    });
+
+    it('fails a refresh that can\'t save the new tokens as a store failure', async () => {
+      const { lifecycle, events, state, cookies } = failing('set');
+      const created = await lifecycle.create(cookies, tokens(1));
+      state.down = true;
+
+      expect(await lifecycle.refresh(cookies)).toEqual({
+        ok: false,
+        reason: 'refresh_failed',
+        cause: 'store',
+        correlationId: created.session.correlationId,
+      });
+      expect(events.at(-1)).toMatchObject({ event: 'session.refresh_failed', cause: 'store' });
+    });
+
+    it('still rejects a read with what the store threw', async () => {
+      const { lifecycle, state, down, cookies } = failing('get');
+      await lifecycle.create(cookies, tokens(1));
+      state.down = true;
+
+      await expect(lifecycle.read(cookies)).rejects.toBe(down);
+    });
   });
 
   it('fails a refresh whose lock it can\'t take as a store failure, and keeps the session', async () => {
