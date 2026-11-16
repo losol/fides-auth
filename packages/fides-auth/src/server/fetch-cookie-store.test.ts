@@ -123,3 +123,41 @@ describe('fetchCookieStore: the response', () => {
     expect(response.headers.getSetCookie()).toHaveLength(1);
   });
 });
+
+describe('fetchCookieStore: a write after the cookies were taken', () => {
+  it('throws on a set after headers(), naming the cookie', () => {
+    const cookies = fetchCookieStore(request());
+    cookies.headers();
+    expect(() => cookies.set('late', '1')).toThrow(/Cookie "late" was set after .*headers\(\) or apply\(\)/);
+    expect(() => cookies.set('late', '1')).not.toThrow(TypeError);
+  });
+
+  it('throws on a set after apply()', () => {
+    const cookies = fetchCookieStore(request());
+    cookies.apply(new Response('body'));
+    expect(() => cookies.set('late', '1')).toThrow(/Cookie "late" was set after/);
+  });
+
+  it('gives the too-late error, not the validation one, for a late unsafe write', () => {
+    const cookies = fetchCookieStore(request());
+    cookies.headers();
+    expect(() => cookies.set('a b', '1')).toThrow(/was set after/);
+  });
+
+  it('still writes before the cookies are taken, and gives the same lines each time', () => {
+    const cookies = fetchCookieStore(request());
+    cookies.set('a', '1');
+    const first = cookies.headers().getSetCookie();
+    expect(first).toEqual(['a=1; Path=/; HttpOnly; Secure; SameSite=Lax']);
+    expect(cookies.headers().getSetCookie()).toEqual(first);
+    expect(cookies.apply(new Response()).headers.getSetCookie()).toEqual(first);
+  });
+
+  it('still reads after the cookies were taken', () => {
+    const cookies = fetchCookieStore(request('sent=1'));
+    cookies.set('written', '2');
+    cookies.headers();
+    expect(cookies.get('sent')).toBe('1');
+    expect(cookies.get('written')).toBe('2');
+  });
+});
