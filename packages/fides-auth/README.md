@@ -362,9 +362,9 @@ confidential client.
 | `handleOidcLogin(request, cookies, { authorizationParameters? })` | `GET`, with an optional `?returnTo=`. Redirects to the provider. |
 | `handleOidcCallback(request, cookies)` | Starts the session. Redirects to the return path with `?login=success`, unless `loginSuccessParam` is false. A login that fails goes to `defaultRedirectPath` with `?login=error&error=<code>`, see [When a login fails](#when-a-login-fails). |
 | `handleOidcLogout(request, cookies, { state?, logoutHint? })` | `POST` from the app's own pages. Ends the session, revokes its refresh token, and redirects to the provider's end-session endpoint. |
-| `handleSessionInfo(request, cookies)` | `GET`. Whether there is a session, whose, and when it ends (`expiresAt`). Never refreshes, never returns tokens. |
+| `handleSessionInfo(request, cookies)` | `GET`. Whether there is a session, whose, when it ends (`expiresAt`), and whether its access token still works (`tokenStatus`). Never refreshes, never returns tokens. |
 | `handleHeartbeat(request, cookies)` | `POST`. Refreshes the session: 401 when it is over, 503 when the provider or the store failed. |
-| `readSession`, `tryReadSession` | The session or null, or why there is none. |
+| `readSession`, `tryReadSession` | The session or null, or why there is none. `tryReadSession` also gives `tokenStatus`. |
 | `getTokens` | The tokens, which the session doesn't carry. |
 | `readSessionWithTokens` | The session and its tokens in one read, or why there is none. |
 | `refreshSession(cookies, { ifExpiresWithin? })` | Refreshes the tokens, or only when the access token is about to expire. |
@@ -548,8 +548,29 @@ await auth.refreshSession(cookies, { ifExpiresWithin: 60 });
 The window never covers more than half the token's lifetime. A 20-second token
 is refreshed once 10 seconds have passed, not on every call.
 
-A session reads until `expiresAt`, whether or not its tokens still work. When
-the provider refuses a refresh for good, the result has `cause:
+A session reads until `expiresAt`, whether or not its tokens still work.
+`tokenStatus` tells the two apart. `tryReadSession`, `readSessionWithTokens`
+and the session info endpoint give it:
+
+| `tokenStatus` | |
+|---|---|
+| `active` | The access token hasn't expired, or the provider gave no lifetime to go by. |
+| `refreshable` | It has expired, and the session holds a refresh token: refresh before calling an API. |
+| `expired` | It has expired and there is no refresh token. The user is still logged in, but calls with the token fail until a new login. |
+
+A login without a refresh token, where `offline_access` isn't granted say,
+ends up `expired` when the access token dies, often long before the session
+does. The session is left as it is, since who the user is hasn't changed. An
+app that takes a session to be no better than its token ends it there:
+
+```typescript
+const { session, tokenStatus } = await auth.tryReadSession(cookies);
+if (session && tokenStatus === "expired") {
+  await auth.clearSession(cookies, { trigger: "rejected" });
+}
+```
+
+When the provider refuses a refresh for good, the result has `cause:
 "invalid_grant"` and the user must log in again. A session in a `sessionStore`
 that implements `withLock` is ended there and then: its record is deleted, and
 its cookie too where cookies can be set. A cookie session, or one in

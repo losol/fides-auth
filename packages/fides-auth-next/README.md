@@ -96,8 +96,8 @@ Logout answers only a `POST` from the app's own pages, so a form does it:
 
 `handleSessionInfo` answers whether there is a session, whose, and when it
 ends: `expiresAt` is the session's own end, which a refresh doesn't move, so a
-page can warn before the user is logged out. It never refreshes and never
-returns tokens. `handleHeartbeat` is there for apps that tie
+page can warn before the user is logged out. `tokenStatus` says whether the
+access token still works. It never refreshes and never returns tokens. `handleHeartbeat` is there for apps that tie
 refreshes to user activity; it too answers only a same-origin `POST`.
 
 ## Reading the session
@@ -106,10 +106,15 @@ In Server Components, Server Actions and Route Handlers:
 
 ```typescript
 const session = await auth.readSession(); // Session | null
-const { session, reason } = await auth.tryReadSession();
+const { session, tokenStatus, reason } = await auth.tryReadSession();
 const tokens = await auth.getTokens(); // Tokens | null
 const both = await auth.readSessionWithTokens(); // { session, tokens } in one read
 ```
+
+A session reads until `expiresAt`, whether or not its tokens still work.
+`tokenStatus` is `active`, `refreshable` or `expired`: the last is a user who
+is logged in with an access token that has died and can't be refreshed. See
+[Keeping the session fresh](../fides-auth/README.md#keeping-the-session-fresh).
 
 `readSession` and `tryReadSession` share one read per render. A `Session` has
 `user`, `scopes`, `data`, `idp`, `correlationId`, `createdAt` and `expiresAt`.

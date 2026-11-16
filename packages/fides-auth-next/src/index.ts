@@ -6,7 +6,14 @@ export {
 export { nextCookieStore } from './cookie-store.js';
 
 // The types an app needs to configure the instance and use its results.
-export type { Session, SessionInfo, SessionUser, TokenResponse, Tokens } from '@eventuras/fides-auth';
+export type {
+  Session,
+  SessionInfo,
+  SessionUser,
+  TokenResponse,
+  Tokens,
+  TokenStatus,
+} from '@eventuras/fides-auth';
 export type {
   CookieStore,
   FidesAuthConfig,

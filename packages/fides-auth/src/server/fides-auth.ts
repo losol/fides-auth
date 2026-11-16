@@ -20,11 +20,17 @@ import type {
   SessionInfo,
   Tokens,
   TokenResponse,
+  TokenStatus,
 } from '../shared/types.js';
 import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { redirectUriOf, type OidcClientConfig } from '../protocol/config.js';
 import { getOAuthErrorLogContext } from '../protocol/logging.js';
-import { checkSessionDuration, type MapRecordSession, type SessionRecord } from '../session/record.js';
+import {
+  checkSessionDuration,
+  type MapRecordSession,
+  type SessionRecord,
+  tokenStatusOf,
+} from '../session/record.js';
 import type { RolesClaim } from '../session/user-claims.js';
 import { authorizedFetch as fetchWithTokens, type AuthorizedFetchOptions } from './authorized-fetch.js';
 import type { CookieStore } from './cookie-store.js';
@@ -225,13 +231,24 @@ export interface FidesAuthConfig<TData = Record<string, unknown>> {
 
 /** The result of {@link FidesAuth.tryReadSession}. */
 export type FidesReadResult<TData = Record<string, unknown>> =
-  | { session: Session<TData>; reason?: undefined }
-  | { session: null; reason: SessionRejectedReason };
+  | {
+      session: Session<TData>;
+      /** Whether the access token can still be used. The session reads either way. */
+      tokenStatus: TokenStatus;
+      reason?: undefined;
+    }
+  | { session: null; tokenStatus?: undefined; reason: SessionRejectedReason };
 
 /** The result of {@link FidesAuth.readSessionWithTokens}. */
 export type FidesSessionWithTokens<TData = Record<string, unknown>> =
-  | { session: Session<TData>; tokens: Tokens; reason?: undefined }
-  | { session: null; tokens: null; reason: SessionRejectedReason };
+  | {
+      session: Session<TData>;
+      tokens: Tokens;
+      /** Whether the access token can still be used. The session reads either way. */
+      tokenStatus: TokenStatus;
+      reason?: undefined;
+    }
+  | { session: null; tokens: null; tokenStatus?: undefined; reason: SessionRejectedReason };
 
 /** Options for {@link FidesAuth.refreshSession}. */
 export interface RefreshSessionOptions {
@@ -299,14 +316,19 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   /** `POST`. Refreshes the session. 401 means it is over; 503 means the provider or the store failed. */
   handleHeartbeat(request: Request, cookies: CookieStore): Promise<Response>;
   /**
-   * `GET`. Whether there is a session, whose, and when it ends. Never
-   * refreshes, never returns tokens.
+   * `GET`. Whether there is a session, whose, when it ends, and whether its
+   * access token still works (`tokenStatus`). Never refreshes, never returns
+   * tokens.
    */
   handleSessionInfo(request: Request, cookies: CookieStore): Promise<Response>;
 
   /** The session, or null. */
   readSession(cookies: CookieStore): Promise<Session<TData> | null>;
-  /** The session, or why there is none. */
+  /**
+   * The session, or why there is none. With a session comes `tokenStatus`:
+   * a session reads until `expiresAt`, also when its access token has
+   * expired and can't be refreshed, and `'expired'` says so.
+   */
   tryReadSession(cookies: CookieStore): Promise<FidesReadResult<TData>>;
   /** The session's tokens, or null without a session. */
   getTokens(cookies: CookieStore): Promise<Tokens | null>;
@@ -571,7 +593,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
   async function tryReadSession(cookies: CookieStore): Promise<FidesReadResult<TData>> {
     const read = await settings().lifecycle.read(cookies);
     return read.record
-      ? { session: typed(read.record.session) }
+      ? { session: typed(read.record.session), tokenStatus: tokenStatusOf(read.record.tokens) }
       : { session: null, reason: read.reason };
   }
 
@@ -841,6 +863,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
             user: record.session.user,
             scopes: record.session.scopes,
             accessTokenExpiresAt: record.tokens.accessTokenExpiresAt ?? null,
+            tokenStatus: tokenStatusOf(record.tokens),
             expiresAt: record.session.expiresAt,
           }
         : { authenticated: false };
@@ -853,7 +876,11 @@ export function createFidesAuth<TData = Record<string, unknown>>(
     async readSessionWithTokens(cookies) {
       const read = await settings().lifecycle.read(cookies);
       return read.record
-        ? { session: typed(read.record.session), tokens: read.record.tokens }
+        ? {
+            session: typed(read.record.session),
+            tokens: read.record.tokens,
+            tokenStatus: tokenStatusOf(read.record.tokens),
+          }
         : { session: null, tokens: null, reason: read.reason };
     },
     refreshSession,
