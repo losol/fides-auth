@@ -86,8 +86,13 @@ library's side:
   takes it for ended, and deletes its cookie.
 
 `createMemorySessionStore()` ships for tests and single-instance development;
-sessions don't survive a restart. Database adapters belong in your app. A
-MongoDB one, with the TTL index doing the sweeping:
+sessions don't survive a restart. Database adapters belong in your app.
+
+The library stops reading a record once it has expired, but it never deletes
+one: sweeping is the store's job. A record whose cookie has expired in the
+browser is never asked for again, so a store that doesn't sweep only grows.
+
+A MongoDB adapter, with the TTL index doing the sweeping:
 
 ```ts
 import type { SessionStore, StoredSession } from "@eventuras/fides-auth/server";
@@ -140,6 +145,164 @@ async set(key, record, { reason }) {
     ...(reason === "refresh" && { refreshedAt: new Date() }),
   });
 },
+```
+
+## A PostgreSQL store
+
+The same for PostgreSQL with [pg](https://node-postgres.com), and with
+`withLock`, which an app that runs more than one instance needs: see
+[Refresh under concurrency](#refresh-under-concurrency). The lock is an
+advisory lock, held on a connection from a pool of its own.
+
+```sql
+create table sessions (
+  key text primary key,
+  data text not null,
+  expires_at timestamptz not null,
+  correlation_id text,
+  iss text,
+  sub_hash text,
+  idp_sid_hash text,
+  fields jsonb
+);
+create index on sessions (sub_hash);   -- for findMatching
+create index on sessions (expires_at); -- for the sweep
+```
+
+```ts
+import type { SessionStore, StoredSession } from "@eventuras/fides-auth/server";
+import pg from "pg";
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+// A lock keeps a connection of its own for as long as it is held, so the
+// queries inside `fn` never wait for one.
+const lockPool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 20, // how many sessions this instance can refresh at once
+  connectionTimeoutMillis: 5_000, // one more than that waits this long, then fails
+  options: "-c lock_timeout=35s", // how long a refresh waits for another's lock
+});
+// An idle connection that is lost emits "error". Without a listener, that ends the process.
+for (const each of [pool, lockPool]) each.on("error", (error) => console.error(error));
+
+interface Row {
+  key: string;
+  data: string;
+  expires_at: Date;
+  correlation_id: string | null;
+  iss: string | null;
+  sub_hash: string | null;
+  idp_sid_hash: string | null;
+  fields: StoredSession["fields"] | null;
+}
+
+const toRecord = (row: Row): StoredSession => ({
+  data: row.data,
+  expiresAt: row.expires_at.toISOString(),
+  ...(row.correlation_id && { correlationId: row.correlation_id }),
+  ...(row.iss && { iss: row.iss }),
+  ...(row.sub_hash && { subHash: row.sub_hash }),
+  ...(row.idp_sid_hash && { idpSidHash: row.idp_sid_hash }),
+  ...(row.fields && { fields: row.fields }),
+});
+
+const columns = { iss: "iss", subHash: "sub_hash", idpSidHash: "idp_sid_hash" } as const;
+
+export const sessionStore: SessionStore = {
+  async get(key) {
+    const { rows } = await pool.query<Row>("select * from sessions where key = $1", [key]);
+    return rows[0] ? toRecord(rows[0]) : null;
+  },
+  async set(key, record, { continuation }) {
+    const values = [
+      key,
+      record.data,
+      record.expiresAt,
+      record.correlationId ?? null,
+      record.iss ?? null,
+      record.subHash ?? null,
+      record.idpSidHash ?? null,
+      record.fields ? JSON.stringify(record.fields) : null,
+    ];
+    // Only a new session inserts. A refresh or an update that finds no row
+    // leaves it so: the session was ended while it ran.
+    await pool.query(
+      continuation
+        ? `update sessions set data = $2, expires_at = $3, correlation_id = $4, iss = $5,
+             sub_hash = $6, idp_sid_hash = $7, fields = $8
+           where key = $1`
+        : `insert into sessions (key, data, expires_at, correlation_id, iss, sub_hash, idp_sid_hash, fields)
+           values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      values,
+    );
+  },
+  async delete(key) {
+    await pool.query("delete from sessions where key = $1", [key]);
+  },
+  async withLock(key, fn) {
+    const client = await lockPool.connect();
+    // The connection sits idle while `fn` runs. If it is lost then, in a
+    // failover say, there is no query to reject, and its "error" event would
+    // end the process without this listener.
+    const lost = (): void => undefined;
+    client.on("error", lost);
+    try {
+      await client.query("select pg_advisory_lock(hashtextextended($1, 0))", [key]);
+    } catch (error) {
+      client.off("error", lost);
+      client.release();
+      throw error;
+    }
+    try {
+      return await fn();
+    } finally {
+      // A connection that can't unlock is closed, and PostgreSQL lets go of its locks.
+      const unlocked = await client
+        .query("select pg_advisory_unlock(hashtextextended($1, 0))", [key])
+        .then(() => true, () => false);
+      client.off("error", lost);
+      client.release(!unlocked);
+    }
+  },
+  async findMatching(match) {
+    // `match` holds only the keys to compare: subHash or idpSidHash, and iss
+    // when the caller named one.
+    const keys = (Object.keys(columns) as (keyof typeof columns)[]).filter(
+      (name) => match[name] !== undefined,
+    );
+    const where = keys.map((name, i) => `${columns[name]} = $${i + 1}`).join(" and ");
+    const { rows } = await pool.query<Row>(
+      `select * from sessions where ${where}`,
+      keys.map((name) => match[name]),
+    );
+    return rows.map((row) => ({ key: row.key, record: toRecord(row) }));
+  },
+};
+```
+
+What the lock relies on:
+
+- **Two pools.** A lock holds its connection for as long as the refresh takes,
+  up to 30 seconds when the provider is slow. Taken from the pool the queries
+  use, the locks would starve the `get` and `set` they are waiting for. The
+  lock pool's `max` is how many sessions one instance refreshes at once. One
+  more waits `connectionTimeoutMillis` for a connection and then fails with
+  `cause: 'store'`, which the browser retries.
+- **`lock_timeout`** is how long a refresh waits for a lock another holds, not
+  how long a lock lasts. It is longer than the 30 seconds a holder may spend
+  on the provider, so a waiter doesn't give up on a holder that is still at
+  work. The lock itself has no lifetime: it is held until it is unlocked or
+  its connection ends, so an instance that crashes lets go of its locks when
+  its connections close.
+- **A real session.** The lock belongs to the connection. Connect the lock
+  pool to PostgreSQL directly, or through a pooler in session mode: PgBouncer
+  in transaction mode hands the unlock to another connection.
+
+PostgreSQL has no TTL index, so sweep on a schedule, hourly say, from
+`pg_cron` or the app's own scheduler:
+
+```sql
+delete from sessions where expires_at < now();
 ```
 
 ## Your own fields
