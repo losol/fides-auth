@@ -1023,6 +1023,40 @@ describe('the session lifecycle, store storage only', () => {
     expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'session_not_found' });
   });
 
+  it('does not bring back a session ended between its check and its write, without a lock', async () => {
+    // Without a lock the library can only check that the record is there and
+    // then write. A logout on another instance can land in between, and it is
+    // the store that must not create the record again.
+    const { lifecycle: _, ...base } = setup();
+    let logoutElsewhere = false;
+    const store: SessionStore = {
+      ...base.store,
+      withLock: undefined,
+      set: (key, record, context) => {
+        if (logoutElsewhere) void base.store.delete(key);
+        return base.store.set(key, record, context);
+      },
+    };
+    const lifecycle = createSessionLifecycle({
+      storage: storeStorage({ store, secure: true }),
+      secret,
+      refreshTokens: base.refreshTokens,
+      logger: quiet,
+    });
+    await lifecycle.create(base.cookies, tokens(1));
+    logoutElsewhere = true;
+
+    await lifecycle.refresh(base.cookies);
+    logoutElsewhere = false;
+    expect(await lifecycle.read(base.cookies)).toEqual({ record: null, reason: 'session_not_found' });
+
+    await lifecycle.create(base.cookies, tokens(1));
+    logoutElsewhere = true;
+    await lifecycle.update(base.cookies, (session) => ({ ...session, data: { a: 1 } }));
+    logoutElsewhere = false;
+    expect(await lifecycle.read(base.cookies)).toEqual({ record: null, reason: 'session_not_found' });
+  });
+
   it('does not bring back a session another instance ended while its refresh ran, without a lock', async () => {
     const { lifecycle: _, ...base } = setup();
     const store: SessionStore = { ...base.store, withLock: undefined };
