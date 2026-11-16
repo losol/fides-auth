@@ -66,7 +66,11 @@ library sets: `iss`, `subHash` and `idpSidHash` are what finds a user's sessions
 for [`endUserSessions`](#ending-a-users-sessions) and for back-channel logout.
 `set` gets `continuation: false` for a new session, which always comes with a
 new key, and `true` for a refresh or an update of one the store has, so an
-adapter can insert or update. `reason` says why the record is written:
+adapter can insert or update. For a continuation it must update only, and do
+nothing when the record is gone: the session was then ended while the refresh
+or the update ran, and an upsert would bring it back. The library checks that
+the record is there before it writes, but without `withLock` a logout on
+another instance can land between the check and the write. `reason` says why the record is written:
 `'login'` for a new session, `'refresh'` when the tokens were refreshed, and
 `'update'` when the app changed the session with `updateSession`. On the
 library's side:
@@ -100,12 +104,14 @@ export const sessionStore: SessionStore = {
     const { _id, expiresAt, ...record } = doc;
     return { ...record, expiresAt: expiresAt.toISOString() };
   },
-  async set(key, record) {
-    // On an insert, the new document takes its `_id` from the filter.
+  async set(key, record, { continuation }) {
+    // Only a new session may insert. A refresh or an update that finds no
+    // document must leave it so: the session was ended while it ran. On an
+    // insert, the new document takes its `_id` from the filter.
     await sessions.replaceOne(
       { _id: key },
       { ...record, expiresAt: new Date(record.expiresAt) },
-      { upsert: true },
+      { upsert: !continuation },
     );
   },
   async delete(key) {

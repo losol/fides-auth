@@ -44,6 +44,10 @@ export interface StoreSetContext {
    * True for a refresh or an update of a session the store already has. False
    * for a new session, which always comes with a new key. It is
    * `reason !== 'login'`.
+   *
+   * A continuation updates a record and must never create one. If the record
+   * is gone, the session was ended while the refresh or the update ran, on
+   * another instance say, and writing it would bring the session back.
    */
   continuation: boolean;
   /**
@@ -84,7 +88,13 @@ export interface StoredSessionEntry {
 export interface SessionStore {
   /** Returns the record, or null/undefined when there is none. May return an expired record. */
   get(key: string): StoredSession | null | undefined | Promise<StoredSession | null | undefined>;
-  /** Creates or replaces the record. `context` says whether the session is new. */
+  /**
+   * Creates the record of a new session, or replaces the record of one that
+   * is refreshed or updated: `context.continuation` says which. For a
+   * continuation it must do nothing when there is no record under `key`, and
+   * never create one: an upsert there would bring back a session that was
+   * ended a moment before.
+   */
   set(key: string, record: StoredSession, context: StoreSetContext): void | Promise<void>;
   /** Removes the record. Deleting a missing key is not an error. */
   delete(key: string): void | Promise<void>;
@@ -123,7 +133,9 @@ export function createMemorySessionStore(): SessionStore {
       }
       return record;
     },
-    set(key, record) {
+    set(key, record, { continuation }) {
+      // An ended session stays ended: a refresh that was still running doesn't bring it back.
+      if (continuation && !records.has(key)) return;
       records.set(key, record);
     },
     delete(key) {

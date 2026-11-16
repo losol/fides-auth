@@ -16,6 +16,20 @@ describe('createMemorySessionStore', () => {
     await expect(Promise.resolve(store.delete('k'))).resolves.toBeUndefined();
   });
 
+  it('never creates a record for a continuation: an ended session stays ended', async () => {
+    const store = createMemorySessionStore();
+    const record = { data: 'd', expiresAt: future };
+
+    await store.set('gone', record, { continuation: true, reason: 'refresh' });
+    await store.set('gone', record, { continuation: true, reason: 'update' });
+    expect(await store.get('gone')).toBeNull();
+
+    // A continuation of a record that is there replaces it.
+    await store.set('k', record, { continuation: false, reason: 'login' });
+    await store.set('k', { ...record, data: 'd2' }, { continuation: true, reason: 'refresh' });
+    expect((await store.get('k'))?.data).toBe('d2');
+  });
+
   it('drops an expired record on read', async () => {
     const store = createMemorySessionStore();
     await store.set('k', { data: 'd', expiresAt: '2000-01-01T00:00:00.000Z' }, { continuation: false, reason: 'login' });
