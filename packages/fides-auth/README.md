@@ -257,7 +257,7 @@ user an access token belongs to. Use it for claims the provider only gives there
 
 ```typescript
 const { session, tokens } = await auth.readSessionWithTokens(cookies);
-if (session?.idp && tokens) {
+if (session?.idp && tokens?.accessToken) {
   const claims = await auth.oidc.userInfo(tokens.accessToken, { expectedSubject: session.idp.sub });
 }
 ```
