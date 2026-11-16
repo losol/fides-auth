@@ -279,3 +279,7 @@ one writes JSON lines to the console.
   only a handle. The cookies are `Secure` unless `redirectUri` is plain http.
 - **The browser store asks the session info endpoint** by default, and its user
   is the session's `user`, where `roles` may be absent.
+- **`checkAuth` keeps a session through a check that fails.** A network error
+  or a 5xx is not an answer, so a logged-in store stays logged in, with the
+  failure as `error`. 0.x logged the user out. A check that answers "no
+  session" still logs out.

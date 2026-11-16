@@ -757,6 +757,9 @@ const stop = startSessionMonitor(authStore, {
   `isInitializing`, and is a new object on every change. Change it with its
   methods: `authSuccess(user)`, `authFailed(error?)`, `sessionExpired()`,
   `logout()`, `setError(error)` and `clearError()`.
+  `checkAuth(store)` asks again. A check that fails, because the network or
+  the server is down, is not an answer: a session the store holds is kept,
+  with the failure as `error`, until a check answers.
 - **The monitor** checks every 30 seconds. When a session the store held is
   gone, it calls `onSessionExpired` and stops. A visitor who was never logged in
   just stays logged out, so it can run on every page. It never refreshes.

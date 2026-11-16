@@ -158,6 +158,43 @@ describe('checkAuth', () => {
       throw new Error('kaboom');
     });
     await checkAuth(auth);
-    expect(auth.getSnapshot()).toMatchObject({ isAuthenticated: false, error: 'kaboom' });
+    expect(auth.getSnapshot()).toMatchObject({ isAuthenticated: false, isInitializing: false, error: 'kaboom' });
+  });
+
+  it('keeps a session it holds when the check fails: that is no answer', async () => {
+    let answer: () => Promise<SessionInfo> = async () => {
+      throw new Error('Session check failed with status 503');
+    };
+    const auth = store(() => answer());
+    auth.authSuccess(admin);
+    const held = auth.getSnapshot();
+
+    await checkAuth(auth);
+    expect(auth.getSnapshot()).toEqual({ ...held, error: 'Session check failed with status 503' });
+
+    // The next check that answers settles it, either way.
+    answer = async () => ({ authenticated: true, user: admin });
+    await checkAuth(auth);
+    expect(auth.getSnapshot()).toMatchObject({ user: admin, isAuthenticated: true, error: null });
+
+    answer = async () => ({ authenticated: false });
+    await checkAuth(auth);
+    expect(auth.getSnapshot()).toMatchObject({ user: null, isAuthenticated: false, isAdmin: false });
+  });
+
+  it('keeps a session through a 503 from the session info endpoint', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ authenticated: true, user: admin }));
+    vi.stubGlobal('fetch', fetchMock);
+    const auth = createAuthStore({ logger: quiet });
+    await initializeAuth(auth);
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
+    await checkAuth(auth);
+    expect(auth.getSnapshot()).toMatchObject({
+      user: admin,
+      isAuthenticated: true,
+      isAdmin: true,
+      error: 'Session check failed with status 503',
+    });
   });
 });

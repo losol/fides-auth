@@ -53,12 +53,13 @@ export interface AuthStore {
   initialize(): void;
   /** A session check or a login found this user. */
   authSuccess(user: AuthUser): void;
-  /** There is no session, or the check failed with `error`. */
+  /** There is no session, or none could be found: the check failed with `error`. */
   authFailed(error?: string): void;
   /** A session the store held has ended. Sets `error` to 'Session expired'. */
   sessionExpired(): void;
   /** The user logged out. */
   logout(): void;
+  /** Sets `error` and leaves the rest, e.g. for a check that failed while a session is held. */
   setError(error: string): void;
   clearError(): void;
 }
@@ -183,9 +184,15 @@ export async function initializeAuth(store: AuthStore): Promise<void> {
 }
 
 /**
- * Checks the session again and updates the store. A rejected refresh token
- * from a custom `checkAuthStatus` ends the session; any other failure is kept
- * as `error`.
+ * Checks the session again and updates the store. An answer is taken as it
+ * is: a user logs in, no user logs out. A rejected refresh token from a
+ * custom `checkAuthStatus` ends the session.
+ *
+ * A check that fails, because the network or the server is down, is not an
+ * answer. A session the store holds is then kept, with the failure as
+ * `error`, as the monitor keeps it: the user is probably still logged in, and
+ * the next check that answers settles it. Without a session to keep, the
+ * store ends logged out with the same `error`.
  */
 export async function checkAuth(store: AuthStore): Promise<void> {
   try {
@@ -193,7 +200,9 @@ export async function checkAuth(store: AuthStore): Promise<void> {
     if (status.authenticated && status.user) store.authSuccess(status.user);
     else store.authFailed();
   } catch (error) {
-    if (isInvalidGrant(error)) store.sessionExpired();
-    else store.authFailed(error instanceof Error ? error.message : 'Unknown error');
+    if (isInvalidGrant(error)) return store.sessionExpired();
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    if (store.getSnapshot().isAuthenticated) store.setError(message);
+    else store.authFailed(message);
   }
 }
