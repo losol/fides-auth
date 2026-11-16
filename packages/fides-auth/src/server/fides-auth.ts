@@ -318,7 +318,7 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   /**
    * `GET`. Whether there is a session, whose, when it ends, and whether its
    * access token still works (`tokenStatus`). Never refreshes, never returns
-   * tokens.
+   * tokens. 503 means the session store failed, so there is no answer.
    */
   handleSessionInfo(request: Request, cookies: CookieStore): Promise<Response>;
 
@@ -350,6 +350,9 @@ export interface FidesAuth<TData = Record<string, unknown>> {
    * and the cookie too where cookies can be set, on every request that was
    * waiting for that refresh. Any other session is left as it is, since
    * another instance may have refreshed it; end it with `clearSession`.
+   *
+   * A session store that fails, on any read or write the refresh makes, is
+   * `cause: 'store'`, not a throw: it says nothing about the session.
    */
   refreshSession(
     cookies: CookieStore,
@@ -489,6 +492,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
     callback: loggers.create({ namespace: 'fides-auth:server:oidc-callback' }),
     logout: loggers.create({ namespace: 'fides-auth:server:oidc-logout' }),
     heartbeat: loggers.create({ namespace: 'fides-auth:server:heartbeat' }),
+    sessionInfo: loggers.create({ namespace: 'fides-auth:server:session-info' }),
     returnTo: loggers.create({ namespace: 'fides-auth:server:return-to' }),
     fetch: loggers.create({ namespace: 'fides-auth:server:authorized-fetch' }),
   };
@@ -601,35 +605,25 @@ export function createFidesAuth<TData = Record<string, unknown>>(
     cookies: CookieStore,
     { ifExpiresWithin }: RefreshSessionOptions = {},
   ): Promise<FidesRefreshResult<TData>> {
-    const { lifecycle } = settings();
-    if (ifExpiresWithin !== undefined) {
-      if (!(ifExpiresWithin >= 0)) {
-        throw new TypeError('refreshSession: ifExpiresWithin must be a number of seconds, 0 or more');
-      }
-      const read = await lifecycle.read(cookies);
-      if (!read.record) return { ok: false, reason: read.reason };
-      const { tokens } = read.record;
+    if (ifExpiresWithin !== undefined && !(ifExpiresWithin >= 0)) {
+      throw new TypeError('refreshSession: ifExpiresWithin must be a number of seconds, 0 or more');
+    }
+    const freshEnough = ({ tokens }: SessionRecord): boolean => {
+      if (ifExpiresWithin === undefined) return false;
       const expiresAt = Date.parse(tokens.accessTokenExpiresAt ?? '');
       // Without a lifetime to judge by, refreshing on every call would only load the provider.
-      if (
+      return (
         Number.isNaN(expiresAt) ||
         expiresAt - Date.now() > refreshWindowMs(tokens, expiresAt, ifExpiresWithin)
-      ) {
-        return {
-          ok: true,
-          session: typed(read.record.session),
-          refreshed: false,
-          rotatedRefreshToken: false,
-        };
-      }
-    }
+      );
+    };
 
-    const result = await lifecycle.refresh(cookies);
+    const result = await settings().lifecycle.refresh(cookies, { unless: freshEnough });
     return result.ok
       ? {
           ok: true,
           session: typed(result.record.session),
-          refreshed: true,
+          refreshed: !result.skipped,
           rotatedRefreshToken: result.rotatedRefreshToken,
         }
       : { ok: false, reason: result.reason, cause: result.cause };
@@ -856,7 +850,19 @@ export function createFidesAuth<TData = Record<string, unknown>>(
 
     async handleSessionInfo(request, cookies) {
       if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed('GET, HEAD');
-      const { record } = await settings().lifecycle.read(cookies);
+      let record: SessionRecord | null;
+      try {
+        ({ record } = await settings().lifecycle.read(cookies));
+      } catch (error) {
+        // Only a store fails a read. Whether there is a session isn't known,
+        // so this is neither answer: the client keeps what it had and asks again.
+        if (!sessionStore) throw error;
+        log.sessionInfo.error(
+          { error: getOAuthErrorLogContext(error) },
+          'The session store failed; whether there is a session is not known',
+        );
+        return new Response(null, { status: 503, headers: NO_STORE });
+      }
       const body: SessionInfo = record
         ? {
             authenticated: true,

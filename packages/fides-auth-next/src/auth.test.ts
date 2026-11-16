@@ -504,6 +504,27 @@ describe('refreshInProxy', () => {
     expect(forwardedCookies(response) ?? '').not.toContain('__Host-session');
   });
 
+  it('passes the request on, cookie and all, while the store can\'t be reached', async () => {
+    const base = createMemorySessionStore();
+    const state = { down: false };
+    const sessionStore = {
+      ...base,
+      get: async (key: string) => {
+        if (state.down) throw new Error('db down');
+        return base.get(key);
+      },
+    };
+    const { auth, events } = setup({ sessionStore });
+    await login(auth);
+    state.down = true;
+
+    const response = await auth.refreshInProxy(proxied());
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(provider.tokenRequests).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ event: 'session.refresh_failed', cause: 'store' });
+  });
+
   it('does nothing for a session without a refresh token', async () => {
     const { auth } = setup();
     await auth.createSession({ access_token: 'a', token_type: 'bearer', expires_in: 5, id_token: idToken() });

@@ -59,7 +59,13 @@ export type ReadRecordResult =
   | { record: null; reason: SessionRejectedReason };
 
 export type RefreshRecordResult =
-  | { ok: true; record: SessionRecord; rotatedRefreshToken: boolean }
+  | {
+    ok: true;
+    record: SessionRecord;
+    rotatedRefreshToken: boolean;
+    /** Set when `unless` said the session needs no refresh. The provider wasn't asked. */
+    skipped?: true;
+  }
   | {
     ok: false;
     reason: SessionRejectedReason;
@@ -123,8 +129,18 @@ export interface SessionLifecycle {
     tokens: TokenResponse,
     options?: { requestedScope?: string },
   ): Promise<SessionRecord>;
-  /** Refreshes the tokens, keeping the session's identity and lifetime. */
-  refresh(cookies: CookieStore): Promise<RefreshRecordResult>;
+  /**
+   * Refreshes the tokens, keeping the session's identity and lifetime. With
+   * `unless`, a session it returns true for is handed back as it is.
+   *
+   * A store that fails, on any read or write a refresh makes, is reported as
+   * `cause: 'store'`: that says nothing about the session, so it is a failure
+   * to retry, not a throw.
+   */
+  refresh(
+    cookies: CookieStore,
+    options?: { unless?: (record: SessionRecord) => boolean },
+  ): Promise<RefreshRecordResult>;
   /**
    * Changes the user, scopes or data. Null when there is no session to change.
    * It takes its turn after a refresh or an update of the session that is
@@ -432,6 +448,19 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     return { record };
   }
 
+  /** A refresh the store failed: on a read or a write, or the lock couldn't be had in time. */
+  function storeFailed(error: unknown, current?: SessionRecord): RefreshRecordResult {
+    const correlationId = current?.session.correlationId;
+    emit({
+      event: SESSION_EVENT.REFRESH_FAILED,
+      correlationId,
+      cause: 'store',
+      accessTokenExpiresAt: current?.tokens.accessTokenExpiresAt,
+      error: getOAuthErrorLogContext(error),
+    });
+    return { ok: false, reason: 'refresh_failed', cause: 'store', correlationId };
+  }
+
   function alreadyRefreshed(before: SessionRecord, after: SessionRecord): RefreshRecordResult {
     logger.debug(
       { correlationId: after.session.correlationId },
@@ -560,10 +589,20 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       return record;
     },
 
-    async refresh(cookies) {
-      const first = await read(cookies);
+    async refresh(cookies, { unless } = {}) {
+      // Before the store is asked: a bad secret is the app's to fix, not a store that failed.
+      assertSessionSecret(secret);
+      let first: ReadRecordResult;
+      try {
+        first = await read(cookies);
+      } catch (error) {
+        // Only a store fails a read. Cookies that can't be read are the caller's mistake.
+        if (storage.mode !== 'server') throw error;
+        return storeFailed(error);
+      }
       if (!first.record) return { ok: false, reason: first.reason };
       const current = first.record;
+      if (unless?.(current)) return { ok: true, record: current, rotatedRefreshToken: false, skipped: true };
       const correlationId = current.session.correlationId;
       notFromInside(correlationId, 'A refresh');
       const refreshToken = current.tokens.refreshToken;
@@ -612,16 +651,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         try {
           return await storage.lock(cookies, attempt);
         } catch (error) {
-          // The store failed, or the lock couldn't be had in time. That says
-          // nothing about the session, so it is a failure to retry, not a throw.
-          emit({
-            event: SESSION_EVENT.REFRESH_FAILED,
-            correlationId,
-            cause: 'store',
-            accessTokenExpiresAt: current.tokens.accessTokenExpiresAt,
-            error: getOAuthErrorLogContext(error),
-          });
-          return { ok: false, reason: 'refresh_failed', cause: 'store', correlationId };
+          return storeFailed(error, current);
         }
       };
 

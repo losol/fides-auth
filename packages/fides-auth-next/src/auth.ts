@@ -57,7 +57,10 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   ): Promise<Response>;
   /** `POST`. Refreshes the session. 401 means it is over; 503 means the provider or the store failed. */
   handleHeartbeat(request: Request): Promise<Response>;
-  /** `GET`. Whether there is a session, and whose. Never refreshes, never returns tokens. */
+  /**
+   * `GET`. Whether there is a session, and whose. Never refreshes, never
+   * returns tokens. 503 means the session store failed, so there is no answer.
+   */
   handleSessionInfo(request: Request): Promise<Response>;
 
   /** The session, or null. Cached per render. */

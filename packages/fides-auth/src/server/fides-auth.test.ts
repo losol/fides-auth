@@ -18,7 +18,7 @@ import type { CookieStore } from './cookie-store.js';
 import { fetchCookieStore } from './fetch-cookie-store.js';
 import { createFidesAuth, type FidesAuth, type FidesAuthConfig, type LoginError } from './fides-auth.js';
 import { SessionSecretError } from './session-secret.js';
-import { createMemorySessionStore, type StoreFields } from './session-store.js';
+import { createMemorySessionStore, type SessionStore, type StoreFields } from './session-store.js';
 
 const secret = 'a'.repeat(64);
 const APP = 'https://app.test';
@@ -1087,6 +1087,63 @@ describe('session members', () => {
     expect((await auth.readSession(cookies))?.scopes).toEqual(['openid']);
     const info = await (await auth.handleSessionInfo(get('/api/auth/session'), cookies)).json();
     expect(info.scopes).toEqual(['openid']);
+  });
+
+  describe.each([
+    ['with', (store: SessionStore): SessionStore => store],
+    ['without', (store: SessionStore): SessionStore => ({ ...store, withLock: undefined })],
+  ])('a store that can\'t be reached, %s a lock', (_, locking) => {
+    async function loggedInThenDown() {
+      const base = createMemorySessionStore();
+      const down = new Error('db down');
+      const state = { down: false };
+      const sessionStore = locking({
+        ...base,
+        get: async (key) => {
+          if (state.down) throw down;
+          return base.get(key);
+        },
+      });
+      const { auth, cookies } = setup({ sessionStore });
+      await login(auth, cookies);
+      state.down = true;
+      return { auth, cookies, state, down };
+    }
+
+    it('answers the heartbeat with 503 and a refresh with cause store', async () => {
+      const { auth, cookies, state } = await loggedInThenDown();
+
+      const heartbeat = await auth.handleHeartbeat(post('/api/auth/heartbeat'), cookies);
+      expect(heartbeat.status).toBe(503);
+      expect(heartbeat.headers.get('cache-control')).toBe('private, no-store');
+      const failed = { ok: false, reason: 'refresh_failed', cause: 'store' };
+      expect(await auth.refreshSession(cookies)).toEqual(failed);
+      expect(await auth.refreshSession(cookies, { ifExpiresWithin: 60 })).toEqual(failed);
+      expect(oidc.refresh).not.toHaveBeenCalled();
+
+      state.down = false;
+      expect((await auth.handleHeartbeat(post('/api/auth/heartbeat'), cookies)).status).toBe(200);
+    });
+
+    it('answers session info with 503: neither logged in nor logged out', async () => {
+      const { auth, cookies, state } = await loggedInThenDown();
+
+      const info = await auth.handleSessionInfo(get('/api/auth/session'), cookies);
+      expect(info.status).toBe(503);
+      expect(info.headers.get('cache-control')).toBe('private, no-store');
+      expect(await info.text()).toBe('');
+
+      state.down = false;
+      const back = await auth.handleSessionInfo(get('/api/auth/session'), cookies);
+      expect(await back.json()).toMatchObject({ authenticated: true });
+    });
+
+    it('still rejects a read with what the store threw', async () => {
+      const { auth, cookies, down } = await loggedInThenDown();
+
+      await expect(auth.readSession(cookies)).rejects.toBe(down);
+      await expect(auth.tryReadSession(cookies)).rejects.toBe(down);
+    });
   });
 
   it('answers the heartbeat with 503, not a throw, when the store lock fails', async () => {
