@@ -81,7 +81,7 @@ argument. Import everything from the package root.
 | `getCurrentSession()`, `tryGetCurrentSession()` | `readSession()`, `tryReadSession()`, cached per render |
 | `refreshCurrentSession()`, `tryRefreshCurrentSession()` | `refreshSession({ ifExpiresWithin? })`, which says why on failure |
 | — | `refreshInProxy(request, { ifExpiresWithin? })` in `proxy.ts`, to refresh before a page renders |
-| `createAndPersistSession(session)` | `createSession(tokenResponse)` |
+| `createAndPersistSession(session)` | `createSession(tokenResponse)`, for a login done outside the handlers. A session that didn't come from a token response has no counterpart: see [Sealing a value of your own](#sealing-a-value-of-your-own) |
 | `clearCurrentSession(options)` | `clearSession(options)` |
 | `authorizedFetch(session, url, options)` | `authorizedFetch(url, options)`. `refresh: false` goes, since it never refreshes |
 | `handleOidcLogin(request, { validateReturnTo, authorizationParameters })` | `handleOidcLogin(request, { authorizationParameters })` |
@@ -196,10 +196,49 @@ and `FidesLoggerOptions`.
   `SESSION_REJECTED_REASONS`.** Pass `onSessionEvent` to `createFidesAuth` to
   get the library's events, or log your own as
   [Session events](./session-events.md#consuming-the-vocabulary) shows.
-- **`resolveClientAuth`, `getOAuthConfigLogContext`, `SilentLoginErrors`,
-  `createEncryptedJWT`, `decryptJWT` and `accessTokenExpires`.**
+- **`resolveClientAuth`, `getOAuthConfigLogContext`, `SilentLoginErrors` and
+  `accessTokenExpires`.**
+- **`createEncryptedJWT` and `decryptJWT`.** See
+  [Sealing a value of your own](#sealing-a-value-of-your-own).
 - **The rejected reason `stale_legacy_session`.** A browser with 0.x cookies
   reads as `no_session_cookie`, or as `unreadable_session` over plain http.
+
+## Sealing a value of your own
+
+A session in 1.0 always comes from a login: `createSession` takes a token
+response and throws without an access token. A session of another kind, for a
+guest or a shopping cart say, is outside the library, and so is sealing a small
+value into a cookie, which `createEncryptedJWT` and `decryptJWT` were used for.
+Both are a few lines with [jose](https://github.com/panva/jose), which 0.x
+used underneath:
+
+```ts
+import { EncryptJWT, jwtDecrypt } from "jose";
+
+// A key of its own, not the session secret: 32 random bytes as 64 hex
+// characters, from `openssl rand -hex 32`.
+const key = Uint8Array.from(process.env.SEAL_KEY!.match(/../g) ?? [], (h) => Number.parseInt(h, 16));
+
+async function seal(value: Record<string, unknown>, maxAgeSeconds: number): Promise<string> {
+  return new EncryptJWT(value)
+    .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+    .setIssuedAt()
+    .setExpirationTime(`${maxAgeSeconds}s`)
+    .encrypt(key);
+}
+
+async function unseal(sealed: string): Promise<Record<string, unknown> | null> {
+  try {
+    return (await jwtDecrypt(sealed, key)).payload;
+  } catch {
+    return null; // forged, expired, or sealed with another key
+  }
+}
+```
+
+It is the format 0.x wrote, so a value sealed by `createEncryptedJWT` opens
+with `unseal` under the same key. 0.x set no expiry, though: give a value you
+seal now one, and the cookie that holds it a matching `Max-Age`.
 
 ## Logging
 
