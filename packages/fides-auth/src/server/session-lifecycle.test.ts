@@ -645,6 +645,24 @@ describe('the session lifecycle, cookie storage only', () => {
     return copy;
   }
 
+  it('doesn\'t try again when the cookies can\'t be written: they won\'t be a second later', async () => {
+    const { lifecycle, refreshTokens, cookies, jar } = setup({ saveRetryDelaysMs: [0, 0] });
+    await lifecycle.create(cookies, tokens(1));
+    const readOnly = new Error('Cookies can only be modified in a Server Action or Route Handler');
+    let writes = 0;
+    const inComponent: CookieStore = {
+      get: (name) => jar.get(name) ?? null,
+      set: () => {
+        writes += 1;
+        throw readOnly;
+      },
+    };
+
+    await expect(lifecycle.refresh(inComponent)).rejects.toBe(readOnly);
+    expect(refreshTokens).toHaveBeenCalledOnce();
+    expect(writes).toBe(1);
+  });
+
   it('rejects a refresh whose cookies can\'t be read: without a store, that is the caller\'s mistake', async () => {
     const { lifecycle, refreshTokens, events } = setup();
     const outside = new Error('cookies() was called outside a request scope');
@@ -1366,6 +1384,7 @@ describe('the session lifecycle, store storage only', () => {
         refreshTokens,
         logger: quiet,
         onSessionEvent: (event) => events.push(event),
+        saveRetryDelaysMs: [],
       });
       return { lifecycle, refreshTokens, events, state, down, ...cookieJar() };
     }
@@ -1410,6 +1429,189 @@ describe('the session lifecycle, store storage only', () => {
 
       await expect(lifecycle.read(cookies)).rejects.toBe(down);
     });
+  });
+
+  describe.each([
+    ['with', (store: SessionStore): SessionStore => store],
+    ['without', (store: SessionStore): SessionStore => ({ ...store, withLock: undefined })],
+  ])('a store that won\'t take what a refresh got, %s a lock', (_, locking) => {
+    /** A store whose next `failures` saves of a refresh fail, and a provider that rotates and refuses a spent token. */
+    function setup(failures: number, delays: number[] = [0, 0]) {
+      const base = createMemorySessionStore();
+      const state = { failures, saves: 0, key: '' };
+      const store = locking({
+        ...base,
+        set: async (key, record, context) => {
+          state.key = key;
+          if (context.reason === 'refresh') {
+            state.saves += 1;
+            if (state.failures > 0) {
+              state.failures -= 1;
+              throw new Error('db blip');
+            }
+          }
+          return base.set(key, record, context);
+        },
+      });
+      const valid = new Set(['refresh-1']);
+      let issued = 1;
+      const refreshTokens = vi.fn(async (token: string) => {
+        if (!valid.delete(token)) throw invalidGrant();
+        issued += 1;
+        valid.add(`refresh-${issued}`);
+        return tokens(issued);
+      });
+      const events: SessionEvent[] = [];
+      const warnings: unknown[] = [];
+      const lifecycle = createSessionLifecycle({
+        storage: storeStorage({ store, secure: true }),
+        secret,
+        refreshTokens,
+        logger: { ...quiet, warn: (...args: unknown[]) => void warnings.push(args) },
+        onSessionEvent: (event) => events.push(event),
+        saveRetryDelaysMs: delays,
+      });
+      const spent = () => refreshTokens.mock.calls.map(([token]) => token);
+      return { lifecycle, refreshTokens, spent, events, warnings, state, base, ...cookieJar() };
+    }
+
+    it('tries the save again, so a blip costs nothing', async () => {
+      const { lifecycle, cookies, spent, state, warnings, events } = setup(2);
+      await lifecycle.create(cookies, tokens(1));
+
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: true, rotatedRefreshToken: true });
+      expect(state.saves).toBe(3);
+      expect(spent()).toEqual(['refresh-1']);
+      expect(warnings).toHaveLength(2);
+      expect((await lifecycle.read(cookies)).record?.tokens.refreshToken).toBe('refresh-2');
+      expect(events.map((e) => e.event)).toEqual(['session.created', 'session.refreshed']);
+    });
+
+    it('waits between the tries', async () => {
+      const { lifecycle, cookies } = setup(1, [40]);
+      await lifecycle.create(cookies, tokens(1));
+
+      const started = Date.now();
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: true });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(35);
+    });
+
+    it('keeps the tokens when every try fails, and the next refresh saves them without asking the provider', async () => {
+      const { lifecycle, cookies, spent, state, events } = setup(3);
+      const created = await lifecycle.create(cookies, tokens(1));
+
+      expect(await lifecycle.refresh(cookies)).toEqual({
+        ok: false,
+        reason: 'refresh_failed',
+        cause: 'store',
+        correlationId: created.session.correlationId,
+      });
+      expect(state.saves).toBe(3);
+      // The store still holds the token the provider has spent.
+      expect((await lifecycle.read(cookies)).record?.tokens.refreshToken).toBe('refresh-1');
+
+      const next = await lifecycle.refresh(cookies);
+      expect(next).toMatchObject({ ok: true, rotatedRefreshToken: true });
+      expect(next.ok && next.record.tokens.accessToken).toBe('access-2');
+      expect(spent()).toEqual(['refresh-1']);
+      expect((await lifecycle.read(cookies)).record?.tokens.refreshToken).toBe('refresh-2');
+      expect(events.map((e) => e.event)).toEqual([
+        'session.created',
+        'session.refresh_failed',
+        'session.refreshed',
+      ]);
+
+      // And from there on it is an ordinary session.
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: true });
+      expect(spent()).toEqual(['refresh-1', 'refresh-2']);
+      expect(events.filter((e) => e.event === 'session.cleared')).toEqual([]);
+    });
+
+    it('keeps them through a store that stays down, however many refreshes ask', async () => {
+      const { lifecycle, cookies, spent, state } = setup(7);
+      await lifecycle.create(cookies, tokens(1));
+
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: false, cause: 'store' });
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: false, cause: 'store' });
+      expect(state.failures).toBe(1);
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: true });
+      expect(spent()).toEqual(['refresh-1']);
+      expect((await lifecycle.read(cookies)).record?.tokens.refreshToken).toBe('refresh-2');
+    });
+
+    it('an update while they are unsaved saves them with its change', async () => {
+      const { lifecycle, cookies, spent } = setup(3);
+      await lifecycle.create(cookies, tokens(1));
+      await lifecycle.refresh(cookies);
+
+      const updated = await lifecycle.update(cookies, (session) => ({ ...session, data: { theme: 'dark' } }));
+      expect(updated?.tokens.refreshToken).toBe('refresh-2');
+      const { record } = await lifecycle.read(cookies);
+      expect(record?.tokens.refreshToken).toBe('refresh-2');
+      expect(record?.session.data).toEqual({ theme: 'dark' });
+
+      // Saved, so the next refresh is the provider's again, with the new token.
+      expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: true });
+      expect(spent()).toEqual(['refresh-1', 'refresh-2']);
+      expect((await lifecycle.read(cookies)).record?.session.data).toEqual({ theme: 'dark' });
+    });
+
+    it('a logout while they are unsaved ends the session with the tokens to revoke', async () => {
+      const { lifecycle, cookies, spent } = setup(3);
+      await lifecycle.create(cookies, tokens(1));
+      await lifecycle.refresh(cookies);
+
+      const ended = await lifecycle.end(cookies, { trigger: 'logout' });
+      expect(ended?.tokens.refreshToken).toBe('refresh-2');
+      expect((await lifecycle.read(cookies)).record).toBeNull();
+
+      // A new login on the same browser starts clean.
+      await lifecycle.create(cookies, tokens(1));
+      expect((await lifecycle.read(cookies)).record?.tokens.refreshToken).toBe('refresh-1');
+      expect(spent()).toEqual(['refresh-1']);
+    });
+
+    it('doesn\'t bring back a session that was ended elsewhere while they were unsaved', async () => {
+      const { lifecycle, cookies, jar, spent, base, state } = setup(3);
+      await lifecycle.create(cookies, tokens(1));
+      await lifecycle.refresh(cookies);
+      // As a logout on another instance leaves it: the record gone, the cookie still in this browser.
+      await base.delete(state.key);
+      expect(jar.size).toBe(1);
+
+      expect(await lifecycle.refresh(cookies)).toEqual({ ok: false, reason: 'session_not_found' });
+      expect(await lifecycle.update(cookies, (session) => session)).toBeNull();
+      expect(spent()).toEqual(['refresh-1']);
+      expect(await base.get(state.key)).toBeNull();
+    });
+  });
+
+  it('keeps nothing for a provider that doesn\'t rotate: the token the store holds still works', async () => {
+    const base = createMemorySessionStore();
+    let failing = 1;
+    const store: SessionStore = {
+      ...base,
+      set: async (key, record, context) => {
+        if (context.reason === 'refresh' && failing-- > 0) throw new Error('db blip');
+        return base.set(key, record, context);
+      },
+    };
+    let issued = 1;
+    const refreshTokens = vi.fn(async (_token: string) => tokens(++issued, { refresh_token: undefined }));
+    const lifecycle = createSessionLifecycle({
+      storage: storeStorage({ store, secure: true }),
+      secret,
+      refreshTokens,
+      logger: quiet,
+      saveRetryDelaysMs: [],
+    });
+    const { cookies } = cookieJar();
+    await lifecycle.create(cookies, tokens(1));
+
+    expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: false, cause: 'store' });
+    const next = await lifecycle.refresh(cookies);
+    expect(next.ok && next.record.tokens.accessToken).toBe('access-3');
+    expect(refreshTokens.mock.calls.map(([token]) => token)).toEqual(['refresh-1', 'refresh-1']);
   });
 
   it('fails a refresh whose lock it can\'t take as a store failure, and keeps the session', async () => {
