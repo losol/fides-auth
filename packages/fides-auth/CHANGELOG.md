@@ -1,5 +1,38 @@
 # @eventuras/fides-auth
 
+## 1.0.0-beta.5
+
+### Minor Changes
+
+- 3081c1d: `fetchCookieStore` now throws when a cookie is set after `headers()` or `apply()` has taken the cookies, as such a cookie could not reach the browser. Set cookies before building the response.
+- 27ccacd: `oidc.userInfo(accessToken, { expectedSubject })` gets the claims from the provider's UserInfo endpoint. It
+  checks that the response is for `expectedSubject`, the ID token's `sub`, so you no longer build an openid-client
+  configuration by hand.
+- 8d6694e: `tokenStatus` says whether a session's access token can still be used: `active`, `refreshable` or `expired`. A
+  session reads until `expiresAt` whatever its tokens are worth, so a login without a refresh token stayed
+  `authenticated: true` for hours after its access token had died, with nothing to tell the two apart.
+  `tryReadSession`, `readSessionWithTokens` and the session info endpoint now give the status. The session itself
+  is left as it is; an app that wants "a session is no better than its token" ends it on `expired`.
+
+### Patch Changes
+
+- 8a172ba: `authorizedFetch` times out a body that stalls while `parse` reads it, also after Node's garbage collector has
+  run. Node's fetch stops passing an abort on to the body once its own request object has been collected, so the
+  read could hang for minutes, long past `timeoutMs`. The read is now held to the timeout and to the caller's
+  signal by `authorizedFetch` itself.
+- b0ec765: The upgrade guide says what to do where 0.x sealed a value of its own. `createEncryptedJWT` and `decryptJWT`
+  were listed as gone without a recipe, and `createAndPersistSession(session)` pointed to
+  `createSession(tokenResponse)`, which is not the same for a session that didn't come from a login. Such sessions
+  are outside the library; the guide now says so and shows how to seal a value with jose.
+- 8110116: The store contract now says that `set` must never create a record for a continuation: when a refresh or an
+  update finds no record, the session was ended while it ran, and an upsert would bring it back. The MongoDB
+  example upserted on every `set`, so without `withLock` a refresh on one instance could restore a session that
+  another had just logged out. It now uses `upsert: !continuation`, and the memory store follows the same rule. A
+  custom `SessionStore` that upserts on every `set` should do the same.
+- a03ae17: The Vipps example in the README passed `VippsEnvironments.Production` as the issuer. That is the environment's
+  address, not its issuer: the example now uses `getVippsIssuer(VippsEnvironments.Production)`, and the doc
+  comments say which is which.
+
 ## 1.0.0-beta.4
 
 ### Minor Changes
