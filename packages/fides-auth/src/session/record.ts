@@ -8,7 +8,7 @@
 import { decodeJwt, type JWTPayload } from 'jose';
 
 import { newSessionId } from '../shared/session-events.js';
-import type { Session, SessionUser, Tokens, TokenResponse } from '../shared/types.js';
+import type { Session, SessionUser, Tokens, TokenResponse, TokenStatus } from '../shared/types.js';
 import { rolesFromClaims, type RolesClaim } from './user-claims.js';
 import { createEncryptedJWT, decryptJWT } from './utils.js';
 
@@ -223,6 +223,18 @@ export function refreshRecord(
       idToken: tokens.id_token ?? record.tokens.idToken,
     },
   };
+}
+
+/**
+ * Whether the record's access token can still be used. A token without a
+ * known lifetime counts as active, as it does for a refresh that is asked for
+ * only when the token is about to expire.
+ */
+export function tokenStatusOf(tokens: Tokens, now = Date.now()): TokenStatus {
+  const expiresAt = Date.parse(tokens.accessTokenExpiresAt ?? '');
+  const usable = !!tokens.accessToken && (Number.isNaN(expiresAt) || expiresAt > now);
+  if (usable) return 'active';
+  return tokens.refreshToken ? 'refreshable' : 'expired';
 }
 
 /** Whether the session's lifetime has run out. */

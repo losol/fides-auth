@@ -66,6 +66,19 @@ export interface Session<TData = Record<string, unknown>> {
   data?: TData;
 }
 
+/**
+ * Whether a session's access token can still be used, by the server's clock.
+ * A session reads until `expiresAt` whatever this says: it tells the two apart.
+ *
+ * - `'active'`: the token hasn't expired, or the provider gave no lifetime to
+ *   go by.
+ * - `'refreshable'`: the token has expired, and the session holds a refresh
+ *   token. A refresh gets a new one, unless the provider refuses it.
+ * - `'expired'`: the token has expired and there is no refresh token. The
+ *   user is still logged in, but calls with the token fail until a new login.
+ */
+export type TokenStatus = 'active' | 'refreshable' | 'expired';
+
 /** What the session info endpoint answers. Never tokens. */
 export interface SessionInfo {
   authenticated: boolean;
@@ -73,6 +86,12 @@ export interface SessionInfo {
   scopes?: string[];
   /** ISO 8601, or null when the provider gave no lifetime. */
   accessTokenExpiresAt?: string | null;
+  /**
+   * Whether the access token can still be used. `'expired'` is a session
+   * whose user is logged in but whose token is dead for good: a page can ask
+   * for a new login then. Absent without a session.
+   */
+  tokenStatus?: TokenStatus;
   /**
    * ISO 8601: when the session itself ends, however its tokens are refreshed.
    * For a page that warns before the user is logged out. Absent without a session.

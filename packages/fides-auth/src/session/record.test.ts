@@ -14,6 +14,7 @@ import {
   openRecord,
   refreshRecord,
   sealRecord,
+  tokenStatusOf,
 } from './record.js';
 import { createEncryptedJWT } from './utils.js';
 
@@ -47,6 +48,34 @@ function tokens(extra: Partial<TokenResponse> = {}): TokenResponse {
     ...extra,
   };
 }
+
+describe('tokenStatusOf', () => {
+  const at = (iso: string | undefined, refreshToken?: string, accessToken: string | undefined = 'a') => ({
+    accessToken,
+    accessTokenExpiresAt: iso,
+    refreshToken,
+  });
+  const later = new Date(now + 60_000).toISOString();
+  const earlier = new Date(now - 60_000).toISOString();
+
+  it('is active until the access token expires, and at the instant it does it has expired', () => {
+    expect(tokenStatusOf(at(later), now)).toBe('active');
+    expect(tokenStatusOf(at(later, 'r'), now)).toBe('active');
+    expect(tokenStatusOf(at(new Date(now).toISOString(), 'r'), now)).toBe('refreshable');
+  });
+
+  it('tells a dead token that can be replaced from one that can not', () => {
+    expect(tokenStatusOf(at(earlier, 'r'), now)).toBe('refreshable');
+    expect(tokenStatusOf(at(earlier), now)).toBe('expired');
+  });
+
+  it('takes a token without a known lifetime for active, and a missing token for dead', () => {
+    expect(tokenStatusOf(at(undefined), now)).toBe('active');
+    expect(tokenStatusOf(at('not a date'), now)).toBe('active');
+    expect(tokenStatusOf(at(later, 'r', ''), now)).toBe('refreshable');
+    expect(tokenStatusOf(at(later, undefined, ''), now)).toBe('expired');
+  });
+});
 
 describe('createRecord', () => {
   it('builds the session, the IdP session and the tokens', () => {

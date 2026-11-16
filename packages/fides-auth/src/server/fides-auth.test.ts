@@ -11,7 +11,7 @@ vi.mock('../protocol/client.js', () => ({ createOidcClient: vi.fn() }));
 
 import type { FidesLogger } from '../shared/logger.js';
 import type { SessionEvent } from '../shared/session-events.js';
-import type { Session, TokenResponse } from '../shared/types.js';
+import type { Session, SessionInfo, TokenResponse, TokenStatus } from '../shared/types.js';
 import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { createRecord, sealRecord } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
@@ -1591,6 +1591,69 @@ describe('mapRefresh', () => {
     await login(auth, cookies);
     expect((await auth.handleHeartbeat(post('/api/auth/heartbeat'), cookies)).status).toBe(200);
     expect(mapRefresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('token status', () => {
+  const start = Date.parse('2026-11-14T12:00:00Z');
+  const minutes = (n: number) => start + n * 60_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ now: start, toFake: ['Date'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const info = async (auth: FidesAuth, cookies: CookieStore) =>
+    (await (await auth.handleSessionInfo(get('/api/auth/session'), cookies)).json()) as SessionInfo;
+
+  it('is active while the access token lives, and refreshable once it has expired with a refresh token', async () => {
+    const { auth, cookies } = setup();
+    await login(auth, cookies);
+    expect(await auth.tryReadSession(cookies)).toMatchObject({ tokenStatus: 'active' });
+    expect(await info(auth, cookies)).toMatchObject({ authenticated: true, tokenStatus: 'active' });
+
+    // The tokens live five minutes.
+    vi.setSystemTime(minutes(6));
+    expect(await auth.tryReadSession(cookies)).toMatchObject({ tokenStatus: 'refreshable' });
+    expect(await auth.readSessionWithTokens(cookies)).toMatchObject({ tokenStatus: 'refreshable' });
+    expect(await info(auth, cookies)).toMatchObject({ authenticated: true, tokenStatus: 'refreshable' });
+
+    await auth.refreshSession(cookies);
+    expect(await auth.tryReadSession(cookies)).toMatchObject({ tokenStatus: 'active' });
+  });
+
+  it('is expired for a session without a refresh token whose access token has died, and the session still reads', async () => {
+    const { auth, cookies } = setup();
+    oidc.exchangeCode.mockResolvedValueOnce(tokens(1, { refresh_token: undefined }));
+    await login(auth, cookies);
+    expect(await auth.tryReadSession(cookies)).toMatchObject({ tokenStatus: 'active' });
+
+    vi.setSystemTime(minutes(6));
+    const read = await auth.tryReadSession(cookies);
+    expect(read.session?.user?.name).toBe('Ada');
+    expect(read.tokenStatus).toBe('expired');
+    expect(await info(auth, cookies)).toMatchObject({ authenticated: true, tokenStatus: 'expired' });
+
+    // The rule "a session is no better than its token", for an app that wants it.
+    if (read.tokenStatus === 'expired') await auth.clearSession(cookies, { trigger: 'rejected' });
+    expect(await auth.readSession(cookies)).toBeNull();
+  });
+
+  it('is active when the provider gave no lifetime to go by', async () => {
+    const { auth, cookies } = setup();
+    oidc.exchangeCode.mockResolvedValueOnce(tokens(1, { expires_in: undefined, refresh_token: undefined }));
+    await login(auth, cookies);
+    vi.setSystemTime(minutes(600));
+    expect(await auth.tryReadSession(cookies)).toMatchObject({ tokenStatus: 'active' });
+  });
+
+  it('is absent without a session', async () => {
+    const { auth, cookies } = setup();
+    expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'no_session_cookie' });
+    expect(await info(auth, cookies)).toEqual({ authenticated: false });
+    expectTypeOf((await auth.tryReadSession(cookies)).tokenStatus).toEqualTypeOf<TokenStatus | undefined>();
   });
 });
 

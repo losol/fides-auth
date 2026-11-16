@@ -62,7 +62,11 @@ export interface FidesAuth<TData = Record<string, unknown>> {
 
   /** The session, or null. Cached per render. */
   readSession(): Promise<Session<TData> | null>;
-  /** The session, or why there is none. Cached per render, together with `readSession`. */
+  /**
+   * The session, or why there is none. With a session comes `tokenStatus`,
+   * which says whether its access token can still be used. Cached per render,
+   * together with `readSession`.
+   */
   tryReadSession(): Promise<FidesReadResult<TData>>;
   /** The session's tokens, or null without a session. The access token may have expired. */
   getTokens(): Promise<Tokens | null>;
