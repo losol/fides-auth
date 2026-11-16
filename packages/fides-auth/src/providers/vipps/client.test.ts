@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { FidesLogger } from '../../shared/logger.js';
 import { VippsLoginClient } from './client.js';
-import { defaultVippsLoginScope } from './types.js';
+import { defaultVippsLoginScope, getVippsIssuer, VippsEnvironments } from './types.js';
 
 const quiet = { create: (): FidesLogger => ({ debug() {}, info() {}, warn() {}, error() {} }) };
 
@@ -26,6 +26,17 @@ const serverMetadata = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('getVippsIssuer', () => {
+  it('gives the issuer under an environment\'s address, with its trailing slash', () => {
+    expect(getVippsIssuer(VippsEnvironments.Production)).toBe('https://api.vipps.no/access-management-1.0/access/');
+    expect(getVippsIssuer(VippsEnvironments.Test)).toBe('https://apitest.vipps.no/access-management-1.0/access/');
+  });
+
+  it('is what the client takes for an issuer: an environment alone is another URL', () => {
+    expect(getVippsIssuer(VippsEnvironments.Production)).not.toBe(VippsEnvironments.Production);
+  });
 });
 
 describe('VippsLoginClient.createAuthorizationRequest', () => {
