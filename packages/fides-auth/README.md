@@ -766,6 +766,7 @@ import {
   VippsLoginClient,
   VippsEnvironments,
   VippsLoginScopes,
+  getVippsIssuer,
 } from "@eventuras/fides-auth/providers/vipps";
 
 const vipps = new VippsLoginClient(
@@ -774,7 +775,8 @@ const vipps = new VippsLoginClient(
     clientSecret: "your-client-secret",
     redirectUri: "https://app.example.com/callback",
     subscriptionKey: "your-subscription-key",
-    issuer: VippsEnvironments.Production,
+    // The issuer is under the environment's address, not the address itself.
+    issuer: getVippsIssuer(VippsEnvironments.Production),
     scope: [VippsLoginScopes.OpenId, VippsLoginScopes.Email, VippsLoginScopes.Name],
   },
   { logger }, // optional, like createOidcClient's options

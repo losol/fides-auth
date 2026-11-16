@@ -10,7 +10,12 @@
  * Configuration for Vipps Login client
  */
 export interface VippsLoginConfig {
-  /** Vipps OIDC issuer URL (e.g., 'https://apitest.vipps.no/access-management-1.0/access') */
+  /**
+   * Vipps OIDC issuer URL, with its trailing slash, e.g.
+   * 'https://apitest.vipps.no/access-management-1.0/access/'. Build it with
+   * `getVippsIssuer(VippsEnvironments.Test)`: an environment's address alone
+   * is not the issuer.
+   */
   issuer: string;
   /** OAuth Client ID from Vipps */
   clientId: string;
@@ -104,7 +109,8 @@ export const defaultVippsLoginScope = [
 ].join(' ');
 
 /**
- * Vipps API environments
+ * The addresses of the Vipps API environments. Not issuers: pass one to
+ * {@link getVippsIssuer} for the `issuer` of a `VippsLoginClient`.
  */
 export const VippsEnvironments = {
   /** Test environment */
@@ -114,7 +120,9 @@ export const VippsEnvironments = {
 } as const;
 
 /**
- * Get Vipps OIDC issuer URL for environment
+ * The Vipps OIDC issuer for an environment, e.g.
+ * `getVippsIssuer(VippsEnvironments.Production)`. This is what
+ * `VippsLoginConfig.issuer` takes.
  */
 export function getVippsIssuer(environment: string): string {
   // Note: Vipps metadata returns issuer with trailing slash
