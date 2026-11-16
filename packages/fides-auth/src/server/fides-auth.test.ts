@@ -1450,6 +1450,14 @@ describe('over Request and Response, with fetchCookieStore', () => {
     tab.receive(new Response(null, { headers: cookies.headers() }));
     expect(tab.jar.size).toBe(0);
   });
+
+  it('refuses a refresh after the cookies were taken, as it could not reach the browser', async () => {
+    const { auth } = setup();
+    const cookies = fetchCookieStore(browser().request('/'));
+    await auth.createSession(cookies, tokens(1));
+    cookies.headers();
+    await expect(auth.refreshSession(cookies)).rejects.toThrow(/was set after the response's cookies were taken/);
+  });
 });
 
 describe('roles', () => {

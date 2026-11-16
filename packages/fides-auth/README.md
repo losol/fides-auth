@@ -352,6 +352,11 @@ await auth.refreshSession(cookies, { ifExpiresWithin: 60 });
 return new Response(body, { headers: cookies.headers() });
 ```
 
+Take the cookies when the work is done: a cookie set after `headers()` or
+`apply()` throws, since it could not reach the browser. A refresh that runs
+after the response was built, in a stream say, must set its cookies another
+way or happen before.
+
 It fits React Router, Hono, SvelteKit, Astro and other frameworks built on
 Fetch. Next.js has its own store in `@eventuras/fides-auth-next`. Anything else
 needs only `get` and `set`:

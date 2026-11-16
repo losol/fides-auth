@@ -14,12 +14,14 @@ import type { CookieStore } from './cookie-store.js';
 export interface FetchCookieStore extends CookieStore {
   /**
    * New headers with a `Set-Cookie` line for each cookie written so far, after
-   * the ones in `init`. For a response the route builds itself.
+   * the ones in `init`. For a response the route builds itself. Once called,
+   * a cookie set later throws, as it could not reach the browser.
    */
   headers(init?: HeadersInit): Headers;
   /**
    * A copy of `response` with those `Set-Cookie` lines added. For a response a
-   * handler such as `handleOidcLogin` returned.
+   * handler such as `handleOidcLogin` returned. Once called, a cookie set
+   * later throws, as it could not reach the browser.
    */
   apply(response: Response): Response;
 }
@@ -76,13 +78,22 @@ function serialize(name: string, value: string, options: CookieOptions = {}): st
  * library's own are cookie-safe, and a write of anything else throws a
  * TypeError. Cookies are `HttpOnly`, `Secure` and `SameSite=Lax` on `/` unless
  * the options say otherwise, and `maxAge: 0` deletes one.
+ *
+ * Take the cookies when the work is done: once `headers()` or `apply()` has
+ * been called, a cookie set after that throws, since it could not reach the
+ * browser. A refresh that runs after the response was built, in a stream say,
+ * needs its own way to set cookies, or must happen before.
  */
 export function fetchCookieStore(request: Pick<Request, 'headers'>): FetchCookieStore {
   const sent = parseCookies(request.headers.get('cookie'));
   // By name, so a cookie written twice goes out once, as it was written last.
   const written = new Map<string, { value: string; deleted: boolean; header: string }>();
 
+  // Set once the writes are taken: a later write would reach no response.
+  let taken = false;
+
   function headers(init?: HeadersInit): Headers {
+    taken = true;
     const result = new Headers(init);
     for (const { header } of written.values()) result.append('Set-Cookie', header);
     return result;
@@ -96,6 +107,11 @@ export function fetchCookieStore(request: Pick<Request, 'headers'>): FetchCookie
     },
 
     set(name, value, options) {
+      if (taken) {
+        throw new Error(
+          `Cookie "${name}" was set after the response's cookies were taken with headers() or apply(), so it would not reach the browser. Set cookies before building the response`,
+        );
+      }
       // Deleted first, so the line for the last write also comes last.
       written.delete(name);
       written.set(name, {
