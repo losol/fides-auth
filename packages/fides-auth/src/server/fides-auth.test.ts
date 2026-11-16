@@ -90,6 +90,7 @@ function fakeOidc() {
     ),
     verifyIdToken: vi.fn(),
     revoke: vi.fn(async (_token: string, _options?: { tokenTypeHint?: string }) => true),
+    userInfo: vi.fn(),
   };
   return client;
 }
