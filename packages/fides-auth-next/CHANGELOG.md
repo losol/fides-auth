@@ -1,5 +1,25 @@
 # @eventuras/fides-auth-next
 
+## 1.0.0-beta.6
+
+### Patch Changes
+
+- 1cd8a5f: A session store that can't be reached no longer makes the heartbeat, the session info and a refresh throw. Only a
+  `withLock` that rejected was handled; a `get` that threw went straight through, since the read a refresh starts
+  with was outside the handling. Now `refreshSession` answers `{ ok: false, reason: 'refresh_failed', cause: 'store' }`
+  for any call to the store that fails, with or without `ifExpiresWithin`, `handleHeartbeat` answers 503 as
+  documented, and `refreshInProxy` passes the request on instead of failing every page. `handleSessionInfo` answers
+  503 without a body: whether there is a session isn't known, so it says neither.
+  
+  The reads (`readSession`, `tryReadSession`, `getTokens`, `readSessionWithTokens`, `authorizedFetch`) still reject
+  with what the store threw, as `updateSession` does: null would send a logged-in user to a login that fails on the
+  same store. `docs/server-sessions.md` has a table of what each call answers.
+- Updated dependencies [b3d0f1e]
+- Updated dependencies [93e7a6e]
+- Updated dependencies [dd337be]
+- Updated dependencies [1cd8a5f]
+  - @eventuras/fides-auth@1.0.0-beta.6
+
 ## 1.0.0-beta.5
 
 ### Patch Changes
