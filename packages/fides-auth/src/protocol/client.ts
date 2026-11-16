@@ -21,6 +21,7 @@ import { createJwksCache, verifyIdTokenWith } from './id-token.js';
 import { logoutUrl, type OidcLogoutOptions } from './logout-url.js';
 import { refresh } from './refresh.js';
 import { revoke, type RevokeOptions } from './revocation.js';
+import { userInfo, type UserInfoOptions } from './userinfo.js';
 
 /** Options for {@link createOidcClient}. */
 export interface OidcClientOptions {
@@ -112,6 +113,15 @@ export interface OidcClient {
    * @throws A jose error if the token is invalid, or a TypeError if the metadata has no `issuer` or `jwks_uri`.
    */
   verifyIdToken(idToken: string, options?: VerifyOptions): Promise<JWTPayload>;
+
+  /**
+   * Gets the claims from the provider's UserInfo endpoint for the user an
+   * access token belongs to. `expectedSubject` is the ID token's `sub`. Use it
+   * for claims a provider only gives there.
+   *
+   * @throws A `ClientError` if the metadata has no `userinfo_endpoint` or the response's `sub` is not `expectedSubject`, or what else openid-client throws when the request fails.
+   */
+  userInfo(accessToken: string, options: UserInfoOptions): Promise<openid.UserInfoResponse>;
 }
 
 /**
@@ -169,6 +179,8 @@ export function createOidcClient(
     logoutUrl: (logoutOptions = {}) => logoutUrl(context, logoutOptions),
 
     revoke: (token, revokeOptions) => revoke(context, token, revokeOptions),
+
+    userInfo: (accessToken, userInfoOptions) => userInfo(context, accessToken, userInfoOptions),
 
     async verifyIdToken(idToken, verifyOptions = {}) {
       const { issuer, jwks_uri } = await metadata();

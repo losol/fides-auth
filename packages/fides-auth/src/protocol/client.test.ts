@@ -15,6 +15,7 @@ vi.mock('openid-client', () => ({
   clientCredentialsGrant: vi.fn(),
   buildEndSessionUrl: vi.fn(),
   tokenRevocation: vi.fn(),
+  fetchUserInfo: vi.fn(),
   ClientSecretPost: vi.fn(() => () => undefined),
   ClientSecretBasic: vi.fn(() => () => undefined),
   None: vi.fn(() => () => undefined),
@@ -302,6 +303,28 @@ describe('createOidcClient: revoke', () => {
     );
     vi.mocked(openid.tokenRevocation).mockRejectedValueOnce(new Error('invalid_client'));
     await expect(createOidcClient(config).revoke('refresh-token')).rejects.toThrow('invalid_client');
+  });
+});
+
+describe('createOidcClient: userInfo', () => {
+  it('gets the claims for the access token and the expected subject', async () => {
+    const configuration = discovered({ userinfo_endpoint: `${issuer}/userinfo` });
+    vi.mocked(openid.discovery).mockResolvedValue(configuration);
+    vi.mocked(openid.fetchUserInfo).mockResolvedValue({ sub: 'user-1', email: 'a@example.test' });
+    const client = createOidcClient(config);
+
+    expect(await client.userInfo('access-token', { expectedSubject: 'user-1' })).toEqual({
+      sub: 'user-1',
+      email: 'a@example.test',
+    });
+    expect(openid.fetchUserInfo).toHaveBeenCalledWith(configuration, 'access-token', 'user-1');
+  });
+
+  it('throws when openid-client refuses the response', async () => {
+    vi.mocked(openid.fetchUserInfo).mockRejectedValueOnce(new Error('unexpected sub'));
+    await expect(
+      createOidcClient(config).userInfo('access-token', { expectedSubject: 'user-2' }),
+    ).rejects.toThrow('unexpected sub');
   });
 });
 

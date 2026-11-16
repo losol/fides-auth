@@ -250,6 +250,23 @@ const user = userFromClaims(claims, "roles"); // { sub, name?, email?, roles }
 `algorithms` defaults to `RS*`, `PS*`, `ES*` and `EdDSA`. The JWKS is cached on
 the client.
 
+#### UserInfo
+
+`oidc.userInfo` gets the claims from the provider's UserInfo endpoint for the
+user an access token belongs to. Use it for claims the provider only gives there:
+
+```typescript
+const { session, tokens } = await auth.readSessionWithTokens(cookies);
+if (session?.idp && tokens) {
+  const claims = await auth.oidc.userInfo(tokens.accessToken, { expectedSubject: session.idp.sub });
+}
+```
+
+`expectedSubject` is required: the access token alone doesn't say whose claims
+come back, so the `sub` of the response is checked against the ID token's
+(OIDC Core §5.3.2). It throws if the provider has no `userinfo_endpoint` or
+the `sub` differs.
+
 #### Silent login
 
 `oidc.silentLoginUrl` is the authorization URL with `prompt=none`: the provider
