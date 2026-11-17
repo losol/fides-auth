@@ -45,6 +45,8 @@ export type SessionRejectedReason =
   | 'no_session_cookie'
   /** A session cookie was sent but did not decrypt or validate — corruption, or a rotated secret. */
   | 'unreadable_session'
+  /** The session opened, but was written by a later major of the library than this one reads. */
+  | 'unsupported_session_version'
   /** The session decoded but carries no refresh token — usually `offline_access` was never granted. */
   | 'no_refresh_token'
   /** The refresh token was rejected by the provider. See {@link RefreshFailureCause}. */
@@ -112,6 +114,8 @@ export type SessionEvent =
     reason: SessionRejectedReason;
     /** Which component made the call, e.g. 'heartbeat'. */
     source?: string;
+    /** The record's version, with `unsupported_session_version`. */
+    version?: number;
   }
   | {
     event: typeof SESSION_EVENT.REFRESH_FAILED;
@@ -145,6 +149,7 @@ const REJECTED_LEVEL: Record<SessionRejectedReason, Level> = {
   session_expired: 'info',
   refresh_failed: 'info',
   unreadable_session: 'warn',
+  unsupported_session_version: 'error',
   no_refresh_token: 'warn',
 };
 
@@ -199,6 +204,7 @@ export function logSessionEvent(logger: FidesLogger, payload: SessionEvent): voi
 export const SESSION_REJECTED_REASONS = [
   'no_session_cookie',
   'unreadable_session',
+  'unsupported_session_version',
   'no_refresh_token',
   'refresh_failed',
   'session_not_found',

@@ -1230,6 +1230,29 @@ describe('session members', () => {
     expect(issuerForKey('idp/')).toBe('idp');
   });
 
+  it('reports a cookie that doesn\'t open once, also through the heartbeat, and names the reason to the browser', async () => {
+    const { auth, cookies, jar, events } = setup();
+    await login(auth, cookies);
+    // As after a change of secret.
+    const elsewhere = setup({ secret: 'b'.repeat(64) });
+    await login(elsewhere.auth, elsewhere.cookies);
+    jar.set('__Host-session', elsewhere.jar.get('__Host-session') ?? '');
+    const rejected = () => events.filter((event) => event.event === 'session.rejected');
+
+    expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'unreadable_session' });
+    expect(rejected()).toEqual([{ event: 'session.rejected', reason: 'unreadable_session' }]);
+
+    const heartbeat = await auth.handleHeartbeat(post('/api/auth/heartbeat'), cookies);
+    expect(heartbeat.status).toBe(401);
+    expect(await heartbeat.json()).toEqual({ reason: 'unreadable_session' });
+    expect(rejected()).toHaveLength(2);
+
+    // Session info is a read too, and says there is no session.
+    const info = await auth.handleSessionInfo(get('/api/auth/session'), cookies);
+    expect(await info.json()).toEqual({ authenticated: false });
+    expect(rejected()).toHaveLength(3);
+  });
+
   it('answers the heartbeat with 503, not a throw, when the store lock fails', async () => {
     const store = {
       ...createMemorySessionStore(),

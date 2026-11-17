@@ -255,32 +255,54 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** What a sealed string opened as. */
+export type OpenedRecord =
+  | { record: SessionRecord }
+  /**
+   * `unreadable`: it didn't open with this key, or what it holds is no record.
+   * `unsupported_version`: it opened, and is a record of another `version`
+   * than this library reads: one a later major wrote.
+   */
+  | { record: null; why: 'unreadable'; version?: undefined }
+  | { record: null; why: 'unsupported_version'; version: number };
+
 /**
- * Opens a sealed record, or returns null when it doesn't open or opens as
- * something else. A payload without `v: 1`, such as a session sealed in the
- * older shape, is something else.
+ * Opens a sealed record, and says why when there is none to hand back.
+ *
+ * Every 1.x reads `v: 1`. A record with another number was written by a later
+ * major, in a rollback or a fleet that runs two versions, and is told apart
+ * from one that doesn't open: that it logs users out should show.
  */
-export async function openRecord(
-  sealed: string,
-  secret: string | Uint8Array,
-): Promise<SessionRecord | null> {
+export async function openSealed(sealed: string, secret: string | Uint8Array): Promise<OpenedRecord> {
   let payload: JWTPayload;
   try {
     payload = await decryptJWT(sealed, secret);
   } catch {
-    return null;
+    return { record: null, why: 'unreadable' };
   }
 
   const { v, session, tokens } = payload;
-  if (v !== 1 || !isObject(session) || !isObject(tokens)) return null;
+  if (typeof v === 'number' && v !== 1) return { record: null, why: 'unsupported_version', version: v };
+  if (v !== 1 || !isObject(session) || !isObject(tokens)) return { record: null, why: 'unreadable' };
   if (
     !isString(session.correlationId) ||
     !isString(session.createdAt) ||
     !isString(session.expiresAt) ||
     Number.isNaN(Date.parse(session.expiresAt))
   ) {
-    return null;
+    return { record: null, why: 'unreadable' };
   }
   // Only the three fields: the seal adds `iat`, which isn't part of the record.
-  return { v: 1, session: session as unknown as Session, tokens: tokens as Tokens };
+  return { record: { v: 1, session: session as unknown as Session, tokens: tokens as Tokens } };
+}
+
+/**
+ * Opens a sealed record, or returns null when it doesn't open or opens as
+ * something else. See {@link openSealed} for the reason.
+ */
+export async function openRecord(
+  sealed: string,
+  secret: string | Uint8Array,
+): Promise<SessionRecord | null> {
+  return (await openSealed(sealed, secret)).record;
 }

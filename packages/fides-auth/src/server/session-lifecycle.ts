@@ -44,6 +44,7 @@ import {
   keepIdentity,
   type MapRecordSession,
   openRecord,
+  openSealed,
   refreshRecord,
   sealRecord,
   type SessionRecord,
@@ -319,6 +320,15 @@ export function sessionKeyInfo(audience: string, binding: string): string {
   return JSON.stringify(['fides-auth session', audience, binding]);
 }
 
+/**
+ * The reasons a read reports as a `session.rejected` event itself: a cookie
+ * that is there and doesn't open. A caller that reports rejections of its own,
+ * as the heartbeat does, leaves these to the read.
+ */
+export function isReportedOnRead(reason: SessionRejectedReason): boolean {
+  return reason === 'unreadable_session' || reason === 'unsupported_session_version';
+}
+
 export function createSessionLifecycle(options: SessionLifecycleOptions): SessionLifecycle {
   const { storage, secret, rolesClaim, mapSession, mapRefresh, logger } = options;
   const sessionDurationSeconds = checkSessionDuration(options.sessionDurationSeconds);
@@ -542,14 +552,32 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     });
   }
 
-  async function read(cookies: CookieStore): Promise<ReadRecordResult> {
+  /** Reads the session and reports nothing: for a second look at one that was read already. */
+  async function load(cookies: CookieStore): Promise<ReadRecordResult & { version?: number }> {
     assertSessionSecret(secret);
     const loaded = await storage.load(cookies);
     if (loaded.sealed === null) return { record: null, reason: loaded.reason };
-    const record = await openRecord(loaded.sealed, await sealingKey(loaded.binding));
-    if (!record) return { record: null, reason: 'unreadable_session' };
-    if (isExpired(record)) return { record: null, reason: 'session_expired' };
-    return { record };
+    const opened = await openSealed(loaded.sealed, await sealingKey(loaded.binding));
+    if (!opened.record) {
+      return opened.why === 'unsupported_version'
+        ? { record: null, reason: 'unsupported_session_version', version: opened.version }
+        : { record: null, reason: 'unreadable_session' };
+    }
+    if (isExpired(opened.record)) return { record: null, reason: 'session_expired' };
+    return { record: opened.record };
+  }
+
+  /**
+   * Reads the session. A cookie that is there and doesn't open is an event:
+   * after a change of secret, issuer or version it is every user's cookie,
+   * and a deploy that logs everyone out should show in the logs.
+   */
+  async function read(cookies: CookieStore): Promise<ReadRecordResult> {
+    const { version, ...result } = await load(cookies);
+    if (!result.record && isReportedOnRead(result.reason)) {
+      emit({ event: SESSION_EVENT.REJECTED, reason: result.reason, version });
+    }
+    return result;
   }
 
   /** A refresh the store failed: on a read or a write, or the lock couldn't be had in time. */
@@ -591,7 +619,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       if (cause === 'invalid_grant' && storage.lock) {
         // With rotation, another instance may have spent this token first, and
         // then its result is ours too.
-        const latest = await read(cookies);
+        const latest = await load(cookies);
         if (latest.record && refreshedSince(current, latest.record)) {
           return alreadyRefreshed(current, latest.record);
         }
@@ -772,7 +800,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       // update may have changed the session while it waited, and another
       // instance may have refreshed or ended it.
       const attempt = async (): Promise<RefreshRecordResult> => {
-        const latest = await read(cookies);
+        const latest = await load(cookies);
         if (!latest.record) {
           // It was there a moment ago: a logout or a refresh that was refused
           // ended it while this one waited.
@@ -811,7 +839,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
 
       const change = async (): Promise<SessionRecord | null> => {
         // Read again: a refresh may have saved new tokens while this waited.
-        const latest = (await read(cookies)).record;
+        const latest = (await load(cookies)).record;
         if (!latest) return null;
         // Under cookie storage the refresh may have been another request's,
         // and this one still carries the cookie from before it.
@@ -862,7 +890,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         // A refresh on another instance holds the same lock: it either saved
         // first, and its tokens are the ones ended, or it finds the record gone.
         ended = await lock(cookies, async () => {
-          const latest = (await read(cookies).catch(() => undefined))?.record;
+          const latest = (await load(cookies).catch(() => undefined))?.record;
           await discard(cookies);
           // What the store holds is the last word, unless it still holds the
           // refresh token of a refresh whose tokens it never took.

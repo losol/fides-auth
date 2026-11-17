@@ -45,7 +45,12 @@ import {
   validateCallback,
 } from './login-transaction.js';
 import { validateReturnUrl } from './return-to.js';
-import { checkRefreshGrace, createSessionLifecycle, SessionCookieLeftError } from './session-lifecycle.js';
+import {
+  checkRefreshGrace,
+  createSessionLifecycle,
+  isReportedOnRead,
+  SessionCookieLeftError,
+} from './session-lifecycle.js';
 import { assertSessionSecret, type SessionSecret } from './session-secret.js';
 import { cookieStorage, sessionCookieName, storeStorage } from './session-storage.js';
 import type { SessionStore, StoreFields } from './session-store.js';
@@ -866,17 +871,20 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         return new Response(null, { status: 503, headers: NO_STORE });
       }
 
-      const event: SessionEvent = {
-        event: SESSION_EVENT.REJECTED,
-        correlationId: result.correlationId,
-        reason: result.reason,
-        source: 'heartbeat',
-      };
-      logSessionEvent(log.heartbeat, event);
-      try {
-        config.onSessionEvent?.(event);
-      } catch (error) {
-        log.heartbeat.error({ error }, 'onSessionEvent threw');
+      // A cookie that doesn't open was reported when it was read.
+      if (!isReportedOnRead(result.reason)) {
+        const event: SessionEvent = {
+          event: SESSION_EVENT.REJECTED,
+          correlationId: result.correlationId,
+          reason: result.reason,
+          source: 'heartbeat',
+        };
+        logSessionEvent(log.heartbeat, event);
+        try {
+          config.onSessionEvent?.(event);
+        } catch (error) {
+          log.heartbeat.error({ error }, 'onSessionEvent threw');
+        }
       }
       return Response.json({ reason: result.reason }, { status: 401, headers: NO_STORE });
     },
