@@ -332,8 +332,13 @@ A value is a string, number, boolean or null, or a list of strings, for roles
 say: `storeFields: (session) => ({ roles: session.user?.roles ?? [] })`.
 The store gets them as `record.fields` on every `set`, so they follow the
 session through refreshes and `updateSession`. Index them to list or count who
-is signed in. They aren't sealed: return only what the store may show, and
-never a token. Without a `sessionStore`, `storeFields` does nothing.
+is signed in. Without a `sessionStore`, `storeFields` does nothing.
+
+**They aren't sealed.** Whoever can read the store, a backup of it or a query
+log reads them as they are. A role or your own user id is what they are for.
+An e-mail address, a name or anything else that identifies a person is not,
+and a token never: those belong in the session's `data`, which is sealed. Keep
+in `fields` only what a query has to find.
 
 ## Ending a user's sessions
 
