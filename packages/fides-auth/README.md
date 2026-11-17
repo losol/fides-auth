@@ -688,7 +688,10 @@ stays on `applicationUrl`'s origin whatever it returns.
 
 `authorizedFetch` sends the session's access token only to URLs under
 `allowedBase` (same origin, and a path under its path). It never follows a
-redirect, never refreshes, and times out after 10 seconds by default:
+redirect, never refreshes, and times out after 10 seconds by default. A path
+with `.` or `..` segments is refused also when they are percent-encoded, once
+or twice, or written with a backslash or `..;`. An encoded slash inside a
+segment, such as `group%2Fproject`, is left alone:
 
 ```typescript
 await auth.refreshSession(cookies, { ifExpiresWithin: 60 });

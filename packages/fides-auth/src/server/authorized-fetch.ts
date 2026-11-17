@@ -158,7 +158,13 @@ function resolveAllowedUrl(url: string | URL, allowedBase: string | URL, logger:
 
   const underBase =
     target.pathname.startsWith(base.pathname) || `${target.pathname}/` === base.pathname;
-  if (target.username || target.password || target.origin !== base.origin || !underBase) {
+  if (
+    target.username ||
+    target.password ||
+    target.origin !== base.origin ||
+    !underBase ||
+    hasDotSegment(target.pathname)
+  ) {
     logger.warn(
       { url: redactUrl(target), allowedBase: redactUrl(base) },
       'Refused to send the access token outside allowedBase',
@@ -166,6 +172,30 @@ function resolveAllowedUrl(url: string | URL, allowedBase: string | URL, logger:
     throw new AuthorizedFetchError('url_not_allowed', { url: redactUrl(target) });
   }
   return target;
+}
+
+/** The escapes a dot segment can hide in: `.`, `/`, `\`, `;`, and `%` for an escape of an escape. */
+const HIDING = /%(2e|2f|5c|3b|25)/gi;
+
+/**
+ * Whether the path has a `.` or `..` segment, in any of its encodings. A gateway
+ * that decodes before it routes would resolve `..%2f` or `%252e%252e` out of the base.
+ *
+ * Each escape is decoded on its own, so a malformed one elsewhere in the path
+ * doesn't stop the rest from being looked at.
+ */
+function hasDotSegment(pathname: string): boolean {
+  let path = pathname;
+  for (let round = 0; round <= 3; round++) {
+    const dotted = path
+      .split(/[/\\]/)
+      .some((segment) => segment === '.' || segment === '..' || /^\.\.?;/.test(segment));
+    if (dotted) return true;
+    const decoded = path.replace(HIDING, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+    if (decoded === path) return false;
+    path = decoded;
+  }
+  return false;
 }
 
 interface Attempt {
@@ -188,7 +218,12 @@ async function send(
   if (!token) throw new AuthorizedFetchError('no_access_token', request);
 
   const headers = new Headers(init.headers);
-  headers.set('Authorization', `Bearer ${token}`);
+  try {
+    headers.set('Authorization', `Bearer ${token}`);
+  } catch {
+    // A token with CR, LF or NUL: the TypeError's message would carry the token.
+    throw new AuthorizedFetchError('no_access_token', request);
+  }
   const timeout = AbortSignal.timeout(timeoutMs);
   const { signal, unlink } = linkSignals(timeout, init.signal);
 
