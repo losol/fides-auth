@@ -61,7 +61,7 @@ endpoint all report the same word for the same situation.
 | `session_not_found`    | info  | A handle was sent but the server store has no live record: revoked, expired or evicted. Server persistence only. |
 | `session_expired`      | info  | The session's lifetime has run out. Refreshes don't extend it, so the user logs in again. |
 | `refresh_failed`       | info  | The provider rejected the refresh token. See `cause`.           |
-| `unreadable_session`   | warn  | A cookie arrived but would not decrypt. Corruption, or a changed secret, `issuer` or `clientId`. |
+| `unreadable_session`   | warn  | A cookie arrived but would not decrypt. Corruption, or a changed `issuer` or `clientId`, or a secret replaced without keeping the old one in the list. |
 | `unsupported_session_version` | error | The session opened, but a later major of the library wrote it. A rollback, or two versions running side by side. Comes with `version`. |
 | `no_refresh_token`     | warn  | The session has no refresh token — usually `offline_access` was never granted. |
 

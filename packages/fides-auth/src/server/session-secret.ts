@@ -12,19 +12,33 @@ export class SessionSecretError extends TypeError {
   override name = 'SessionSecretError';
 }
 
-/** Throws unless `secret` is the 32 bytes A256GCM needs. Never echoes the secret. */
-export function assertSessionSecret(secret: SessionSecret): void {
+/**
+ * The secret, or several while one is replaced: the first seals, and every
+ * one of them opens. So a new secret can be put first, and the old one kept
+ * behind it until the sessions it sealed have run out.
+ */
+export type SessionSecrets = SessionSecret | readonly SessionSecret[];
+
+/** The secrets as a list, the one that seals first. */
+export function secretsOf(secret: SessionSecrets): readonly SessionSecret[] {
+  return typeof secret === 'string' || secret instanceof Uint8Array ? [secret] : secret;
+}
+
+/** Throws unless every secret is the 32 bytes A256GCM needs. Never echoes a secret. */
+export function assertSessionSecret(secret: SessionSecrets): void {
   if (!secret || secret.length === 0) {
     throw new SessionSecretError('fides-auth: session secret is missing or empty');
   }
-  const valid =
-    secret instanceof Uint8Array
-      ? secret.length === 32
-      : typeof secret === 'string' && /^[0-9a-fA-F]{64}$/.test(secret);
-  if (!valid) {
-    throw new SessionSecretError(
-      'fides-auth: session secret must be 32 bytes (64 hex characters or a Uint8Array)',
-    );
+  for (const one of secretsOf(secret)) {
+    const valid =
+      one instanceof Uint8Array
+        ? one.length === 32
+        : typeof one === 'string' && /^[0-9a-fA-F]{64}$/.test(one);
+    if (!valid) {
+      throw new SessionSecretError(
+        'fides-auth: session secret must be 32 bytes (64 hex characters or a Uint8Array)',
+      );
+    }
   }
 }
 

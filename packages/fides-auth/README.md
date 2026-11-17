@@ -670,13 +670,42 @@ Choose the store when the provider's tokens don't fit in three cookies
 (OpenIddict's encrypted JWE tokens, for instance), when logout must end a
 copied cookie, when you need to sign a user out everywhere, or when you
 refresh from Server Components. Both seal the
-session with `secret`, so rotating it ends every session either way, and
+session with `secret`, so a new secret alone ends every session either way, and
 moving from one to the other logs users in again once.
 
 See [docs/server-sessions.md](./docs/server-sessions.md) for the store contract,
 and [docs/session-format.md](./docs/session-format.md) for what is written to
 a cookie and to a store, what stays the same through 1.x, and how to start a
 session in a test.
+
+#### Replacing the secret
+
+`secret` also takes a list. The first one seals, and every one of them opens,
+so a secret can be replaced while users stay logged in:
+
+```typescript
+createFidesAuth({ oauthConfig, secret: [newSecret, oldSecret] });
+```
+
+In a fleet where instances are replaced one at a time, do it in three deploys,
+or an instance that hasn't got the new secret yet meets sessions it can't open:
+
+1. `secret: [oldSecret, newSecret]`. Every instance opens both, and still seals
+   with the old one.
+2. `secret: [newSecret, oldSecret]`. New sessions are sealed with the new one,
+   and so is an old session the next time it is refreshed or updated. A read
+   doesn't write, so one that is only read keeps the old seal.
+3. `secret: newSecret`, once `sessionDurationSeconds` has passed since step 2.
+   By then every session sealed with the old one has run out.
+
+With one instance, or a deploy that replaces all at once, start at step 2.
+
+Keep an old secret only while it is still a secret. One that has leaked opens
+every session it sealed, so take it out at once and let everyone log in again.
+
+A login that was under way when the secret changed finishes, and
+`endUserSessions` finds a user's sessions whichever secret they were saved
+with.
 
 #### Login
 

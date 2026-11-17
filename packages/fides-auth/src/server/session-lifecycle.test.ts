@@ -729,6 +729,121 @@ describe('what a sealed session is bound to', () => {
   });
 });
 
+describe.each(storages)('replacing the secret, with %s', (_, { make }) => {
+  const OLD = 'a'.repeat(64);
+  const NEW = 'b'.repeat(64);
+
+  function fleet() {
+    const { storage, store } = make();
+    const issued = { n: 1 };
+    const refreshTokens = vi.fn(async () => tokens(++issued.n));
+    const events: SessionEvent[] = [];
+    const withSecret = (secret: SessionLifecycleOptions['secret']) =>
+      createSessionLifecycle({
+        storage,
+        secret,
+        refreshTokens,
+        logger: quiet,
+        onSessionEvent: (event) => events.push(event),
+      });
+    return { withSecret, store, events, refreshTokens, ...cookieJar() };
+  }
+
+  it('opens a session sealed with the old secret, and seals it with the new one when it is next saved', async () => {
+    const { withSecret, cookies, events } = fleet();
+    const created = await withSecret(OLD).create(cookies, tokens(1));
+    const both = withSecret([NEW, OLD]);
+
+    // Read as it is: a read writes nothing, so the old secret still opens it and the new one alone doesn't.
+    expect((await both.read(cookies)).record).toEqual(created);
+    expect((await withSecret(OLD).read(cookies)).record).toEqual(created);
+    expect((await withSecret(NEW).read(cookies)).record).toBeNull();
+
+    // A refresh saves it, sealed with the first secret.
+    expect(await both.refresh(cookies)).toMatchObject({ ok: true });
+    expect((await withSecret(NEW).read(cookies)).record?.tokens.refreshToken).toBe('refresh-2');
+    expect((await withSecret(OLD).read(cookies)).record).toBeNull();
+    expect((await both.read(cookies)).record?.session.correlationId).toBe(created.session.correlationId);
+    expect(events.filter((event) => event.event === 'session.rejected')).toHaveLength(2);
+  });
+
+  it('an update seals it with the new secret too', async () => {
+    const { withSecret, cookies } = fleet();
+    await withSecret(OLD).create(cookies, tokens(1));
+
+    await withSecret([NEW, OLD]).update(cookies, (session) => ({ ...session, data: { theme: 'dark' } }));
+    expect((await withSecret(NEW).read(cookies)).record?.session.data).toEqual({ theme: 'dark' });
+  });
+
+  it('seals a new session with the first secret, whatever comes after it', async () => {
+    const { withSecret, cookies } = fleet();
+    await withSecret([NEW, OLD]).create(cookies, tokens(1));
+
+    expect((await withSecret(NEW).read(cookies)).record).not.toBeNull();
+    expect((await withSecret(OLD).read(cookies)).record).toBeNull();
+    // The step before: instances that already open the new one, and still seal with the old.
+    expect((await withSecret([OLD, NEW]).read(cookies)).record).not.toBeNull();
+  });
+
+  it('opens nothing sealed with a secret that isn\'t in the list, and ends a session it opened with any', async () => {
+    const { withSecret, cookies } = fleet();
+    await withSecret('c'.repeat(64)).create(cookies, tokens(1));
+    expect(await withSecret([NEW, OLD]).read(cookies)).toEqual({ record: null, reason: 'unreadable_session' });
+
+    await withSecret(OLD).create(cookies, tokens(1));
+    const ended = await withSecret([NEW, OLD]).end(cookies, { trigger: 'logout' });
+    expect(ended?.tokens.refreshToken).toBe('refresh-1');
+    expect((await withSecret(OLD).read(cookies)).record).toBeNull();
+  });
+
+  it('refuses a list that is empty or holds a bad secret', async () => {
+    const { withSecret, cookies } = fleet();
+    await expect(withSecret([]).read(cookies)).rejects.toThrow(SessionSecretError);
+    await expect(withSecret([NEW, 'short']).read(cookies)).rejects.toThrow(SessionSecretError);
+    await expect(withSecret([NEW, 'short']).create(cookies, tokens(1))).rejects.toThrow(SessionSecretError);
+  });
+});
+
+describe('replacing the secret, and the sessions a store finds by user', () => {
+  const OLD = 'a'.repeat(64);
+  const NEW = 'b'.repeat(64);
+  const forUser = (sub: string, sid: string) =>
+    tokens(1, {
+      refresh_token: `refresh-${sid}`,
+      id_token: new UnsecuredJWT({ iss: 'https://idp.test', sub, sid }).encode(),
+    });
+
+  it('ends a user\'s sessions whichever secret they were last saved with', async () => {
+    const store = createMemorySessionStore();
+    const find = vi.spyOn(store, 'findMatching');
+    const withSecret = (secret: SessionLifecycleOptions['secret']) =>
+      createSessionLifecycle({
+        storage: storeStorage({ store, secure: true }),
+        secret,
+        refreshTokens: vi.fn(async () => tokens(2)),
+        logger: quiet,
+      });
+    const laptop = cookieJar();
+    const phone = cookieJar();
+    const bob = cookieJar();
+    await withSecret(OLD).create(laptop.cookies, forUser('ada', 'sid-laptop'));
+    await withSecret(OLD).create(bob.cookies, forUser('bob', 'sid-bob'));
+    const both = withSecret([NEW, OLD]);
+    await both.create(phone.cookies, forUser('ada', 'sid-phone'));
+
+    // The lookup hash is keyed with the secret, so the two sessions of one user are filed under two hashes.
+    const ended = await both.endMatching({ sub: 'ada' }, { trigger: 'logout' });
+
+    expect(ended.map((record) => record.tokens.refreshToken).sort()).toEqual(['refresh-sid-laptop', 'refresh-sid-phone']);
+    expect(find).toHaveBeenCalledTimes(2);
+    expect(new Set(find.mock.calls.map(([match]) => match.subHash)).size).toBe(2);
+    expect((await both.read(bob.cookies)).record?.session.user?.sub).toBe('bob');
+    // With the new secret alone, the session filed under the old hash is not found.
+    await withSecret(OLD).create(laptop.cookies, forUser('ada', 'sid-laptop-2'));
+    expect(await withSecret(NEW).endMatching({ sub: 'ada' })).toEqual([]);
+  });
+});
+
 describe('a cookie that is there and doesn\'t open', () => {
   function setup() {
     const events: SessionEvent[] = [];
