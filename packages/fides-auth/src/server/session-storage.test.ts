@@ -40,8 +40,52 @@ function cookieJar(initial: Record<string, string> = {}) {
 const inAnHour = () => new Date(Date.now() + 3_600_000).toISOString();
 
 function request(sealed: string, extra: Partial<SaveRequest> = {}): SaveRequest {
-  return { sealed, expiresAt: inAnHour(), correlationId: 'c1', continuation: false, reason: 'login', ...extra };
+  return {
+    seal: async () => sealed,
+    expiresAt: inAnHour(),
+    correlationId: 'c1',
+    continuation: false,
+    reason: 'login',
+    ...extra,
+  };
 }
+
+describe('what a record is sealed for', () => {
+  /** A request whose sealed string names the binding it was sealed for. */
+  const naming = (extra: Partial<SaveRequest> = {}) => request('', { seal: async (binding) => `for:${binding}`, ...extra });
+
+  it('is `cookie` under cookie storage, on save and on load', async () => {
+    const { cookies, jar } = cookieJar();
+    const storage = cookieStorage({ secure: true });
+    await storage.save(cookies, naming());
+
+    expect(jar.get('__Host-session')).toBe('for:cookie');
+    expect(await storage.load(cookies)).toEqual({ sealed: 'for:cookie', binding: 'cookie' });
+  });
+
+  it('is the record\'s own key under store storage: on a login, a continuation, a load and a search', async () => {
+    const store = createMemorySessionStore();
+    const { cookies, jar } = cookieJar();
+    const storage = storeStorage({ store, secure: true });
+    await storage.save(cookies, naming({ lookup: { subHash: 'h1' } }));
+    const key = await sha256(jar.get('__Host-session') ?? '');
+    const binding = `store ${key}`;
+
+    expect((await store.get(key))?.data).toBe(`for:${binding}`);
+    expect(await storage.load(cookies)).toEqual({ sealed: `for:${binding}`, binding });
+
+    await storage.save(cookies, naming({ lookup: { subHash: 'h1' }, continuation: true, reason: 'refresh' }));
+    expect((await store.get(key))?.data).toBe(`for:${binding}`);
+
+    const found = await storage.findMatching?.({ subHash: 'h1' });
+    expect(found?.map((entry) => entry.binding)).toEqual([binding]);
+
+    // Another session gets another key, and so another binding.
+    const other = cookieJar();
+    await storage.save(other.cookies, naming());
+    expect((await storage.load(other.cookies)).sealed).not.toBe(`for:${binding}`);
+  });
+});
 
 describe('cookieStorage', () => {
   it('writes a small record to one __Host-session cookie, with the time left as Max-Age', async () => {
@@ -60,7 +104,7 @@ describe('cookieStorage', () => {
     expect(writes[0]?.options?.maxAge).toBeGreaterThan(3590);
     expect(writes[0]?.options?.maxAge).toBeLessThanOrEqual(3600);
     expect(result).toEqual({ saved: true, cookieBytes: '__Host-session=sealed-value'.length });
-    expect(await storage.load(cookies)).toEqual({ sealed: 'sealed-value' });
+    expect(await storage.load(cookies)).toMatchObject({ sealed: 'sealed-value' });
   });
 
   it('cuts a large record into chunks below the per-cookie limit and joins them on load', async () => {
@@ -71,7 +115,7 @@ describe('cookieStorage', () => {
 
     expect([...jar.keys()]).toEqual(['__Host-session', '__Host-session.1', '__Host-session.2']);
     for (const [name, value] of jar) expect(name.length + 1 + value.length).toBeLessThan(4096);
-    expect(await storage.load(cookies)).toEqual({ sealed });
+    expect(await storage.load(cookies)).toMatchObject({ sealed });
   });
 
   it('refuses a record that needs more than three cookies, and writes nothing', async () => {
@@ -91,7 +135,7 @@ describe('cookieStorage', () => {
     await storage.save(cookies, request('small'));
 
     expect([...jar.keys()]).toEqual(['__Host-session']);
-    expect(await storage.load(cookies)).toEqual({ sealed: 'small' });
+    expect(await storage.load(cookies)).toMatchObject({ sealed: 'small' });
   });
 
   it('uses the plain name without Secure for a plain-http redirect URI', async () => {
@@ -184,7 +228,7 @@ describe('storeStorage', () => {
       subHash: 'h1',
       idpSidHash: 'h2',
     });
-    expect(await storage.load(cookies)).toEqual({ sealed: 'sealed' });
+    expect(await storage.load(cookies)).toMatchObject({ sealed: 'sealed' });
   });
 
   it('mints a new handle for a new session and deletes the old record', async () => {
@@ -206,7 +250,7 @@ describe('storeStorage', () => {
     });
 
     expect(jar.get('__Host-session')).toBe(handle);
-    expect(await storage.load(cookies)).toEqual({ sealed: 'second' });
+    expect(await storage.load(cookies)).toMatchObject({ sealed: 'second' });
   });
 
   it('does not bring back a session that ended while a continuation ran', async () => {

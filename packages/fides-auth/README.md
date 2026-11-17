@@ -843,6 +843,7 @@ const user = await vipps.getUserInfo(tokens.access_token);
 
 - **PKCE** — All OAuth flows use Proof Key for Code Exchange
 - **AES-256-GCM** — Sessions encrypted with authenticated encryption
+- **Bound sessions** — A session is sealed for its provider and client, and in a store for its own key. Another instance with the same secret can't read it, and a stored record can't be moved to another key or sent as a cookie
 - **Open redirect protection** — Return paths are validated and kept on the app's origin
 - **CSRF** — Logout and heartbeat answer only a same-origin `POST`
 - **No secret logging** — Tokens, keys, and PII are never logged
