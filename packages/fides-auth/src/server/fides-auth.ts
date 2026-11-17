@@ -45,7 +45,7 @@ import {
   validateCallback,
 } from './login-transaction.js';
 import { validateReturnUrl } from './return-to.js';
-import { checkRefreshGrace, createSessionLifecycle } from './session-lifecycle.js';
+import { checkRefreshGrace, createSessionLifecycle, SessionCookieLeftError } from './session-lifecycle.js';
 import { assertSessionSecret, type SessionSecret } from './session-secret.js';
 import { cookieStorage, sessionCookieName, storeStorage } from './session-storage.js';
 import type { SessionStore, StoreFields } from './session-store.js';
@@ -384,6 +384,13 @@ export interface FidesAuth<TData = Record<string, unknown>> {
    * Ends the session and revokes its refresh token where the provider has a
    * revocation endpoint. With a store, the record is deleted too. `trigger`
    * defaults to `'logout'`.
+   *
+   * Call it where cookies can be written. Where they can't, after the
+   * response's cookies were taken say, it rejects with what the cookie store
+   * threw. With a store the session is over all the same: the record is
+   * deleted and the token revoked, and the cookie the browser keeps finds
+   * nothing. With cookie storage nothing is ended, since the cookie is the
+   * session.
    */
   clearSession(cookies: CookieStore, options?: { trigger?: SessionClearedTrigger }): Promise<void>;
   /**
@@ -797,10 +804,17 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       try {
         ended = await settings().lifecycle.end(cookies, { trigger: 'logout' });
       } catch (error) {
-        // Never send the user to the provider with the local session half ended:
-        // they would come back looking logged in.
-        log.logout.error({ error }, 'Failed to end the session');
-        return logoutFailed(request, { code: 'logout_failed', cause: error }, log.logout);
+        if (error instanceof SessionCookieLeftError) {
+          // The record is gone, so the user is logged out and the logout goes
+          // on. The cookie they keep finds no session when they come back.
+          log.logout.error({ error: error.cause }, 'Could not delete the session cookie; the session is ended');
+          ended = error.ended;
+        } else {
+          // Never send the user to the provider with the local session half ended:
+          // they would come back looking logged in.
+          log.logout.error({ error }, 'Failed to end the session');
+          return logoutFailed(request, { code: 'logout_failed', cause: error }, log.logout);
+        }
       }
       await revokeRefreshToken(ended, log.logout);
 
@@ -919,7 +933,17 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       return updated ? typed(updated.session) : null;
     },
     async clearSession(cookies, { trigger = 'logout' } = {}) {
-      await revokeRefreshToken(await settings().lifecycle.end(cookies, { trigger }), log.logout);
+      let ended: SessionRecord | undefined;
+      try {
+        ended = await settings().lifecycle.end(cookies, { trigger });
+      } catch (error) {
+        if (!(error instanceof SessionCookieLeftError)) throw error;
+        // The session is over, so its refresh token goes too. Then the caller
+        // hears what the cookie store said: the cookie is still in the browser.
+        await revokeRefreshToken(error.ended, log.logout);
+        throw error.cause;
+      }
+      await revokeRefreshToken(ended, log.logout);
     },
 
     async endUserSessions({ sub, iss }, { trigger = 'logout' } = {}) {

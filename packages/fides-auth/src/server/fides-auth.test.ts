@@ -1246,6 +1246,94 @@ describe('session members', () => {
     expect(await auth.readSession(cookies)).not.toBeNull();
   });
 
+  describe('ending a session where its cookie can\'t be deleted', () => {
+    /** The request's cookies, readable, and refusing every write as a response already built would. */
+    function readOnly(jar: Map<string, string>) {
+      const late = new Error('Cookie "__Host-session" was set after the response\'s cookies were taken');
+      const cookies: CookieStore = {
+        get: (name) => jar.get(name) ?? null,
+        set: () => {
+          throw late;
+        },
+      };
+      return { cookies, late };
+    }
+
+    it('with a store, clearSession ends the session and revokes its token, and then says the cookie is left', async () => {
+      const sessionStore = createMemorySessionStore();
+      const { auth, cookies, jar, events } = setup({ sessionStore });
+      await login(auth, cookies);
+      const { cookies: built, late } = readOnly(jar);
+
+      await expect(auth.clearSession(built)).rejects.toBe(late);
+
+      expect(oidc.revoke).toHaveBeenCalledExactlyOnceWith('refresh-1', { tokenTypeHint: 'refresh_token' });
+      // The browser keeps the handle, and it finds nothing.
+      expect(jar.has('__Host-session')).toBe(true);
+      expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+      expect(events.at(-1)).toMatchObject({ event: 'session.cleared', trigger: 'logout' });
+    });
+
+    it('with a store, it revokes the tokens of a refresh that came just before', async () => {
+      const sessionStore = createMemorySessionStore();
+      const { auth, cookies, jar } = setup({ sessionStore });
+      await login(auth, cookies);
+      await auth.refreshSession(cookies);
+
+      await expect(auth.clearSession(readOnly(jar).cookies)).rejects.toThrow();
+      expect(oidc.revoke).toHaveBeenCalledExactlyOnceWith('refresh-2', { tokenTypeHint: 'refresh_token' });
+    });
+
+    it('with a store, the logout goes on to the provider: the user is logged out', async () => {
+      const sessionStore = createMemorySessionStore();
+      const onLogoutError = vi.fn();
+      const { auth, cookies, jar } = setup({ sessionStore, onLogoutError });
+      await login(auth, cookies);
+
+      const response = await auth.handleOidcLogout(post('/api/auth/logout'), readOnly(jar).cookies);
+
+      expect(response.headers.get('location')).toMatch(/^https:\/\/idp\.test\/logout/);
+      expect(onLogoutError).not.toHaveBeenCalled();
+      expect(oidc.revoke).toHaveBeenCalledExactlyOnceWith('refresh-1', { tokenTypeHint: 'refresh_token' });
+      expect(await auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'session_not_found' });
+    });
+
+    it('with cookie storage, nothing is ended: the cookie is the session', async () => {
+      const { auth, cookies, jar } = setup();
+      await login(auth, cookies);
+      const { cookies: built, late } = readOnly(jar);
+
+      await expect(auth.clearSession(built)).rejects.toBe(late);
+      expect(oidc.revoke).not.toHaveBeenCalled();
+      expect((await auth.readSession(cookies))?.user?.sub).toBe('user-1');
+
+      const response = await auth.handleOidcLogout(post('/api/auth/logout'), built);
+      expect(response.headers.get('location')).toBe(`${APP}/?logout=error&error=logout_failed`);
+      expect(oidc.revoke).not.toHaveBeenCalled();
+    });
+
+    it('with a store that fails, clearSession rejects with what the store threw, and revokes nothing', async () => {
+      const base = createMemorySessionStore();
+      const down = new Error('db down');
+      const state = { down: false };
+      const sessionStore: SessionStore = {
+        ...base,
+        delete: async (key) => {
+          if (state.down) throw down;
+          return base.delete(key);
+        },
+      };
+      const { auth, cookies } = setup({ sessionStore });
+      await login(auth, cookies);
+      state.down = true;
+
+      await expect(auth.clearSession(cookies)).rejects.toBe(down);
+      expect(oidc.revoke).not.toHaveBeenCalled();
+      state.down = false;
+      expect((await auth.readSession(cookies))?.user?.sub).toBe('user-1');
+    });
+  });
+
   describe('endUserSessions', () => {
     it('ends a user\'s sessions in every browser, and revokes their refresh tokens', async () => {
       const store = createMemorySessionStore();

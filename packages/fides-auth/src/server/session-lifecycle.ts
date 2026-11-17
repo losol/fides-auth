@@ -80,6 +80,23 @@ export type RefreshRecordResult =
     ended?: true;
   };
 
+/**
+ * A stored session was ended, but its cookie couldn't be deleted: `end` was
+ * called where cookies can't be written. The record is gone, so the handle
+ * the browser keeps finds nothing. `ended` is what `end` would have returned,
+ * and `cause` is what the cookie store threw.
+ */
+export class SessionCookieLeftError extends Error {
+  override name = 'SessionCookieLeftError';
+
+  constructor(
+    readonly ended: SessionRecord | undefined,
+    cause: unknown,
+  ) {
+    super('The session is ended, but its cookie could not be deleted', { cause });
+  }
+}
+
 export interface SessionLifecycleOptions {
   storage: SessionStorage;
   /** The keys that seal records, and the one for the store's lookup hashes, are derived from it. */
@@ -177,6 +194,9 @@ export interface SessionLifecycle {
    * waited for first.
    *
    * @returns The record ended, with the tokens it held last, so they can be revoked.
+   * @throws SessionCookieLeftError when a stored session's record is deleted
+   * and its cookie can't be: the session is over, and the error carries the
+   * record. Under cookie storage, what the cookie store threw: nothing is ended.
    */
   end(
     cookies: CookieStore,
@@ -835,17 +855,27 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         unsaved.delete(current.session.correlationId);
       }
 
-      if (storage.lock) {
+      // What the cookie store threw, when the record went and the cookie couldn't.
+      let cookieLeft: { cause: unknown } | undefined;
+      const { lock, discard, clearCookies } = storage;
+      if (lock && discard && clearCookies) {
         // A refresh on another instance holds the same lock: it either saved
         // first, and its tokens are the ones ended, or it finds the record gone.
-        ended = await storage.lock(cookies, async () => {
+        ended = await lock(cookies, async () => {
           const latest = (await read(cookies).catch(() => undefined))?.record;
-          await storage.remove(cookies);
+          await discard(cookies);
           // What the store holds is the last word, unless it still holds the
           // refresh token of a refresh whose tokens it never took.
           if (latest && kept && latest.tokens.refreshToken === kept.spent) return kept.record;
           return latest ?? ended;
         });
+        // The record is gone, so the session is over whatever becomes of the
+        // cookie. The caller still gets the tokens that were ended, to revoke.
+        try {
+          await clearCookies(cookies);
+        } catch (cause) {
+          cookieLeft = { cause };
+        }
       } else {
         await storage.remove(cookies);
       }
@@ -857,6 +887,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
           trigger,
         });
       }
+      if (cookieLeft) throw new SessionCookieLeftError(ended, cookieLeft.cause);
       return ended;
     },
 

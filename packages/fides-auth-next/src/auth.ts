@@ -106,6 +106,11 @@ export interface FidesAuth<TData = Record<string, unknown>> {
    * Ends the session and revokes its refresh token where the provider has a
    * revocation endpoint. With a store, the record is deleted too. `trigger`
    * defaults to `'logout'`.
+   *
+   * Call it in a Server Action or a Route Handler. In a Server Component,
+   * where cookies can't be written, it rejects with what Next threw. With a
+   * store the session is over all the same, and the cookie the browser keeps
+   * finds nothing; with cookie storage nothing is ended.
    */
   clearSession(options?: { trigger?: SessionClearedTrigger }): Promise<void>;
   /**
