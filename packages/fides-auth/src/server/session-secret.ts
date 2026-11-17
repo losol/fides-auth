@@ -19,9 +19,39 @@ export class SessionSecretError extends TypeError {
  */
 export type SessionSecrets = SessionSecret | readonly SessionSecret[];
 
-/** The secrets as a list, the one that seals first. */
-export function secretsOf(secret: SessionSecrets): readonly SessionSecret[] {
+/** The secrets as given, as a list. */
+function listed(secret: SessionSecrets): readonly SessionSecret[] {
   return typeof secret === 'string' || secret instanceof Uint8Array ? [secret] : secret;
+}
+
+/** What tells one secret from another: its bytes, however they were written. Never logged. */
+function bytesOf(one: SessionSecret): string {
+  if (typeof one === 'string') return one.toLowerCase();
+  if (one instanceof Uint8Array) return Array.from(one, (b) => b.toString(16).padStart(2, '0')).join('');
+  // Not a secret at all: left for `assertSessionSecret` to refuse.
+  return String(one);
+}
+
+/**
+ * The secrets as a list, the one that seals first. One that is listed twice
+ * counts once, where it comes first: a config that always passes a current
+ * and a previous secret has the same one in both places between two changes.
+ */
+export function secretsOf(secret: SessionSecrets): readonly SessionSecret[] {
+  const all = listed(secret);
+  if (all.length < 2) return all;
+  const seen = new Set<string>();
+  return all.filter((one) => {
+    const bytes = bytesOf(one);
+    if (seen.has(bytes)) return false;
+    seen.add(bytes);
+    return true;
+  });
+}
+
+/** Whether the same secret is listed more than once. */
+export function hasRepeatedSecret(secret: SessionSecrets): boolean {
+  return !!secret && secretsOf(secret).length !== listed(secret).length;
 }
 
 /** Throws unless every secret is the 32 bytes A256GCM needs. Never echoes a secret. */

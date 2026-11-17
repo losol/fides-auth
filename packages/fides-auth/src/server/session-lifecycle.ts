@@ -54,6 +54,7 @@ import type { CookieStore } from './cookie-store.js';
 import {
   assertSessionSecret,
   deriveKey,
+  hasRepeatedSecret,
   secretsOf,
   type SessionSecret,
   type SessionSecrets,
@@ -342,6 +343,10 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
   const { storage, secret, rolesClaim, mapSession, mapRefresh, logger } = options;
   const sessionDurationSeconds = checkSessionDuration(options.sessionDurationSeconds);
   const refreshGraceSeconds = checkRefreshGrace(options.refreshGraceSeconds);
+  if (hasRepeatedSecret(secret)) {
+    // Harmless, and worth a line: someone who meant to replace the secret hasn't.
+    logger.warn('The same session secret is listed more than once; it counts once, so nothing is being replaced');
+  }
   const inflight = new Map<string, Promise<RefreshRecordResult>>();
   // By correlation id, oldest first. A store has no use for it: a request with
   // an old cookie holds the same handle, and reads the new record.
