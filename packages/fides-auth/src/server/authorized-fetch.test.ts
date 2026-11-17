@@ -209,6 +209,33 @@ describe('authorizedFetch — allowedBase', () => {
     expect(otherSeen).toEqual([]);
   });
 
+  it.each([
+    '/v1/..%2f..%2fadmin',
+    '/v1/..%5cadmin',
+    '/v1/..;/admin',
+    '/v1/%252e%252e/admin',
+    '/v1/a/%2e%2e%2f%2e%2e%2fadmin',
+    '/v1/%2E%2E%5Cadmin',
+  ])('refuses the encoded dot segments in %s and sends nothing', async (path) => {
+    const error = await failure(authorizedFetch(tokens(), `${api.url}${path}`, { allowedBase: base }));
+
+    expect(error.reason).toBe('url_not_allowed');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(apiSeen).toEqual([]);
+  });
+
+  it.each([
+    '/v1/projects/group%2Fproject',
+    '/v1/files/a%20b',
+    '/v1/users/..hidden',
+    '/v1/a..b/c',
+    '/v1/%zz',
+  ])('still sends %s, path unchanged', async (path) => {
+    await authorizedFetch(tokens(), `${api.url}${path}`, { allowedBase: base });
+
+    expect(apiSeen.map((s) => s.path)).toEqual([path]);
+  });
+
   it('throws a TypeError for an allowedBase that is relative, not http(s), or has credentials', async () => {
     for (const allowedBase of ['/v1', 'file:///etc/', `http://u:p@${new URL(api.url).host}/v1`]) {
       await expect(authorizedFetch(tokens(), 'ok', { allowedBase })).rejects.toThrow(TypeError);
@@ -545,6 +572,18 @@ describe('authorizedFetch — errors and parse', () => {
     expect(error.reason).toBe('no_access_token');
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it.each(['abc\r\ndef', 'abc\u0000def'])(
+    'does not put an unusable token in the error: %j',
+    async (accessToken) => {
+      const error = await failure(authorizedFetch(tokens(accessToken), 'ok', { allowedBase: base }));
+
+      expect(error.reason).toBe('no_access_token');
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(error.message).not.toContain('abc');
+      expect(String(error.cause)).not.toContain('abc');
+    },
+  );
 });
 
 describe('authorizedFetch — 401', () => {
