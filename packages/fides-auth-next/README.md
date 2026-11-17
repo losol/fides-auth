@@ -11,7 +11,9 @@ pnpm add @eventuras/fides-auth @eventuras/fides-auth-next
 ```
 
 `@eventuras/fides-auth`, `next` and `react` are peer dependencies, so the app
-has one copy of core. Needs Node 22.
+has one copy of core. Needs Node 22 and Next 16.4.1 or later: earlier 16
+releases have known vulnerabilities, among them one that lets a request pass
+`proxy.ts`, which is where an app guards its pages.
 
 ## Setup
 

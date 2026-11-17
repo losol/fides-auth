@@ -848,6 +848,9 @@ const user = await vipps.getUserInfo(tokens.access_token);
 - **No secret logging** — Tokens, keys, and PII are never logged
 - **Web Crypto API** — Uses the platform cryptographic primitives (not userland crypto)
 
+Found a vulnerability? Report it privately, as
+[SECURITY.md](https://github.com/losol/fides-auth/blob/main/SECURITY.md) says.
+
 ## TypeScript
 
 The shared types come from the root entry, and the server's from `/server`:
