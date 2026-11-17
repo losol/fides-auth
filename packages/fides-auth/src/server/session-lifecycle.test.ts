@@ -16,7 +16,7 @@ import {
   sessionKeyInfo,
   type SessionLifecycleOptions,
 } from './session-lifecycle.js';
-import { deriveKey, SessionSecretError } from './session-secret.js';
+import { deriveKey, secretsOf, SessionSecretError } from './session-secret.js';
 import { cookieStorage, type SessionStorage, storeStorage } from './session-storage.js';
 import { createMemorySessionStore, type SessionStore } from './session-store.js';
 
@@ -841,6 +841,78 @@ describe('replacing the secret, and the sessions a store finds by user', () => {
     // With the new secret alone, the session filed under the old hash is not found.
     await withSecret(OLD).create(laptop.cookies, forUser('ada', 'sid-laptop-2'));
     expect(await withSecret(NEW).endMatching({ sub: 'ada' })).toEqual([]);
+  });
+});
+
+describe('the same secret listed twice', () => {
+  const OLD = 'a'.repeat(64);
+  const NEW = 'b'.repeat(64);
+  const forUser = (sub: string, sid: string) =>
+    tokens(1, { id_token: new UnsecuredJWT({ iss: 'https://idp.test', sub, sid }).encode() });
+
+  function withSecret(secret: SessionLifecycleOptions['secret'], store = createMemorySessionStore()) {
+    const warnings: unknown[][] = [];
+    const lifecycle = createSessionLifecycle({
+      storage: storeStorage({ store, secure: true }),
+      secret,
+      // No ID token in the answer, so the refresh is for whoever the session belongs to.
+      refreshTokens: vi.fn(async () => tokens(2, { id_token: undefined })),
+      logger: { ...quiet, warn: (...args: unknown[]) => void warnings.push(args) },
+    });
+    return { lifecycle, warnings, store };
+  }
+
+  it('counts once, where it comes first, however it is written', async () => {
+    const { hexToUint8Array } = await import('../session/utils.js');
+
+    expect(secretsOf(OLD)).toEqual([OLD]);
+    expect(secretsOf([OLD, OLD])).toEqual([OLD]);
+    expect(secretsOf([NEW, OLD, NEW, OLD])).toEqual([NEW, OLD]);
+    // The same 32 bytes as hex in another case, and as bytes.
+    expect(secretsOf([OLD, OLD.toUpperCase()])).toEqual([OLD]);
+    expect(secretsOf([hexToUint8Array(OLD), OLD])).toHaveLength(1);
+    expect(secretsOf([NEW, OLD])).toEqual([NEW, OLD]);
+  });
+
+  it('works as the one secret it is: a config that always passes a current and a previous one', async () => {
+    const store = createMemorySessionStore();
+    const find = vi.spyOn(store, 'findMatching');
+    const { cookies } = cookieJar();
+    const created = await withSecret(OLD, store).lifecycle.create(cookies, forUser('ada', 'sid-1'));
+    const { lifecycle } = withSecret([OLD, OLD], store);
+
+    expect((await lifecycle.read(cookies)).record).toEqual(created);
+    expect(await lifecycle.refresh(cookies)).toMatchObject({ ok: true });
+    expect((await withSecret(OLD, store).lifecycle.read(cookies)).record?.tokens.refreshToken).toBe('refresh-2');
+
+    // One secret, so one search for the user's sessions.
+    expect(await lifecycle.endMatching({ sub: 'ada' })).toHaveLength(1);
+    expect(find).toHaveBeenCalledOnce();
+  });
+
+  it('says so once, since someone who meant to replace the secret hasn\'t', async () => {
+    const twice = withSecret([OLD, OLD]);
+    const { cookies } = cookieJar();
+    await twice.lifecycle.create(cookies, tokens(1));
+    await twice.lifecycle.read(cookies);
+    await twice.lifecycle.refresh(cookies);
+
+    expect(twice.warnings).toHaveLength(1);
+    expect(String(twice.warnings[0])).toMatch(/listed more than once/);
+    // Never the secret itself.
+    expect(JSON.stringify(twice.warnings)).not.toContain(OLD);
+
+    expect(withSecret(OLD).warnings).toEqual([]);
+    expect(withSecret([NEW, OLD]).warnings).toEqual([]);
+  });
+
+  it('still refuses a list with something that is no secret in it', async () => {
+    const { cookies } = cookieJar();
+    for (const secret of [[OLD, undefined as never], [OLD, 'short', 'short'], [OLD, OLD, '']]) {
+      await expect(withSecret(secret).lifecycle.read(cookies), JSON.stringify(secret.length)).rejects.toThrow(
+        SessionSecretError,
+      );
+    }
   });
 });
 

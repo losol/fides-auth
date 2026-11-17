@@ -700,6 +700,12 @@ or an instance that hasn't got the new secret yet meets sessions it can't open:
 
 With one instance, or a deploy that replaces all at once, start at step 2.
 
+The same secret listed twice counts once. So a config that always passes a
+current and a previous one, `[CURRENT, PREVIOUS]`, can have the same value in
+both between two changes. It is logged once as a warning, since it is also
+what a change that didn't happen looks like. An entry that is missing or isn't
+a secret is refused, as before.
+
 Keep an old secret only while it is still a secret. One that has leaked opens
 every session it sealed, so take it out at once and let everyone log in again.
 
