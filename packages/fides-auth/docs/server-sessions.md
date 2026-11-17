@@ -136,14 +136,19 @@ export const sessionStore: SessionStore = {
 
 An adapter can use `reason` to record when a session was last refreshed. It
 must then merge the record into what it has, since a `set` that replaces would
-drop the stamp at the next update:
+drop the stamp at the next update. The rule for a continuation holds for a
+merge too: one that creates what it doesn't find would bring back a session
+that was just ended.
 
 ```ts
-async set(key, record, { reason }) {
-  await db.sessions.merge(key, {
+async set(key, record, { continuation, reason }) {
+  const fields = {
     ...record,
     ...(reason === "refresh" && { refreshedAt: new Date() }),
-  });
+  };
+  // Only a new session creates. A refresh or an update merges into what is there.
+  if (continuation) await db.sessions.mergeIfExists(key, fields);
+  else await db.sessions.create(key, fields);
 },
 ```
 

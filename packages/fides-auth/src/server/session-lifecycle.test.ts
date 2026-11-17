@@ -1297,6 +1297,54 @@ describe('the session lifecycle, store storage only', () => {
       expect((await lifecycle.read(laptop.cookies)).record).toBeNull();
     });
 
+    it('leaves a record without a user alone, when a search hands back too much', async () => {
+      const { store, lifecycle, refreshTokens, events, laptop, bob } = await threeSessions();
+      // A session started without an ID token: it has no `idp`, and no lookup fields.
+      const service = cookieJar();
+      await lifecycle.create(service.cookies, tokens(1, { id_token: undefined, refresh_token: 'refresh-service' }));
+      // And a record that doesn't open.
+      await store.set('garbage', { data: 'not-a-sealed-record', expiresAt: new Date(Date.now() + 60_000).toISOString() }, { continuation: false, reason: 'login' });
+
+      // An adapter whose search returns every record it has.
+      const everything: SessionStore = {
+        ...store,
+        findMatching: async () => {
+          const all = [];
+          for (const jar of [laptop.jar, bob.jar, service.jar]) {
+            const { sha256 } = await import('../session/utils.js');
+            const key = await sha256(jar.get('__Host-session') ?? '');
+            const record = await store.get(key);
+            if (record) all.push({ key, record });
+          }
+          const garbage = await store.get('garbage');
+          if (garbage) all.push({ key: 'garbage', record: garbage });
+          return all;
+        },
+      };
+      const sloppy = createSessionLifecycle({
+        storage: storeStorage({ store: everything, secure: true }),
+        secret,
+        refreshTokens,
+        logger: quiet,
+        onSessionEvent: (event) => events.push(event),
+      });
+
+      const ended = await sloppy.endMatching({ sub: 'ada' }, { trigger: 'logout' });
+
+      // Ada's, and nothing else: not Bob's, not the one without a user, not the one that doesn't open.
+      expect(ended.map((record) => record.tokens.refreshToken)).toEqual(['refresh-sid-laptop']);
+      expect((await lifecycle.read(bob.cookies)).record).not.toBeNull();
+      expect((await lifecycle.read(service.cookies)).record?.tokens.refreshToken).toBe('refresh-service');
+      expect(await store.get('garbage')).not.toBeNull();
+    });
+
+    it('refuses an empty issuer: it is not the same as none', async () => {
+      const { lifecycle, laptop } = await threeSessions();
+
+      await expect(lifecycle.endMatching({ iss: '', sub: 'ada' })).rejects.toThrow(TypeError);
+      expect((await lifecycle.read(laptop.cookies)).record).not.toBeNull();
+    });
+
     // With a lock the delete queues behind the refresh; without one, the wait in this process does it.
     it.each([
       ['with', (store: SessionStore) => store],

@@ -1184,6 +1184,8 @@ describe('session members', () => {
       await login(auth, cookies);
 
       expect(await auth.endUserSessions({ sub: 'user-2', iss: 'https://idp.test' })).toBe(0);
+      // An issuer that is given but empty, an unset variable say, is refused, not read as "any".
+      await expect(auth.endUserSessions({ sub: 'user-1', iss: '' })).rejects.toThrow(TypeError);
       expect(await auth.endUserSessions({ sub: 'user-1', iss: 'https://other.test' })).toBe(0);
       expect(await auth.readSession(cookies)).not.toBeNull();
       expect(oidc.metadata).not.toHaveBeenCalled();
