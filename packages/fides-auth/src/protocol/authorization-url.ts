@@ -2,6 +2,7 @@ import * as openid from 'openid-client';
 
 import type { FidesLogger } from '../shared/logger.js';
 import type { ProtocolContext } from './context.js';
+import { getOAuthErrorLogContext } from './logging.js';
 
 async function urlFor(
   config: openid.Configuration,
@@ -13,7 +14,7 @@ async function urlFor(
     logger.info('Authorization URL built successfully');
     return authUrl;
   } catch (error) {
-    logger.error({ error }, 'Failed to build authorization URL');
+    logger.error({ error: getOAuthErrorLogContext(error) }, 'Failed to build authorization URL');
     throw error;
   }
 }
@@ -28,7 +29,7 @@ async function parUrlFor(
     logger.info('PAR authorization URL built successfully');
     return authUrl;
   } catch (error) {
-    logger.error({ error }, 'Failed to build PAR authorization URL');
+    logger.error({ error: getOAuthErrorLogContext(error) }, 'Failed to build PAR authorization URL');
     throw error;
   }
 }
@@ -66,7 +67,10 @@ export async function authorizationUrl(
 
     return urlFor(config, parameters, logger);
   } catch (error) {
-    logger.error({ error, issuer: oauthConfig.issuer }, 'Failed to discover config or build URL');
+    logger.error(
+      { error: getOAuthErrorLogContext(error), issuer: oauthConfig.issuer },
+      'Failed to discover config or build URL',
+    );
     throw error;
   }
 }

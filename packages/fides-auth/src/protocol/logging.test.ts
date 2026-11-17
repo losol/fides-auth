@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { classifyRefreshFailure, getOAuthErrorLogContext } from './logging.js';
+import { classifyRefreshFailure, getOAuthErrorLogContext, withoutResponseBody } from './logging.js';
 
 describe('getOAuthErrorLogContext', () => {
   it('returns { value } for non-object errors', () => {
@@ -169,6 +169,41 @@ describe('classifyRefreshFailure', () => {
     // a session.
     for (const value of [null, undefined, 'a string', 42, new Error('who knows')]) {
       expect(classifyRefreshFailure(value), String(value)).toBe('idp_error');
+    }
+  });
+});
+
+describe('withoutResponseBody', () => {
+  it('takes the body off a cause, however deep openid-client wrapped it, and keeps the rest', () => {
+    const inner = new Error('"response" body "token_type" property must be a string', {
+      cause: { body: { access_token: 'secret' }, attribute: 'token_type' },
+    });
+    const outer = new Error('invalid response encountered', { cause: inner });
+
+    expect(withoutResponseBody(outer)).toBe(outer);
+    expect(inner.cause).toEqual({ attribute: 'token_type' });
+    expect(outer.cause).toBe(inner);
+  });
+
+  it('leaves an OAuth error response as it is', () => {
+    const error = Object.assign(new Error('invalid_grant'), {
+      code: 'OAUTH_RESPONSE_BODY_ERROR',
+      error: 'invalid_grant',
+      cause: { error: 'invalid_grant', error_description: 'expired' },
+    });
+
+    withoutResponseBody(error);
+    expect(error.cause).toEqual({ error: 'invalid_grant', error_description: 'expired' });
+    expect(classifyRefreshFailure(error)).toBe('invalid_grant');
+  });
+
+  it('takes anything that was thrown', () => {
+    const frozen = new Error('boom', { cause: Object.freeze({ body: 'kept: it can\'t be changed' }) });
+    const looped: { cause?: unknown } = {};
+    looped.cause = looped;
+
+    for (const thrown of ['boom', null, undefined, 7, new Error('plain'), frozen, looped]) {
+      expect(withoutResponseBody(thrown)).toBe(thrown);
     }
   });
 });
