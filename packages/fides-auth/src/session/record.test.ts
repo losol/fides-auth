@@ -12,6 +12,7 @@ import {
   isSameSubject,
   keepIdentity,
   openRecord,
+  openSealed,
   refreshRecord,
   sealRecord,
   tokenStatusOf,
@@ -369,5 +370,26 @@ describe('sealRecord and openRecord', () => {
       secret,
     );
     expect(await openRecord(broken, secret)).toBeNull();
+  });
+
+  it('says why there is no record: it doesn\'t open, or a later major wrote it', async () => {
+    const record = createRecord(tokens(), { sessionDurationSeconds: 3600 });
+
+    expect(await openSealed(await sealRecord(record, secret), secret)).toEqual({ record });
+    expect(await openSealed('not-a-jwe', secret)).toEqual({ record: null, why: 'unreadable' });
+    expect(await openSealed(await sealRecord(record, secret), 'b'.repeat(64))).toEqual({
+      record: null,
+      why: 'unreadable',
+    });
+
+    const later = await createEncryptedJWT({ ...record, v: 2 }, secret);
+    expect(await openSealed(later, secret)).toEqual({ record: null, why: 'unsupported_version', version: 2 });
+    expect(await openRecord(later, secret)).toBeNull();
+
+    // No version, or one that is no number, is not a record of any version.
+    for (const v of [undefined, '2', null]) {
+      const odd = await createEncryptedJWT({ ...record, v }, secret);
+      expect(await openSealed(odd, secret), String(v)).toEqual({ record: null, why: 'unreadable' });
+    }
   });
 });

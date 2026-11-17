@@ -729,6 +729,86 @@ describe('what a sealed session is bound to', () => {
   });
 });
 
+describe('a cookie that is there and doesn\'t open', () => {
+  function setup() {
+    const events: SessionEvent[] = [];
+    const logged: Array<[string, unknown]> = [];
+    const level = (name: string) => (fields: unknown) => void logged.push([name, fields]);
+    const refreshTokens = vi.fn(async () => tokens(2));
+    const lifecycle = createSessionLifecycle({
+      storage: cookieStorage({ secure: true }),
+      secret,
+      refreshTokens,
+      logger: { debug: level('debug'), info: level('info'), warn: level('warn'), error: level('error') },
+      onSessionEvent: (event) => events.push(event),
+    });
+    const rejected = () => events.filter((event) => event.event === 'session.rejected');
+    return { lifecycle, refreshTokens, events, logged, rejected, ...cookieJar() };
+  }
+  const cookieKey = () => deriveKey(secret, sessionKeyInfo('', 'cookie'));
+
+  it('is told apart when a later major wrote it: every 1.x reads v 1, and says so of any other', async () => {
+    const { lifecycle, cookies, jar, rejected, logged, refreshTokens } = setup();
+    const created = await lifecycle.create(cookies, tokens(1));
+    const { createEncryptedJWT } = await import('../session/utils.js');
+    jar.set('__Host-session', await createEncryptedJWT({ ...created, v: 2 }, await cookieKey()));
+
+    expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'unsupported_session_version' });
+    expect(rejected()).toEqual([{ event: 'session.rejected', reason: 'unsupported_session_version', version: 2 }]);
+    expect(logged.at(-1)).toEqual(['error', { event: 'session.rejected', reason: 'unsupported_session_version', version: 2 }]);
+
+    expect(await lifecycle.refresh(cookies)).toEqual({ ok: false, reason: 'unsupported_session_version' });
+    expect(await lifecycle.update(cookies, (session) => session)).toBeNull();
+    expect(refreshTokens).not.toHaveBeenCalled();
+    // One event for each call that read it, not one for each look inside the call.
+    expect(rejected()).toHaveLength(3);
+  });
+
+  it('is an event when it doesn\'t open at all, once for each call that reads it', async () => {
+    const { lifecycle, cookies, jar, rejected, logged } = setup();
+    await lifecycle.create(cookies, tokens(1));
+    // As after a change of secret: sealed with another key.
+    const other = createSessionLifecycle({
+      storage: cookieStorage({ secure: true }),
+      secret: 'b'.repeat(64),
+      refreshTokens: vi.fn(),
+      logger: quiet,
+    });
+    const elsewhere = cookieJar();
+    await other.create(elsewhere.cookies, tokens(1));
+    jar.set('__Host-session', elsewhere.jar.get('__Host-session') ?? '');
+
+    expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'unreadable_session' });
+    expect(rejected()).toEqual([{ event: 'session.rejected', reason: 'unreadable_session' }]);
+    expect(logged.at(-1)?.[0]).toBe('warn');
+
+    await lifecycle.refresh(cookies);
+    await lifecycle.update(cookies, (session) => session);
+    await lifecycle.end(cookies);
+    expect(rejected()).toHaveLength(4);
+  });
+
+  it('is not an event when there is no cookie, or the session has ended or run out', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-11-17T12:00:00Z') });
+    const { lifecycle, cookies, rejected } = setup();
+    expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'no_session_cookie' });
+
+    await lifecycle.create(cookies, tokens(1));
+    vi.setSystemTime(Date.now() + 2 * DAY);
+    expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'session_expired' });
+    expect(rejected()).toEqual([]);
+  });
+
+  it('is unreadable, not another version, when what it holds has no version', async () => {
+    const { lifecycle, cookies, jar, rejected } = setup();
+    const { createEncryptedJWT } = await import('../session/utils.js');
+    jar.set('__Host-session', await createEncryptedJWT({ user: { sub: 'user-1' } }, await cookieKey()));
+
+    expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'unreadable_session' });
+    expect(rejected()).toEqual([{ event: 'session.rejected', reason: 'unreadable_session' }]);
+  });
+});
+
 describe('the session lifecycle, cookie storage only', () => {
   function setup(options: Partial<SessionLifecycleOptions> = {}) {
     let issued = 1;

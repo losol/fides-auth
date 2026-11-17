@@ -28,6 +28,16 @@ nothing. Write queries that tolerate absence.
 `correlationId` is absent when no session was read to take it from, as for a
 request rejected with `no_session_cookie` or `unreadable_session`.
 
+Every read of a session, `readSession` and `refreshInProxy` among them, emits
+`session.rejected` when a cookie is there and doesn't open: `unreadable_session`
+and `unsupported_session_version`. After a change that makes old sessions
+unreadable that is every user's cookie, once for each request until they log in
+again, so a deploy that logs everyone out shows as a burst. The other reasons
+are ordinary, and only the heartbeat reports them.
+
+Every 1.x reads a session written by any 1.x. A session of another version is
+never read as one of this, and never silently dropped either.
+
 `session.cleared` has `trigger: "logout"` for a logout, `clearSession` or
 `endUserSessions`, and `trigger: "rejected"` when the library ended a stored
 session because the provider refused its refresh for good. That one follows a
@@ -51,7 +61,8 @@ endpoint all report the same word for the same situation.
 | `session_not_found`    | info  | A handle was sent but the server store has no live record: revoked, expired or evicted. Server persistence only. |
 | `session_expired`      | info  | The session's lifetime has run out. Refreshes don't extend it, so the user logs in again. |
 | `refresh_failed`       | info  | The provider rejected the refresh token. See `cause`.           |
-| `unreadable_session`   | warn  | A cookie arrived but would not decrypt. Corruption, or a rotated secret. |
+| `unreadable_session`   | warn  | A cookie arrived but would not decrypt. Corruption, or a changed secret, `issuer` or `clientId`. |
+| `unsupported_session_version` | error | The session opened, but a later major of the library wrote it. A rollback, or two versions running side by side. Comes with `version`. |
 | `no_refresh_token`     | warn  | The session has no refresh token — usually `offline_access` was never granted. |
 
 The level follows the **reason**, not the event. A single level for the whole
@@ -148,7 +159,8 @@ The session is cut into at most three cookies of up to 4096 bytes, and
 | any `session.created` with `hasRefreshToken=false` | Guaranteed logouts at access-token TTL. |
 | `session.refresh_failed` with `cause=idp_error` above baseline | The provider is failing. |
 | `session.refresh_failed` with `cause=store` above ~0 | The session store or its lock is failing. |
-| `session.rejected` with `reason=unreadable_session` above ~0 | Corruption, or a secret rotated without draining sessions. |
+| `session.rejected` with `reason=unreadable_session` above ~0 | Corruption, or a secret, `issuer` or `clientId` changed without draining sessions. |
+| any `session.rejected` with `reason=unsupported_session_version` | Sessions written by a later major are reaching this one: a rollback, or a fleet on two versions. |
 | `cookieBytes` p99 approaching 12000 | Sessions about to stop fitting: logins start failing with 431. |
 
 Rate-of-`invalid_grant` is deliberately *not* on this list — it rises whenever an
