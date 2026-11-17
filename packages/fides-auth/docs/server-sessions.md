@@ -482,7 +482,9 @@ and the session ends as for any refresh the provider refuses.
 - **At rest.** The sealing keys are derived from the same secret as for
   cookie sessions. Rotating the secret ends stored sessions
   (`unreadable_session`), as it ends cookie ones. So does a change of
-  `issuer` or `clientId`.
+  `issuer` or `clientId`. How the issuer is written doesn't matter: a
+  trailing slash, the case of the host and a default port are the same
+  provider.
 
 ## Switching from cookies
 

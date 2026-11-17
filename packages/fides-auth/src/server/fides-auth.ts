@@ -425,6 +425,22 @@ export interface FidesAuth<TData = Record<string, unknown>> {
 const NO_STORE = { 'Cache-Control': 'private, no-store' };
 
 /**
+ * The issuer as it goes into the key that seals a session: the same string
+ * for every way of writing one URL. `https://IDP.test`, `https://idp.test/`
+ * and `https://idp.test:443` name one provider, and tidying the config
+ * shouldn't log everyone out. The path keeps its case, which can matter.
+ */
+export function issuerForKey(issuer: string): string {
+  let url: URL;
+  try {
+    url = new URL(issuer);
+  } catch {
+    return issuer.replace(/\/+$/, '');
+  }
+  return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}${url.search}`;
+}
+
+/**
  * How long before `expiresAt` a refresh with `ifExpiresWithin` is due, in
  * milliseconds: the window, but never more than half the token's lifetime, so
  * a token that lives shorter than the window isn't refreshed on every call.
@@ -515,7 +531,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         secret,
         // A session is for this provider and this client. Another instance
         // that shares the secret, for another of either, can't read it.
-        audience: JSON.stringify([oauthConfig.issuer, oauthConfig.clientId]),
+        audience: JSON.stringify([issuerForKey(oauthConfig.issuer), oauthConfig.clientId]),
         sessionDurationSeconds,
         rolesClaim: config.rolesClaim,
         // The lifecycle doesn't know what `data` holds; the type is the app's own.

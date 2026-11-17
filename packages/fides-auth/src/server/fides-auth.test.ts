@@ -16,7 +16,13 @@ import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { createRecord, sealRecord } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
 import { fetchCookieStore } from './fetch-cookie-store.js';
-import { createFidesAuth, type FidesAuth, type FidesAuthConfig, type LoginError } from './fides-auth.js';
+import {
+  createFidesAuth,
+  type FidesAuth,
+  type FidesAuthConfig,
+  issuerForKey,
+  type LoginError,
+} from './fides-auth.js';
 import { sessionKeyInfo } from './session-lifecycle.js';
 import { deriveKey, SessionSecretError } from './session-secret.js';
 import { createMemorySessionStore, type SessionStore, type StoreFields } from './session-store.js';
@@ -1177,6 +1183,51 @@ describe('session members', () => {
     // Another instance of the same app reads it.
     expect((await instance({}).readSession(cookies))?.user?.sub).toBe('user-1');
     expect((await auth.readSession(cookies))?.user?.sub).toBe('user-1');
+  });
+
+  it.each([
+    ['cookies', () => undefined],
+    ['a store', () => createMemorySessionStore()],
+  ])('reads a session whatever way the issuer is written in the config, in %s', async (_, makeStore) => {
+    const sessionStore = makeStore();
+    const { auth, cookies } = setup({ sessionStore });
+    await login(auth, cookies);
+    const withIssuer = (issuer: string) =>
+      setup({
+        sessionStore,
+        oauthConfig: {
+          issuer,
+          clientId: 'web',
+          clientSecret: 'shh',
+          redirectUri: `${APP}/api/auth/callback`,
+          scope: 'openid',
+        },
+      }).auth;
+
+    // One provider, written four ways. A slash more or less must not log everyone out.
+    for (const issuer of ['https://idp.test/', 'https://idp.test//', 'https://IDP.test', 'https://idp.test:443/']) {
+      expect((await withIssuer(issuer).readSession(cookies))?.user?.sub, issuer).toBe('user-1');
+    }
+    // Another host, port or path is another provider.
+    for (const issuer of ['https://idp.test:8443', 'https://idp.test/realms/a', 'http://idp.test']) {
+      expect(await withIssuer(issuer).readSession(cookies), issuer).toBeNull();
+    }
+  });
+
+  it('writes an issuer one way for the key, and leaves one already written that way alone', () => {
+    // As written, so sessions from before the issuer was normalized still open.
+    expect(issuerForKey('https://idp.test')).toBe('https://idp.test');
+    expect(issuerForKey('https://idp.test/realms/Main')).toBe('https://idp.test/realms/Main');
+    expect(issuerForKey('https://login.example.com/tenant-1/v2.0')).toBe('https://login.example.com/tenant-1/v2.0');
+
+    expect(issuerForKey('https://idp.test/')).toBe('https://idp.test');
+    expect(issuerForKey('https://IDP.Test/realms/Main/')).toBe('https://idp.test/realms/Main');
+    expect(issuerForKey('https://idp.test:443')).toBe('https://idp.test');
+    expect(issuerForKey('http://localhost:8080/')).toBe('http://localhost:8080');
+    // The path's case is the provider's to decide.
+    expect(issuerForKey('https://idp.test/realms/main')).not.toBe(issuerForKey('https://idp.test/realms/Main'));
+    // Not a URL: the trailing slash is all that is known to be noise.
+    expect(issuerForKey('idp/')).toBe('idp');
   });
 
   it('answers the heartbeat with 503, not a throw, when the store lock fails', async () => {
