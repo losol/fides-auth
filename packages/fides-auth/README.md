@@ -834,8 +834,12 @@ const url = await vipps.authorizationUrl(request);
 
 // Callback
 const tokens = await vipps.exchangeCode(new URL(callbackUrl), request);
-const user = await vipps.getUserInfo(tokens.access_token);
+const claims = await vipps.oidc.verifyIdToken(tokens.id_token!);
+const user = await vipps.getUserInfo(tokens.access_token, { expectedSubject: claims.sub! });
 ```
+
+`getUserInfo` checks that the answer is for `expectedSubject`, the ID token's
+`sub`, refuses redirects and gives up after 10 seconds.
 
 `vipps.oidc` is the OIDC client underneath, for the rest of the protocol.
 
