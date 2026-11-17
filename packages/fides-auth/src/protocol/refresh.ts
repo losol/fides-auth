@@ -41,7 +41,7 @@ export async function refresh(
       );
     } else {
       // Unexpected error - log at error level
-      logger.error({ error, issuer: oAuthConfig.issuer }, 'Token refresh failed');
+      logger.error({ ...errorContext, issuer: oAuthConfig.issuer }, 'Token refresh failed');
     }
 
     throw error;

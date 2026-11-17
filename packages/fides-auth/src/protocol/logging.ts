@@ -37,6 +37,32 @@ export function getOAuthErrorLogContext(error: unknown) {
   };
 }
 
+/**
+ * Takes the provider's response off an error from `oauth4webapi`, and returns
+ * the error.
+ *
+ * A response that arrives with a 2xx status and then fails validation is
+ * attached whole, as the `body` of a cause: a token response with its access and
+ * refresh tokens when `token_type` is missing, a UserInfo response with the
+ * user's claims when `sub` is. The error is logged and handed to the app's
+ * callbacks, so the body goes; what the error says was wrong with it stays.
+ */
+export function withoutResponseBody<T>(error: T): T {
+  // openid-client wraps the error from oauth4webapi, so the body is a cause or two down.
+  let cause = (error as { cause?: unknown } | null | undefined)?.cause;
+  for (let depth = 0; depth < 5 && typeof cause === 'object' && cause !== null; depth += 1) {
+    if ('body' in cause) {
+      try {
+        delete (cause as { body?: unknown }).body;
+      } catch {
+        // A cause that can't be changed is not one oauth4webapi made.
+      }
+    }
+    cause = (cause as { cause?: unknown }).cause;
+  }
+  return error;
+}
+
 function stringProp(value: Record<string, unknown>, key: string): string | undefined {
   return typeof value[key] === 'string' ? (value[key] as string) : undefined;
 }

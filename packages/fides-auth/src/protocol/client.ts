@@ -18,6 +18,7 @@ import type { OidcClientConfig } from './config.js';
 import type { ProtocolContext } from './context.js';
 import { checkTtl, createDiscoveryCache } from './discovery.js';
 import { createJwksCache, verifyIdTokenWith } from './id-token.js';
+import { withoutResponseBody } from './logging.js';
 import { logoutUrl, type OidcLogoutOptions } from './logout-url.js';
 import { refresh } from './refresh.js';
 import { revoke, type RevokeOptions } from './revocation.js';
@@ -154,33 +155,43 @@ export function createOidcClient(
 
   const metadata = async () => (await context.configuration()).serverMetadata();
 
+  /** Runs a call to the provider. What it throws leaves without the provider's response. */
+  const calling = async <T>(call: () => Promise<T>): Promise<T> => {
+    try {
+      return await call();
+    } catch (error) {
+      throw withoutResponseBody(error);
+    }
+  };
+
   return {
     metadata,
 
     createAuthorizationRequest: (requestOptions) =>
       createAuthorizationRequest(context, requestOptions),
 
-    authorizationUrl: (request) => authorizationUrl(context, request.parameters),
+    authorizationUrl: (request) => calling(() => authorizationUrl(context, request.parameters)),
 
     silentLoginUrl: (request, silentOptions = {}) => {
       const parameters: Record<string, string> = { ...request.parameters, prompt: 'none' };
       if (silentOptions.loginHint) parameters.login_hint = silentOptions.loginHint;
       if (silentOptions.maxAge !== undefined) parameters.max_age = String(silentOptions.maxAge);
-      return authorizationUrl(context, parameters);
+      return calling(() => authorizationUrl(context, parameters));
     },
 
     exchangeCode: (callbackUrl, request) =>
-      exchangeCode(context, callbackUrl, request.codeVerifier, request.state),
+      calling(() => exchangeCode(context, callbackUrl, request.codeVerifier, request.state)),
 
-    refresh: (refreshToken) => refresh(context, refreshToken),
+    refresh: (refreshToken) => calling(() => refresh(context, refreshToken)),
 
-    clientCredentials: (grantOptions) => clientCredentials(context, grantOptions),
+    clientCredentials: (grantOptions) => calling(() => clientCredentials(context, grantOptions)),
 
     logoutUrl: (logoutOptions = {}) => logoutUrl(context, logoutOptions),
 
-    revoke: (token, revokeOptions) => revoke(context, token, revokeOptions),
+    revoke: (token, revokeOptions) => calling(() => revoke(context, token, revokeOptions)),
 
-    userInfo: (accessToken, userInfoOptions) => userInfo(context, accessToken, userInfoOptions),
+    userInfo: (accessToken, userInfoOptions) =>
+      calling(() => userInfo(context, accessToken, userInfoOptions)),
 
     async verifyIdToken(idToken, verifyOptions = {}) {
       const { issuer, jwks_uri } = await metadata();
