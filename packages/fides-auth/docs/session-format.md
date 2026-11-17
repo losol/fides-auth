@@ -18,7 +18,9 @@ not by opening these values itself: see [In a test](#in-a-test).
   version says so, as `unsupported_session_version`, and reads nothing from it.
 - The secret, `issuer` and `clientId` are part of every sealing key, so a
   change of one of them is a change of key: old sessions read as
-  `unreadable_session`.
+  `unreadable_session`. A secret can be replaced without that, by keeping the
+  old one in the list for a while: see
+  [Replacing the secret](../README.md#replacing-the-secret).
 
 `src/server/session-format.test.ts` holds values written by 1.0.0-beta.8 and
 fails the moment one of them stops reading.
@@ -74,6 +76,9 @@ So a sealed session opens only for the provider and client it was made for,
 and a stored one only under its own key: not under another, and not as a
 cookie.
 
+Where `secret` is a list, each secret gives a key of its own. The first one's
+seals, and each is tried in turn to open.
+
 ## Cookie storage
 
 The sealed string is the value of `__Host-session`. One that doesn't fit in a
@@ -105,7 +110,8 @@ What the store gets under that key:
 
 The two hashes find a user's sessions without the store knowing the user.
 Their key is HKDF-SHA-256 of the secret with the info
-`fides-auth session lookup v1`.
+`fides-auth session lookup v1`. A record carries the hashes of the secret it
+was last saved with, so where `secret` is a list a search asks for each.
 
 **`fields` are in the clear.** Whoever can read the store reads them. A role
 or the app's own user id is what they are for. An e-mail address, a name or
