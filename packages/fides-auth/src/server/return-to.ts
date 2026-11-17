@@ -36,5 +36,12 @@ export function validateReturnUrl(
     return new URL(defaultPath, applicationOrigin);
   }
 
+  // `new URL` removes dot segments, so `/.//evil.test` leaves a pathname of
+  // `//evil.test`, which code that navigates to the pathname takes for another site.
+  if (redirectUrl.pathname.startsWith('//')) {
+    logger.warn({ returnTo: redirectPath }, 'returnTo resolves to a path starting with //, using default');
+    return new URL(defaultPath, applicationOrigin);
+  }
+
   return redirectUrl;
 }

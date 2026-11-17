@@ -213,19 +213,19 @@ describe('login transaction cookie', () => {
     expect(await readTransaction(store, 'two', secret, { logger: quiet })).not.toBeNull();
   });
 
-  it('drops a returnTo over 1 KB once serialized', () => {
-    // 1024 bytes with the JSON quotes.
-    const fits = `/${'a'.repeat(1021)}`;
+  it('drops a returnTo over 512 bytes once serialized', () => {
+    // 512 bytes with the JSON quotes.
+    const fits = `/${'a'.repeat(509)}`;
     expect(createTransaction(pkce('st'), { logger: quiet, returnTo: fits }).returnTo).toBe(fits);
     expect(createTransaction(pkce('st'), { logger: quiet, returnTo: `${fits}a` }).returnTo).toBeUndefined();
 
-    // 201 raw bytes, but each control character escapes to six.
-    const escaped = `/${'\u0001'.repeat(200)}`;
+    // 86 raw bytes, but each control character escapes to six.
+    const escaped = `/${'\u0001'.repeat(85)}`;
     expect(createTransaction(pkce('st'), { logger: quiet, returnTo: escaped }).returnTo).toBeUndefined();
   });
 
   it('keeps a cookie at the returnTo cap under 2 KB, even when escaped', async () => {
-    for (const returnTo of [`/${'a'.repeat(1021)}`, `/${'\u0001'.repeat(170)}`]) {
+    for (const returnTo of [`/${'a'.repeat(509)}`, `/${'\u0001'.repeat(84)}`]) {
       const { store, jar } = memoryStore();
       const transaction = createTransaction(pkce('st'), { logger: quiet, returnTo });
       expect(transaction.returnTo).toBe(returnTo);

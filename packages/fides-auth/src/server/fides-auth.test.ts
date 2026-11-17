@@ -396,6 +396,7 @@ describe('return paths', () => {
     ['//evil.test/x', `${APP}/?login=success`],
     ['https://evil.test/x', `${APP}/?login=success`],
     ['/\\evil.test', `${APP}/?login=success`],
+    ['/.//evil.test', `${APP}/?login=success`],
     ['/ok', `${APP}/ok?login=success`],
   ])('returnTo %s lands on %s', async (returnTo, expected) => {
     const { auth, cookies } = setup();

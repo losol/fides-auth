@@ -33,14 +33,19 @@ const VALUE = /^[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*$/;
 // A path is cut off by `;`, and a control character could end the header.
 const PATH = /^[\x20-\x3A\x3C-\x7E]*$/;
 
+// Only space and tab are trimmed. `trim()` also strips U+00A0 and other Unicode
+// whitespace, which a browser keeps in the name.
+const OWS = /^[ \t]+|[ \t]+$/g;
+
 /** The request's cookies by name. The first of a name wins, as the more specific path comes first. */
 function parseCookies(header: string | null): Map<string, string> {
   const cookies = new Map<string, string>();
   for (const pair of header?.split(';') ?? []) {
     const separator = pair.indexOf('=');
     if (separator === -1) continue;
-    const name = pair.slice(0, separator).trim();
-    if (name && !cookies.has(name)) cookies.set(name, pair.slice(separator + 1).trim());
+    const name = pair.slice(0, separator).replace(OWS, '');
+    if (!NAME.test(name) || cookies.has(name)) continue;
+    cookies.set(name, pair.slice(separator + 1).replace(OWS, ''));
   }
   return cookies;
 }

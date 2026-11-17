@@ -26,6 +26,19 @@ describe('fetchCookieStore: reading', () => {
     expect(cookies.get('')).toBeNull();
   });
 
+  it('reads plain pairs, with optional whitespace around the semicolon', () => {
+    expect(fetchCookieStore(request('a=1; b=2')).get('b')).toBe('2');
+    const cookies = fetchCookieStore(request('a=1 ;\tb=2\t;  c=3'));
+    expect([cookies.get('a'), cookies.get('b'), cookies.get('c')]).toEqual(['1', '2', '3']);
+  });
+
+  it('does not read a name padded with Unicode whitespace as the plain name', () => {
+    const cookies = fetchCookieStore(request('\u00A0__Host-session=planted; __Host-session=real'));
+    expect(cookies.get('__Host-session')).toBe('real');
+    expect(cookies.get('\u00A0__Host-session')).toBeNull();
+    expect(fetchCookieStore(request('\u00A0a=1')).get('a')).toBeNull();
+  });
+
   it('reads nothing from a request without cookies', () => {
     expect(fetchCookieStore(request()).get('a')).toBeNull();
   });
