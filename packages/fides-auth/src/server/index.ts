@@ -21,7 +21,7 @@ export {
   type RefreshSessionOptions,
 } from './fides-auth.js';
 export type { RolesClaim } from '../session/user-claims.js';
-export { SessionSecretError, type SessionSecret } from './session-secret.js';
+export { SessionSecretError, type SessionSecret, type SessionSecrets } from './session-secret.js';
 export { AuthorizedFetchError, type AuthorizedFetchErrorReason } from './authorized-fetch.js';
 
 export {

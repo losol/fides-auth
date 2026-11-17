@@ -281,6 +281,9 @@ one writes JSON lines to the console.
   way does not: a trailing slash, the case of the host and a default port
   make no difference. Two instances that share a secret but not a provider or
   client no longer read each other's sessions.
+- **`secret` takes a list.** The first seals and all of them open, so a secret
+  can be replaced without logging anyone out. See
+  [Replacing the secret](../README.md#replacing-the-secret).
 - **One session cookie.** The session lives in `__Host-session`, in at most
   three chunks, or `session` over plain http. With a `sessionStore`, it holds
   only a handle. The cookies are `Secure` unless `redirectUri` is plain http.

@@ -78,6 +78,26 @@ describe('login transaction cookie', () => {
     expect(jar.size).toBe(0);
   });
 
+  it('opens a login started under the old secret, and seals a new one with the first', async () => {
+    const OLD = 'a'.repeat(64);
+    const NEW = 'b'.repeat(64);
+    const { store } = memoryStore();
+    await persistTransaction(store, createTransaction(pkce('before'), { logger: quiet }), OLD);
+
+    // The secret was replaced between the login and the callback.
+    expect((await readTransaction(store, 'before', [NEW, OLD], { logger: quiet }))?.state).toBe('before');
+    expect(await readTransaction(store, 'before', NEW, { logger: quiet })).toBeNull();
+
+    await persistTransaction(store, createTransaction(pkce('after'), { logger: quiet }), [NEW, OLD]);
+    expect((await readTransaction(store, 'after', NEW, { logger: quiet }))?.state).toBe('after');
+    expect(await readTransaction(store, 'after', OLD, { logger: quiet })).toBeNull();
+    // The login from before is still there: it was read as taken, not written over.
+    expect((await readTransaction(store, 'before', [NEW, OLD], { logger: quiet }))?.state).toBe('before');
+
+    await clearTransaction(store, 'before', [NEW, OLD]);
+    expect(await readTransaction(store, 'before', [NEW, OLD], { logger: quiet })).toBeNull();
+  });
+
   it('seals one cookie per login and reads it back by state', async () => {
     const { store, jar, options } = memoryStore();
     const transaction = createTransaction(pkce('st'), { logger: quiet, returnTo: '/dash' });

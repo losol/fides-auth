@@ -43,7 +43,7 @@ import {
   isSameSubject,
   keepIdentity,
   type MapRecordSession,
-  openRecord,
+  type OpenedRecord,
   openSealed,
   refreshRecord,
   sealRecord,
@@ -51,8 +51,14 @@ import {
 } from '../session/record.js';
 import type { RolesClaim } from '../session/user-claims.js';
 import type { CookieStore } from './cookie-store.js';
-import { assertSessionSecret, deriveKey, type SessionSecret } from './session-secret.js';
-import type { LookupFields, SaveResult, SessionStorage } from './session-storage.js';
+import {
+  assertSessionSecret,
+  deriveKey,
+  secretsOf,
+  type SessionSecret,
+  type SessionSecrets,
+} from './session-secret.js';
+import type { FoundSession, LookupFields, SaveResult, SessionStorage } from './session-storage.js';
 import type { SessionMatch, StoreFields, StoreSetReason } from './session-store.js';
 
 export type ReadRecordResult =
@@ -100,8 +106,11 @@ export class SessionCookieLeftError extends Error {
 
 export interface SessionLifecycleOptions {
   storage: SessionStorage;
-  /** The keys that seal records, and the one for the store's lookup hashes, are derived from it. */
-  secret: SessionSecret;
+  /**
+   * The keys that seal records, and the ones for the store's lookup hashes,
+   * are derived from it. Of several, the first seals and all of them open.
+   */
+  secret: SessionSecrets;
   /**
    * Who the sessions are for, e.g. the provider and the client. It is part of
    * the key a record is sealed with, so an instance with another audience and
@@ -341,26 +350,51 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
   // didn't take. The store still holds the refresh token that refresh spent.
   const unsaved = new Map<string, RecentRefresh>();
   const saveRetryDelaysMs = options.saveRetryDelaysMs ?? [200, 1000];
-  let lookupKeyPromise: Promise<CryptoKey> | undefined;
+  let lookupKeysPromise: Promise<CryptoKey[]> | undefined;
   const audience = options.audience ?? '';
-  // The last key derived. Cookie storage has one; a request for a stored session asks for the same one a few times.
-  let lastSealingKey: { binding: string; key: Promise<Uint8Array> } | undefined;
+  // The last keys derived. Cookie storage has one set; a request for a stored session asks for the same one a few times.
+  let lastSealingKeys: { binding: string; keys: Promise<Uint8Array[]> } | undefined;
 
   /**
-   * The key a record is sealed with: for this instance's audience, and for
-   * where the record is kept. So a record doesn't open for another instance
-   * that has the secret, under another store key, or in the other storage.
+   * The keys a record may be sealed with, one for each secret: for this
+   * instance's audience, and for where the record is kept. So a record
+   * doesn't open for another instance that has the secret, under another
+   * store key, or in the other storage.
    */
-  function sealingKey(binding: string): Promise<Uint8Array> {
-    if (lastSealingKey?.binding === binding) return lastSealingKey.key;
-    const key = deriveKey(secret, sessionKeyInfo(audience, binding));
-    const entry = { binding, key };
-    lastSealingKey = entry;
+  function sealingKeys(binding: string): Promise<Uint8Array[]> {
+    if (lastSealingKeys?.binding === binding) return lastSealingKeys.keys;
+    const info = sessionKeyInfo(audience, binding);
+    const keys = Promise.all(secretsOf(secret).map((one) => deriveKey(one, info)));
+    const entry = { binding, keys };
+    lastSealingKeys = entry;
     // A bad secret is reported each time it is used, not remembered.
-    key.catch(() => {
-      if (lastSealingKey === entry) lastSealingKey = undefined;
+    keys.catch(() => {
+      if (lastSealingKeys === entry) lastSealingKeys = undefined;
     });
+    return keys;
+  }
+
+  /** The key a record is sealed with now: the first secret's. */
+  async function sealingKey(binding: string): Promise<Uint8Array> {
+    const [key] = await sealingKeys(binding);
+    if (!key) throw new TypeError('fides-auth: session secret is missing or empty');
     return key;
+  }
+
+  /**
+   * Opens a sealed record with the first key that opens it. A record sealed
+   * with an older secret is read as it is, and sealed with the first one the
+   * next time it is saved.
+   */
+  async function open(sealed: string, binding: string): Promise<OpenedRecord> {
+    let last: OpenedRecord = { record: null, why: 'unreadable' };
+    for (const key of await sealingKeys(binding)) {
+      const opened = await openSealed(sealed, key);
+      if (opened.record) return opened;
+      // It opened with this key, as a record of another version: that is the answer.
+      if (opened.why === 'unsupported_version') last = opened;
+    }
+    return last;
   }
   // By correlation id: the end of the last refresh or update queued for a session.
   const turns = new Map<string, Promise<void>>();
@@ -519,10 +553,20 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     }
   }
 
-  /** The keyed hash a store keeps in place of `sub` or `sid`. */
+  /**
+   * The keyed hashes a store may hold in place of `sub` or `sid`, one for
+   * each secret. A record keeps the hash it was saved with until it is saved
+   * again, so a search asks for all of them.
+   */
+  async function lookupHashes(value: string): Promise<string[]> {
+    lookupKeysPromise ??= Promise.all(secretsOf(secret).map(lookupKey));
+    return Promise.all((await lookupKeysPromise).map((key) => hmacHex(key, value)));
+  }
+
+  /** The keyed hash a record is saved with: the first secret's. */
   async function lookupHash(value: string): Promise<string> {
-    lookupKeyPromise ??= lookupKey(secret);
-    return hmacHex(await lookupKeyPromise, value);
+    const [hash] = await lookupHashes(value);
+    return hash ?? '';
   }
 
   /** The store's lookup fields. Cookie storage has no use for them. */
@@ -557,7 +601,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     assertSessionSecret(secret);
     const loaded = await storage.load(cookies);
     if (loaded.sealed === null) return { record: null, reason: loaded.reason };
-    const opened = await openSealed(loaded.sealed, await sealingKey(loaded.binding));
+    const opened = await open(loaded.sealed, loaded.binding);
     if (!opened.record) {
       return opened.why === 'unsupported_version'
         ? { record: null, reason: 'unsupported_session_version', version: opened.version }
@@ -928,19 +972,25 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       // An empty issuer is a variable that wasn't set. Read as "any issuer" it would match the most.
       if (iss === '') throw new TypeError('Ending sessions needs an iss that is not empty, or none');
 
-      // Only the keys to compare, so an adapter can hand the match to its query as it is.
-      const match: SessionMatch = {};
-      if (iss) match.iss = iss;
-      if (sub) match.subHash = await lookupHash(sub);
-      if (sid) match.idpSidHash = await lookupHash(sid);
-      const found = await storage.findMatching(match);
+      // One search for each secret: a record holds the hashes of the secret it
+      // was last saved with. Only the keys to compare, so an adapter can hand
+      // the match to its query as it is.
+      const subHashes = sub ? await lookupHashes(sub) : [];
+      const sidHashes = sid ? await lookupHashes(sid) : [];
+      const found = new Map<string, FoundSession>();
+      for (let i = 0; i < secretsOf(secret).length; i += 1) {
+        const match: SessionMatch = {};
+        if (iss) match.iss = iss;
+        if (sub) match.subHash = subHashes[i];
+        if (sid) match.idpSidHash = sidHashes[i];
+        for (const entry of await storage.findMatching(match)) found.set(entry.binding, entry);
+      }
 
       const ended: SessionRecord[] = [];
-      for (const entry of found) {
+      for (const entry of found.values()) {
         // The plain fields are the store's word. Check them against the sealed
         // record, so a search that matches too much can't end someone else's session.
-        const key = await sealingKey(entry.binding);
-        const idp = (await openRecord(entry.sealed, key))?.session.idp;
+        const idp = (await open(entry.sealed, entry.binding)).record?.session.idp;
         if (idp && ((iss && idp.iss !== iss) || (sub && idp.sub !== sub) || (sid && idp.sid !== sid))) {
           logger.warn(
             { correlationId: entry.correlationId },
@@ -963,7 +1013,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         const running = entry.correlationId ? inflight.get(entry.correlationId) : undefined;
         if (running) await running.catch(() => undefined);
         const sealed = await entry.remove();
-        const record = sealed ? await openRecord(sealed, key) : null;
+        const record = sealed ? (await open(sealed, entry.binding)).record : null;
         if (record) ended.push(record);
         if (trigger && sealed) {
           emit({

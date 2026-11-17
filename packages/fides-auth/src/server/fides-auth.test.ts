@@ -1253,6 +1253,44 @@ describe('session members', () => {
     expect(rejected()).toHaveLength(3);
   });
 
+  it.each([
+    ['cookies', () => undefined],
+    ['a store', () => createMemorySessionStore()],
+  ])('replaces the secret without logging anyone out, in %s', async (_, makeStore) => {
+    const OLD = secret;
+    const NEW = 'c'.repeat(64);
+    const sessionStore = makeStore();
+    const before = setup({ sessionStore, secret: OLD });
+    const { cookies } = before;
+    await login(before.auth, cookies);
+
+    // New first, old behind it: everyone stays logged in.
+    const during = setup({ sessionStore, secret: [NEW, OLD] });
+    expect((await during.auth.readSession(cookies))?.user?.sub).toBe('user-1');
+    expect(await during.auth.refreshSession(cookies)).toMatchObject({ ok: true, refreshed: true });
+
+    // The old one can go when the sessions it sealed have been saved again or have run out.
+    const after = setup({ sessionStore, secret: NEW });
+    expect((await after.auth.readSession(cookies))?.user?.sub).toBe('user-1');
+    expect(await before.auth.tryReadSession(cookies)).toEqual({ session: null, reason: 'unreadable_session' });
+    expect(during.events.filter((event) => event.event === 'session.rejected')).toEqual([]);
+  });
+
+  it('finishes a login that was started before the secret was replaced', async () => {
+    const OLD = secret;
+    const NEW = 'c'.repeat(64);
+    const before = setup({ secret: OLD });
+    const { cookies } = before;
+    const started = await before.auth.handleOidcLogin(get('/api/auth/login'), cookies);
+    const state = new URL(started.headers.get('location') ?? '').searchParams.get('state');
+
+    const during = setup({ secret: [NEW, OLD] });
+    const response = await during.auth.handleOidcCallback(get(`/api/auth/callback?code=c&state=${state}`), cookies);
+
+    expect(response.headers.get('location')).toBe(`${APP}/?login=success`);
+    expect((await setup({ secret: NEW }).auth.readSession(cookies))?.user?.sub).toBe('user-1');
+  });
+
   it('answers the heartbeat with 503, not a throw, when the store lock fails', async () => {
     const store = {
       ...createMemorySessionStore(),

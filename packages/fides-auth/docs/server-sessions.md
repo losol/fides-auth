@@ -480,9 +480,12 @@ and the session ends as for any refresh the provider refuses.
   key derived from `secret`, so a store dump doesn't give up `sub`; your own
   fields are as readable as you make them.
 - **At rest.** The sealing keys are derived from the same secret as for
-  cookie sessions. Rotating the secret ends stored sessions
-  (`unreadable_session`), as it ends cookie ones. So does a change of
-  `issuer` or `clientId`. How the issuer is written doesn't matter: a
+  cookie sessions. A new secret alone ends stored sessions
+  (`unreadable_session`), as it ends cookie ones; to replace it and keep
+  them, see [Replacing the secret](../README.md#replacing-the-secret). The
+  lookup hashes are keyed with the secret too, so a record is filed under
+  the hash of the secret it was last saved with, and a search asks for each.
+  A change of `issuer` or `clientId` ends sessions as well. How the issuer is written doesn't matter: a
   trailing slash, the case of the host and a default port are the same
   provider.
 

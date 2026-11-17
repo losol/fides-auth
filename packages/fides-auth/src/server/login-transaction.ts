@@ -10,7 +10,7 @@ import type { FidesLogger } from '../shared/logger.js';
 import type { AuthorizationRequest } from '../protocol/authorization-parameters.js';
 import { createEncryptedJWT, decryptJWT } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
-import { deriveKey, type SessionSecret } from './session-secret.js';
+import { deriveKey, secretsOf, type SessionSecrets } from './session-secret.js';
 
 const COOKIE_NAME = 'oauth_tx_';
 
@@ -114,11 +114,12 @@ export function createTransaction(
 export async function persistTransaction(
   cookies: CookieStore,
   transaction: LoginTransaction,
-  secret: SessionSecret,
+  secret: SessionSecrets,
   { secure = true }: TransactionCookieOptions = {},
 ): Promise<void> {
-  const key = await transactionKey(secret);
-  const slots = await readSlots(cookies, key, secure);
+  const keys = await transactionKeys(secret);
+  const [key] = keys;
+  const slots = await readSlots(cookies, keys, secure);
   const free = slots.filter((candidate) => !candidate.transaction);
   // A random free slot, so two logins started at the same moment rarely share one.
   const slot =
@@ -138,10 +139,10 @@ export async function persistTransaction(
 export async function readTransaction(
   cookies: CookieStore,
   state: string,
-  secret: SessionSecret,
+  secret: SessionSecrets,
   { secure = true, logger }: ReadTransactionOptions,
 ): Promise<LoginTransaction | null> {
-  const slots = await readSlots(cookies, await transactionKey(secret), secure);
+  const slots = await readSlots(cookies, await transactionKeys(secret), secure);
   const match = findSlot(slots, state);
   if (match) return match.transaction;
 
@@ -156,10 +157,10 @@ export async function readTransaction(
 export async function clearTransaction(
   cookies: CookieStore,
   state: string,
-  secret: SessionSecret,
+  secret: SessionSecrets,
   { secure = true }: TransactionCookieOptions = {},
 ): Promise<void> {
-  const match = findSlot(await readSlots(cookies, await transactionKey(secret), secure), state);
+  const match = findSlot(await readSlots(cookies, await transactionKeys(secret), secure), state);
   if (!match) return;
   // With the attributes it was set with: a delete that isn't Secure is ignored for a __Host- cookie.
   await cookies.set(match.name, '', { ...defaultOAuthCookieOptions, secure, maxAge: 0 });
@@ -203,9 +204,14 @@ export function validateCallback(
   return code;
 }
 
-/** A key of its own, so a transaction and a session never share one. */
-function transactionKey(secret: SessionSecret): Promise<Uint8Array> {
-  return deriveKey(secret, KEY_INFO);
+/**
+ * Keys of their own, so a transaction and a session never share one. The
+ * first seals; a login started under an older secret still opens with its key.
+ */
+function transactionKeys(secret: SessionSecrets): Promise<[Uint8Array, ...Uint8Array[]]> {
+  return Promise.all(secretsOf(secret).map((one) => deriveKey(one, KEY_INFO))) as Promise<
+    [Uint8Array, ...Uint8Array[]]
+  >;
 }
 
 interface Slot {
@@ -214,13 +220,13 @@ interface Slot {
   transaction: LoginTransaction | null;
 }
 
-async function readSlots(cookies: CookieStore, key: Uint8Array, secure: boolean): Promise<Slot[]> {
+async function readSlots(cookies: CookieStore, keys: readonly Uint8Array[], secure: boolean): Promise<Slot[]> {
   const prefix = secure ? HOST_PREFIX : '';
   const names = Array.from({ length: MAX_TRANSACTIONS }, (_, i) => `${prefix}${COOKIE_NAME}${i}`);
   return Promise.all(
     names.map(async (name) => {
       const value = await cookies.get(name);
-      return { name, value, transaction: value ? await open(value, key) : null };
+      return { name, value, transaction: value ? await open(value, keys) : null };
     }),
   );
 }
@@ -234,8 +240,16 @@ function findSlot(slots: Slot[], state: string) {
   return undefined;
 }
 
-/** The sealed transaction, or null when the value is forged, malformed or under another key. */
-async function open(value: string, key: Uint8Array): Promise<LoginTransaction | null> {
+/** The sealed transaction, or null when the value is forged, malformed or under no key of ours. */
+async function open(value: string, keys: readonly Uint8Array[]): Promise<LoginTransaction | null> {
+  for (const key of keys) {
+    const transaction = await openWith(value, key);
+    if (transaction) return transaction;
+  }
+  return null;
+}
+
+async function openWith(value: string, key: Uint8Array): Promise<LoginTransaction | null> {
   try {
     const sealed = await decryptJWT(value, key);
     if (
