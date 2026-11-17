@@ -54,7 +54,12 @@ function chunkNames(secure: boolean): [string, ...string[]] {
 export type StorageRejectedReason = 'no_session_cookie' | 'session_not_found' | 'unreadable_session';
 
 export type LoadResult =
-  | { sealed: string; reason?: undefined }
+  | {
+      sealed: string;
+      /** Where the record was kept. It is part of the key the record was sealed with. */
+      binding: string;
+      reason?: undefined;
+    }
   | { sealed: null; reason: StorageRejectedReason };
 
 /** The lookup fields a store keeps for back-channel logout. Hashes, never `sub` itself. */
@@ -65,7 +70,12 @@ export interface LookupFields {
 }
 
 export interface SaveRequest {
-  sealed: string;
+  /**
+   * Seals the record for where it will be kept. The storage names the place
+   * as `binding`: a record sealed for one store key doesn't open under
+   * another, or as a cookie.
+   */
+  seal(binding: string): Promise<string>;
   /** ISO 8601. Cookies get the time left as `Max-Age`; a store keeps it on the record. */
   expiresAt: string;
   correlationId: string;
@@ -85,6 +95,8 @@ export interface SaveRequest {
 export interface FoundSession {
   /** The sealed record as the search saw it. */
   sealed: string;
+  /** Where the record is kept, as in {@link LoadResult}. */
+  binding: string;
   correlationId?: string;
   /**
    * Deletes the record, under the store's lock when it has one, and returns
@@ -171,6 +183,12 @@ export interface StorageOptions {
   secure: boolean;
 }
 
+/** What a record kept in cookies is sealed for. */
+const COOKIE_BINDING = 'cookie';
+
+/** What a record kept in a store is sealed for: its own key, so it can't be moved to another. */
+const storeBinding = (key: string): string => `store ${key}`;
+
 /** Keeps the sealed record in the browser, cut into at most {@link MAX_CHUNKS} cookies. */
 export function cookieStorage({ secure }: StorageOptions): SessionStorage {
   const names = chunkNames(secure);
@@ -187,10 +205,11 @@ export function cookieStorage({ secure }: StorageOptions): SessionStorage {
         if (!next) break;
         sealed += next;
       }
-      return { sealed };
+      return { sealed, binding: COOKIE_BINDING };
     },
 
-    async save(cookies, { sealed, expiresAt }) {
+    async save(cookies, { seal, expiresAt }) {
+      const sealed = await seal(COOKIE_BINDING);
       // Cut and measure everything before writing anything, so a session that
       // doesn't fit leaves the browser's cookies as they were.
       const chunks: string[] = [];
@@ -246,8 +265,13 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
     return { handle, key: await sha256(handle) };
   }
 
-  function record({ sealed, expiresAt, correlationId, lookup, fields }: SaveRequest): StoredSession {
-    return { data: sealed, expiresAt, correlationId, ...lookup, ...(fields && { fields }) };
+  /** The record to store under `key`, sealed for that key. */
+  async function record(
+    key: string,
+    { seal, expiresAt, correlationId, lookup, fields }: SaveRequest,
+  ): Promise<StoredSession> {
+    const data = await seal(storeBinding(key));
+    return { data, expiresAt, correlationId, ...lookup, ...(fields && { fields }) };
   }
 
   const storage: SessionStorage = {
@@ -259,7 +283,9 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
       if (current === null) return { sealed: null, reason: 'no_session_cookie' };
       if (current === 'invalid') return { sealed: null, reason: 'unreadable_session' };
       const stored = await store.get(current.key);
-      return stored ? { sealed: stored.data } : { sealed: null, reason: 'session_not_found' };
+      return stored
+        ? { sealed: stored.data, binding: storeBinding(current.key) }
+        : { sealed: null, reason: 'session_not_found' };
     },
 
     async save(cookies, request) {
@@ -271,7 +297,10 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
         if (current === null || current === 'invalid' || !(await store.get(current.key))) {
           return { saved: false };
         }
-        await store.set(current.key, record(request), { continuation: true, reason: request.reason });
+        await store.set(current.key, await record(current.key, request), {
+          continuation: true,
+          reason: request.reason,
+        });
         await deleteLegacy(cookies, secure);
         return { saved: true };
       }
@@ -280,7 +309,8 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
       // (session fixation) never becomes a logged-in one.
       if (current && current !== 'invalid') await store.delete(current.key);
       const handle = generateToken(32);
-      await store.set(await sha256(handle), record(request), { continuation: false, reason: request.reason });
+      const key = await sha256(handle);
+      await store.set(key, await record(key, request), { continuation: false, reason: request.reason });
       const options = cookieOptions(secure, secondsLeft(request.expiresAt));
       await cookies.set(name, handle, options);
       await deletePresent(cookies, otherChunks, options);
@@ -322,6 +352,7 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
       const entries = (await store.findMatching?.(match)) ?? [];
       return entries.map(({ key, record: found }) => ({
         sealed: found.data,
+        binding: storeBinding(key),
         correlationId: found.correlationId,
         async remove() {
           const take = async () => {

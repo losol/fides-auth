@@ -8,9 +8,9 @@
 import { assertCookieWithinLimit, defaultOAuthCookieOptions } from '../shared/cookies.js';
 import type { FidesLogger } from '../shared/logger.js';
 import type { AuthorizationRequest } from '../protocol/authorization-parameters.js';
-import { createEncryptedJWT, decryptJWT, hexToUint8Array } from '../session/utils.js';
+import { createEncryptedJWT, decryptJWT } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
-import { assertSessionSecret, type SessionSecret } from './session-secret.js';
+import { deriveKey, type SessionSecret } from './session-secret.js';
 
 const COOKIE_NAME = 'oauth_tx_';
 
@@ -200,20 +200,9 @@ export function validateCallback(
   return code;
 }
 
-/** HKDF-SHA-256 of the secret, so a transaction and a session never share a key. */
-async function transactionKey(secret: SessionSecret): Promise<Uint8Array> {
-  // HKDF takes a key of any length; the session encryption doesn't.
-  assertSessionSecret(secret);
-  const ikm = typeof secret === 'string' ? hexToUint8Array(secret) : secret;
-  const base = await crypto.subtle.importKey('raw', ikm as BufferSource, 'HKDF', false, [
-    'deriveBits',
-  ]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(), info: new TextEncoder().encode(KEY_INFO) },
-    base,
-    256,
-  );
-  return new Uint8Array(bits);
+/** A key of its own, so a transaction and a session never share one. */
+function transactionKey(secret: SessionSecret): Promise<Uint8Array> {
+  return deriveKey(secret, KEY_INFO);
 }
 
 interface Slot {

@@ -10,8 +10,8 @@ import type { SessionEvent } from '../shared/session-events.js';
 import type { TokenResponse } from '../shared/types.js';
 import { sealRecord } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
-import { createSessionLifecycle, type SessionLifecycleOptions } from './session-lifecycle.js';
-import { SessionSecretError } from './session-secret.js';
+import { createSessionLifecycle, sessionKeyInfo, type SessionLifecycleOptions } from './session-lifecycle.js';
+import { deriveKey, SessionSecretError } from './session-secret.js';
 import { cookieStorage, type SessionStorage, storeStorage } from './session-storage.js';
 import { createMemorySessionStore, type SessionStore } from './session-store.js';
 
@@ -622,6 +622,108 @@ describe.each(storages)('the session lifecycle, with %s', (_, { make: makeStorag
   });
 });
 
+describe('what a sealed session is bound to', () => {
+  function lifecycleOver(storage: SessionStorage, audience?: string) {
+    return createSessionLifecycle({
+      storage,
+      secret,
+      audience,
+      refreshTokens: vi.fn(async () => tokens(2)),
+      logger: quiet,
+    });
+  }
+  const keyOf = async (jar: Map<string, string>) => {
+    const { sha256 } = await import('../session/utils.js');
+    return sha256(jar.get('__Host-session') ?? '');
+  };
+
+  it('its store key: copied over another row, it doesn\'t read as that row\'s session', async () => {
+    const store = createMemorySessionStore();
+    const lifecycle = lifecycleOver(storeStorage({ store, secure: true }));
+    const victim = cookieJar();
+    const attacker = cookieJar();
+    await lifecycle.create(victim.cookies, tokens(1));
+    await lifecycle.create(attacker.cookies, tokens(1, { id_token: new UnsecuredJWT({ iss: 'https://idp.test', sub: 'mallory' }).encode() }));
+    const victimRow = await store.get(await keyOf(victim.jar));
+    const attackerKey = await keyOf(attacker.jar);
+    const attackerRow = await store.get(attackerKey);
+
+    // With write access to the store and no secret: the victim's record under the attacker's handle.
+    await store.set(attackerKey, { ...attackerRow!, data: victimRow!.data }, { continuation: true, reason: 'update' });
+
+    expect(await lifecycle.read(attacker.cookies)).toEqual({ record: null, reason: 'unreadable_session' });
+    expect(await lifecycle.refresh(attacker.cookies)).toEqual({ ok: false, reason: 'unreadable_session' });
+    // The victim's own row is as it was.
+    expect((await lifecycle.read(victim.cookies)).record?.session.user?.sub).toBe('user-1');
+  });
+
+  it('its storage: a row from a store is not a cookie, and a cookie is not a row', async () => {
+    const store = createMemorySessionStore();
+    const stored = lifecycleOver(storeStorage({ store, secure: true }));
+    const inCookies = lifecycleOver(cookieStorage({ secure: true }));
+
+    // A leaked row, sent as a cookie to an instance on cookie storage with the same secret.
+    const browser = cookieJar();
+    await stored.create(browser.cookies, tokens(1));
+    const row = await store.get(await keyOf(browser.jar));
+    const replayed = cookieJar();
+    replayed.jar.set('__Host-session', row!.data);
+    expect(await inCookies.read(replayed.cookies)).toEqual({ record: null, reason: 'unreadable_session' });
+
+    // And a session cookie written into a row.
+    const other = cookieJar();
+    await inCookies.create(other.cookies, tokens(1));
+    const key = await keyOf(browser.jar);
+    await store.set(key, { ...row!, data: other.jar.get('__Host-session') ?? '' }, { continuation: true, reason: 'update' });
+    expect(await stored.read(browser.cookies)).toEqual({ record: null, reason: 'unreadable_session' });
+  });
+
+  it.each(storages)('its audience, with %s: another instance with the same secret can\'t read it', async (_, { make }) => {
+    const { storage } = make();
+    const customers = lifecycleOver(storage, 'customers');
+    const staff = lifecycleOver(storage, 'staff');
+    const { cookies } = cookieJar();
+    await customers.create(cookies, tokens(1));
+
+    expect((await customers.read(cookies)).record?.session.user?.sub).toBe('user-1');
+    expect(await staff.read(cookies)).toEqual({ record: null, reason: 'unreadable_session' });
+    expect(await staff.refresh(cookies)).toEqual({ ok: false, reason: 'unreadable_session' });
+    expect(await staff.update(cookies, (session) => session)).toBeNull();
+    // Another lifecycle with the same audience reads it: two instances of one app.
+    expect((await lifecycleOver(storage, 'customers').read(cookies)).record).not.toBeNull();
+  });
+
+  it('not the raw secret: a record sealed with the secret itself doesn\'t open', async () => {
+    const lifecycle = lifecycleOver(cookieStorage({ secure: true }));
+    const { cookies, jar } = cookieJar();
+    const created = await lifecycle.create(cookies, tokens(1));
+
+    jar.set('__Host-session', await sealRecord(created, secret));
+    expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'unreadable_session' });
+
+    jar.set('__Host-session', await sealRecord(created, await deriveKey(secret, sessionKeyInfo('', 'cookie'))));
+    expect((await lifecycle.read(cookies)).record).toEqual(created);
+  });
+
+  it('what sealing can\'t cover: a row put back under its own key reads again until it expires', async () => {
+    const store = createMemorySessionStore();
+    const lifecycle = lifecycleOver(storeStorage({ store, secure: true }));
+    const { cookies, jar } = cookieJar();
+    await lifecycle.create(cookies, tokens(1));
+    const key = await keyOf(jar);
+    const row = await store.get(key);
+    const copied = new Map(jar);
+
+    await lifecycle.end(cookies);
+    expect(await store.get(key)).toBeNull();
+
+    // Write access to the store is trusted: the docs say so.
+    await store.set(key, row!, { continuation: false, reason: 'login' });
+    const withCopiedCookie: CookieStore = { get: (name) => copied.get(name) ?? null, set: () => undefined };
+    expect((await lifecycle.read(withCopiedCookie)).record).not.toBeNull();
+  });
+});
+
 describe('the session lifecycle, cookie storage only', () => {
   function setup(options: Partial<SessionLifecycleOptions> = {}) {
     let issued = 1;
@@ -1156,7 +1258,8 @@ describe('the session lifecycle, store storage only', () => {
     refreshTokens.mockImplementationOnce(async () => {
       const stored = await store.get(key);
       const rotated = { ...created, tokens: { ...created.tokens, accessToken: 'other', refreshToken: 'refresh-x' } };
-      await store.set(key, { ...stored!, data: await sealRecord(rotated, secret) }, { continuation: true, reason: 'refresh' });
+      const sealingKey = await deriveKey(secret, sessionKeyInfo('', `store ${key}`));
+      await store.set(key, { ...stored!, data: await sealRecord(rotated, sealingKey) }, { continuation: true, reason: 'refresh' });
       throw invalidGrant();
     });
 

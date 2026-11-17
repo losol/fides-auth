@@ -513,6 +513,9 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       lifecycle: createSessionLifecycle({
         storage: sessionStore ? storeStorage({ store: sessionStore, secure }) : cookieStorage({ secure }),
         secret,
+        // A session is for this provider and this client. Another instance
+        // that shares the secret, for another of either, can't read it.
+        audience: JSON.stringify([oauthConfig.issuer, oauthConfig.clientId]),
         sessionDurationSeconds,
         rolesClaim: config.rolesClaim,
         // The lifecycle doesn't know what `data` holds; the type is the app's own.

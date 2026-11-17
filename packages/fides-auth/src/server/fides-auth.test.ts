@@ -17,7 +17,8 @@ import { createRecord, sealRecord } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
 import { fetchCookieStore } from './fetch-cookie-store.js';
 import { createFidesAuth, type FidesAuth, type FidesAuthConfig, type LoginError } from './fides-auth.js';
-import { SessionSecretError } from './session-secret.js';
+import { sessionKeyInfo } from './session-lifecycle.js';
+import { deriveKey, SessionSecretError } from './session-secret.js';
 import { createMemorySessionStore, type SessionStore, type StoreFields } from './session-store.js';
 
 const secret = 'a'.repeat(64);
@@ -992,7 +993,9 @@ describe('session members', () => {
       const { auth, cookies, jar } = setup();
       const record = createRecord(tokens(1, { expires_in: 20 }), { sessionDurationSeconds: 86_400 });
       delete record.tokens.accessTokenIssuedAt;
-      jar.set('__Host-session', await sealRecord(record, secret));
+      const audience = JSON.stringify(['https://idp.test', 'web']);
+      const key = await deriveKey(secret, sessionKeyInfo(audience, 'cookie'));
+      jar.set('__Host-session', await sealRecord(record, key));
       expect(await auth.refreshSession(cookies, { ifExpiresWithin: 60 })).toMatchObject({
         refreshed: true,
       });
@@ -1144,6 +1147,35 @@ describe('session members', () => {
       await expect(auth.readSession(cookies)).rejects.toBe(down);
       await expect(auth.tryReadSession(cookies)).rejects.toBe(down);
     });
+  });
+
+  it.each([
+    ['cookies', () => undefined],
+    ['a store', () => createMemorySessionStore()],
+  ])('doesn\'t read a session another provider or client started with the same secret, in %s', async (_, makeStore) => {
+    const sessionStore = makeStore();
+    const { auth, cookies } = setup({ sessionStore });
+    await login(auth, cookies);
+    const oauthConfig = {
+      issuer: 'https://idp.test',
+      clientId: 'web',
+      clientSecret: 'shh',
+      redirectUri: `${APP}/api/auth/callback`,
+      scope: 'openid',
+    };
+    const instance = (overrides: Partial<typeof oauthConfig>) =>
+      setup({ sessionStore, oauthConfig: { ...oauthConfig, ...overrides } }).auth;
+
+    // On the same origin, with the same secret and the same cookie.
+    for (const other of [instance({ clientId: 'staff' }), instance({ issuer: 'https://staff-idp.test' })]) {
+      expect(await other.tryReadSession(cookies)).toEqual({ session: null, reason: 'unreadable_session' });
+      expect(await other.getTokens(cookies)).toBeNull();
+      expect(await other.refreshSession(cookies)).toEqual({ ok: false, reason: 'unreadable_session' });
+    }
+    expect(oidc.refresh).not.toHaveBeenCalled();
+    // Another instance of the same app reads it.
+    expect((await instance({}).readSession(cookies))?.user?.sub).toBe('user-1');
+    expect((await auth.readSession(cookies))?.user?.sub).toBe('user-1');
   });
 
   it('answers the heartbeat with 503, not a throw, when the store lock fails', async () => {

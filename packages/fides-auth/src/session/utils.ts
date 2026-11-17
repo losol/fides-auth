@@ -52,7 +52,8 @@ export async function createEncryptedJWT(
  * Decrypts a JWE produced by {@link createEncryptedJWT} and returns its payload.
  *
  * Counterpart to {@link createEncryptedJWT}. Throws if the token cannot be
- * decrypted (wrong key, tampering, or malformed input).
+ * decrypted (wrong key, tampering, or malformed input), or names another
+ * algorithm than the one {@link createEncryptedJWT} uses.
  *
  * @param encryptedJwt - The encrypted JWT string.
  * @param secret - The decryption key as a hex string or Uint8Array (32 bytes for A256GCM).
@@ -62,7 +63,10 @@ export async function decryptJWT(
   encryptedJwt: string,
   secret: string | Uint8Array,
 ): Promise<jose.JWTPayload> {
-  const { payload } = await jose.jwtDecrypt(encryptedJwt, normalizeSecret(secret));
+  const { payload } = await jose.jwtDecrypt(encryptedJwt, normalizeSecret(secret), {
+    keyManagementAlgorithms: ['dir'],
+    contentEncryptionAlgorithms: ['A256GCM'],
+  });
   return payload;
 }
 

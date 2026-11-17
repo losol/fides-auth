@@ -458,6 +458,14 @@ and the session ends as for any refresh the provider refuses.
   equal to the time left in the session. The library never logs it.
 - **Key.** `SHA-256(handle)`. Neither a leaked store nor a logged key can be
   replayed as a cookie.
+- **Bound to its key.** A record is sealed with a key derived from `secret`,
+  the provider and client, and its own store key. Copied over another row it
+  doesn't open, so someone who can write to the store can't put one user's
+  session under their own handle. Nor does it open as a cookie, on an instance
+  that runs cookie storage with the same secret.
+- **What sealing can't cover.** A row put back under its own key after a
+  logout reads again, until `expiresAt`, for whoever kept the handle. Write
+  access to the store is trusted to that extent: guard it like the secret.
 - **Fixation.** Every login mints a new handle and deletes the record the old
   one pointed at. Only a refresh or an update keeps the handle.
 - **Revocation.** Logout and `clearSession` delete the record before the
@@ -466,9 +474,10 @@ and the session ends as for any refresh the provider refuses.
   `storeFields` returns are stored in the clear. The hashes are HMACs under a
   key derived from `secret`, so a store dump doesn't give up `sub`; your own
   fields are as readable as you make them.
-- **At rest.** Records are sealed with the same secret as cookie sessions.
-  Rotating the secret ends stored sessions (`unreadable_session`), as it ends
-  cookie ones.
+- **At rest.** The sealing keys are derived from the same secret as for
+  cookie sessions. Rotating the secret ends stored sessions
+  (`unreadable_session`), as it ends cookie ones. So does a change of
+  `issuer` or `clientId`.
 
 ## Switching from cookies
 

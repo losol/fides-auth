@@ -19,6 +19,8 @@ import {
   type LoginTransaction,
 } from './login-transaction.js';
 import { openRecord } from '../session/record.js';
+import { sessionKeyInfo } from './session-lifecycle.js';
+import { deriveKey } from './session-secret.js';
 
 const secret = 'a'.repeat(64);
 
@@ -136,6 +138,9 @@ describe('login transaction cookie', () => {
 
     await expect(decryptJWT(value!, secret)).rejects.toThrow();
     expect(await openRecord(value!, secret)).toBeNull();
+    // Nor under the key a session in a cookie is sealed with.
+    const sessionKey = await deriveKey(secret, sessionKeyInfo('', 'cookie'));
+    expect(await openRecord(value!, sessionKey)).toBeNull();
   });
 
   it('keeps parallel logins apart', async () => {

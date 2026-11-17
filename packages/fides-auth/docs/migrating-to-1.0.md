@@ -274,6 +274,10 @@ one writes JSON lines to the console.
   `rateLimit`.
 - **`createFidesAuth` throws on `clientAuth: 'none'`.** The server side of an
   app is a confidential client.
+- **A session belongs to one provider and one client.** Its key is derived
+  from `secret`, `issuer` and `clientId`, so changing either of the two logs
+  everyone out, as changing the secret does. Two instances that share a secret
+  but not a provider or client no longer read each other's sessions.
 - **One session cookie.** The session lives in `__Host-session`, in at most
   three chunks, or `session` over plain http. With a `sessionStore`, it holds
   only a handle. The cookies are `Secure` unless `redirectUri` is plain http.

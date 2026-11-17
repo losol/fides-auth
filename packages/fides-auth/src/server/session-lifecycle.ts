@@ -50,7 +50,7 @@ import {
 } from '../session/record.js';
 import type { RolesClaim } from '../session/user-claims.js';
 import type { CookieStore } from './cookie-store.js';
-import { assertSessionSecret, type SessionSecret } from './session-secret.js';
+import { assertSessionSecret, deriveKey, type SessionSecret } from './session-secret.js';
 import type { LookupFields, SaveResult, SessionStorage } from './session-storage.js';
 import type { SessionMatch, StoreFields, StoreSetReason } from './session-store.js';
 
@@ -82,8 +82,15 @@ export type RefreshRecordResult =
 
 export interface SessionLifecycleOptions {
   storage: SessionStorage;
-  /** Seals records and derives the key for the store's lookup hashes. */
+  /** The keys that seal records, and the one for the store's lookup hashes, are derived from it. */
   secret: SessionSecret;
+  /**
+   * Who the sessions are for, e.g. the provider and the client. It is part of
+   * the key a record is sealed with, so an instance with another audience and
+   * the same secret can't read them.
+   * @default ''
+   */
+  audience?: string;
   /** @default 43200, which is 12 hours */
   sessionDurationSeconds?: number;
   /** Where the roles are in the ID token. False leaves them to `mapSession`. @default 'roles' */
@@ -284,6 +291,14 @@ interface RecentRefresh {
  *
  * @throws TypeError if `refreshGraceSeconds` is not a finite number, 0 or more.
  */
+/**
+ * What a session's sealing key is derived for: the instance's audience, and
+ * where the record is kept. The HKDF `info` of that key.
+ */
+export function sessionKeyInfo(audience: string, binding: string): string {
+  return JSON.stringify(['fides-auth session', audience, binding]);
+}
+
 export function createSessionLifecycle(options: SessionLifecycleOptions): SessionLifecycle {
   const { storage, secret, rolesClaim, mapSession, mapRefresh, logger } = options;
   const sessionDurationSeconds = checkSessionDuration(options.sessionDurationSeconds);
@@ -297,6 +312,26 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
   const unsaved = new Map<string, RecentRefresh>();
   const saveRetryDelaysMs = options.saveRetryDelaysMs ?? [200, 1000];
   let lookupKeyPromise: Promise<CryptoKey> | undefined;
+  const audience = options.audience ?? '';
+  // The last key derived. Cookie storage has one; a request for a stored session asks for the same one a few times.
+  let lastSealingKey: { binding: string; key: Promise<Uint8Array> } | undefined;
+
+  /**
+   * The key a record is sealed with: for this instance's audience, and for
+   * where the record is kept. So a record doesn't open for another instance
+   * that has the secret, under another store key, or in the other storage.
+   */
+  function sealingKey(binding: string): Promise<Uint8Array> {
+    if (lastSealingKey?.binding === binding) return lastSealingKey.key;
+    const key = deriveKey(secret, sessionKeyInfo(audience, binding));
+    const entry = { binding, key };
+    lastSealingKey = entry;
+    // A bad secret is reported each time it is used, not remembered.
+    key.catch(() => {
+      if (lastSealingKey === entry) lastSealingKey = undefined;
+    });
+    return key;
+  }
   // By correlation id: the end of the last refresh or update queued for a session.
   const turns = new Map<string, Promise<void>>();
 
@@ -477,7 +512,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     reason: StoreSetReason,
   ): Promise<SaveResult> {
     return storage.save(cookies, {
-      sealed: await sealRecord(record, secret),
+      seal: async (binding) => sealRecord(record, await sealingKey(binding)),
       expiresAt: record.session.expiresAt,
       correlationId: record.session.correlationId,
       lookup: await lookupFields(record),
@@ -491,7 +526,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     assertSessionSecret(secret);
     const loaded = await storage.load(cookies);
     if (loaded.sealed === null) return { record: null, reason: loaded.reason };
-    const record = await openRecord(loaded.sealed, secret);
+    const record = await openRecord(loaded.sealed, await sealingKey(loaded.binding));
     if (!record) return { record: null, reason: 'unreadable_session' };
     if (isExpired(record)) return { record: null, reason: 'session_expired' };
     return { record };
@@ -843,7 +878,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       for (const entry of found) {
         // The plain fields are the store's word. Check them against the sealed
         // record, so a search that matches too much can't end someone else's session.
-        const idp = (await openRecord(entry.sealed, secret))?.session.idp;
+        const key = await sealingKey(entry.binding);
+        const idp = (await openRecord(entry.sealed, key))?.session.idp;
         if (idp && ((iss && idp.iss !== iss) || (sub && idp.sub !== sub) || (sid && idp.sid !== sid))) {
           logger.warn(
             { correlationId: entry.correlationId },
@@ -857,7 +893,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         const running = entry.correlationId ? inflight.get(entry.correlationId) : undefined;
         if (running) await running.catch(() => undefined);
         const sealed = await entry.remove();
-        const record = sealed ? await openRecord(sealed, secret) : null;
+        const record = sealed ? await openRecord(sealed, key) : null;
         if (record) ended.push(record);
         if (trigger && sealed) {
           emit({

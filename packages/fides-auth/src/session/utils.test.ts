@@ -1,8 +1,9 @@
-import { jwtDecrypt } from 'jose';
+import { EncryptJWT, jwtDecrypt } from 'jose';
 
 import {
   hexToUint8Array,
   createEncryptedJWT,
+  decryptJWT,
   sha256,
   generateToken,
 } from './utils.js';
@@ -142,3 +143,25 @@ describe('generateToken', () => {
   });
 });
 
+
+describe('decryptJWT', () => {
+  it('opens what createEncryptedJWT sealed', async () => {
+    const jwe = await createEncryptedJWT({ sub: 'user-1' }, TEST_SECRET);
+    expect((await decryptJWT(jwe, TEST_SECRET)).sub).toBe('user-1');
+  });
+
+  it('refuses a token that names another algorithm, also one the key would open', async () => {
+    // A256KW and A128CBC-HS256 both take a 32-byte key, so jose opens them with the secret.
+    const wrapped = await new EncryptJWT({ sub: 'user-1' })
+      .setProtectedHeader({ alg: 'A256KW', enc: 'A256GCM' })
+      .encrypt(TEST_SECRET_BYTES);
+    const cbc = await new EncryptJWT({ sub: 'user-1' })
+      .setProtectedHeader({ alg: 'dir', enc: 'A128CBC-HS256' })
+      .encrypt(TEST_SECRET_BYTES);
+    expect((await jwtDecrypt(wrapped, TEST_SECRET_BYTES)).payload.sub).toBe('user-1');
+    expect((await jwtDecrypt(cbc, TEST_SECRET_BYTES)).payload.sub).toBe('user-1');
+
+    await expect(decryptJWT(wrapped, TEST_SECRET)).rejects.toThrow();
+    await expect(decryptJWT(cbc, TEST_SECRET)).rejects.toThrow();
+  });
+});
