@@ -174,9 +174,15 @@ function resolveAllowedUrl(url: string | URL, allowedBase: string | URL, logger:
   return target;
 }
 
+/** The escapes a dot segment can hide in: `.`, `/`, `\`, `;`, and `%` for an escape of an escape. */
+const HIDING = /%(2e|2f|5c|3b|25)/gi;
+
 /**
  * Whether the path has a `.` or `..` segment, in any of its encodings. A gateway
  * that decodes before it routes would resolve `..%2f` or `%252e%252e` out of the base.
+ *
+ * Each escape is decoded on its own, so a malformed one elsewhere in the path
+ * doesn't stop the rest from being looked at.
  */
 function hasDotSegment(pathname: string): boolean {
   let path = pathname;
@@ -185,12 +191,7 @@ function hasDotSegment(pathname: string): boolean {
       .split(/[/\\]/)
       .some((segment) => segment === '.' || segment === '..' || /^\.\.?;/.test(segment));
     if (dotted) return true;
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(path);
-    } catch {
-      return false;
-    }
+    const decoded = path.replace(HIDING, (escape) => String.fromCharCode(Number.parseInt(escape.slice(1), 16)));
     if (decoded === path) return false;
     path = decoded;
   }

@@ -216,6 +216,11 @@ describe('authorizedFetch — allowedBase', () => {
     '/v1/%252e%252e/admin',
     '/v1/a/%2e%2e%2f%2e%2e%2fadmin',
     '/v1/%2E%2E%5Cadmin',
+    // A malformed escape elsewhere doesn't hide the rest.
+    '/v1/..%2f..%2fadmin%zz',
+    '/v1/%zz/..%5cadmin',
+    '/v1/%E0%A4%A/..%2fadmin',
+    '/v1/.%3b/admin',
   ])('refuses the encoded dot segments in %s and sends nothing', async (path) => {
     const error = await failure(authorizedFetch(tokens(), `${api.url}${path}`, { allowedBase: base }));
 
@@ -230,6 +235,8 @@ describe('authorizedFetch — allowedBase', () => {
     '/v1/users/..hidden',
     '/v1/a..b/c',
     '/v1/%zz',
+    '/v1/a%3Bb/caf%C3%A9',
+    '/v1/100%25/done',
   ])('still sends %s, path unchanged', async (path) => {
     await authorizedFetch(tokens(), `${api.url}${path}`, { allowedBase: base });
 
