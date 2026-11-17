@@ -78,7 +78,7 @@ describe('VippsLoginClient.getUserInfo', () => {
       { logger: quiet },
     );
 
-    const user = await client.getUserInfo('access-token');
+    const user = await client.getUserInfo('access-token', { expectedSubject: 'u-1' });
 
     expect(user).toEqual({ sub: 'u-1', email: 'ada@example.com' });
     const [url, init] = fetchMock.mock.calls.at(-1) ?? [];
@@ -90,10 +90,66 @@ describe('VippsLoginClient.getUserInfo', () => {
     });
   });
 
+  it('refuses redirects and has a timeout', async () => {
+    const fetchMock = provider(() => Response.json({ sub: 'u-1' }));
+    const client = new VippsLoginClient(baseConfig, { logger: quiet });
+
+    await client.getUserInfo('access-token', { expectedSubject: 'u-1' });
+
+    const [, init] = fetchMock.mock.calls.at(-1) ?? [];
+    expect(init?.redirect).toBe('error');
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('rejects an answer for another subject, without naming either', async () => {
+    provider(() => Response.json({ sub: 'other-sub-999' }));
+    const client = new VippsLoginClient(baseConfig, { logger: quiet });
+
+    const error = await client
+      .getUserInfo('access-token', { expectedSubject: 'expected-sub-123' })
+      .catch((e: Error) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('another subject');
+    expect((error as Error).message).not.toContain('other-sub-999');
+    expect((error as Error).message).not.toContain('expected-sub-123');
+  });
+
+  it('rejects an answer without a string sub', async () => {
+    provider(() => Response.json({ sub: 42 }));
+    const client = new VippsLoginClient(baseConfig, { logger: quiet });
+
+    await expect(client.getUserInfo('access-token', { expectedSubject: '42' })).rejects.toThrow('another subject');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+  ])('rejects a %s expectedSubject with a TypeError, before any request', async (_name, expectedSubject) => {
+    const fetchMock = provider(() => Response.json({ sub: 'u-1' }));
+    const client = new VippsLoginClient(baseConfig, { logger: quiet });
+
+    await expect(
+      client.getUserInfo('access-token', { expectedSubject } as unknown as { expectedSubject: string }),
+    ).rejects.toThrow(TypeError);
+    await expect(client.getUserInfo('access-token', undefined as never)).rejects.toThrow(TypeError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('throws on a non-2xx answer', async () => {
     provider(() => new Response('nope', { status: 401 }));
     const client = new VippsLoginClient(baseConfig, { logger: quiet });
 
-    await expect(client.getUserInfo('access-token')).rejects.toThrow('Failed to fetch user info: 401');
+    await expect(client.getUserInfo('access-token', { expectedSubject: 'u-1' })).rejects.toThrow('Failed to fetch user info: 401');
+  });
+
+  it('keeps the response body out of the error', async () => {
+    provider(() => new Response('secret-detail', { status: 500 }));
+    const client = new VippsLoginClient(baseConfig, { logger: quiet });
+
+    const error = await client.getUserInfo('access-token', { expectedSubject: 'u-1' }).catch((e: Error) => e);
+
+    expect((error as Error).message).toContain('500');
+    expect((error as Error).message).not.toContain('secret-detail');
   });
 });

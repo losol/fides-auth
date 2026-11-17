@@ -127,7 +127,8 @@ const oidc = createOidcClient(oauthConfig, { logger, discoveryTtlMs });
 
 **Vipps.** `VippsLoginClient` is built on the OIDC client. A second constructor
 argument takes `logger` and `discoveryTtlMs`, and `vipps.oidc` is the client
-underneath.
+underneath. `getUserInfo(accessToken, { expectedSubject })` takes the ID token's
+`sub` and throws if the answer is for another one.
 
 | 0.x | 1.0 |
 |---|---|
@@ -283,6 +284,10 @@ one writes JSON lines to the console.
   only a handle. The cookies are `Secure` unless `redirectUri` is plain http.
 - **The browser store asks the session info endpoint** by default, and its user
   is the session's `user`, where `roles` may be absent.
+- **Vipps `getUserInfo` needs `{ expectedSubject }`**, the ID token's `sub`, and
+  throws a `TypeError` without it. It throws if the answer is for another `sub`,
+  refuses redirects, gives up after 10 seconds, and leaves the response body out
+  of the error.
 - **`checkAuth` keeps a session through a check that fails.** A network error
   or a 5xx is not an answer, so a logged-in store stays logged in, with the
   failure as `error`. 0.x logged the user out. A check that answers "no
