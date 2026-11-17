@@ -138,6 +138,12 @@ export interface SessionStorage {
    * a place. Only store storage.
    */
   forget?(cookies: CookieStore): Promise<void>;
+  /**
+   * Deletes the session's cookies and nothing else, and throws where they
+   * can't be written. For ending a session whose record `discard` has
+   * deleted: the two can then fail apart. Only store storage.
+   */
+  clearCookies?(cookies: CookieStore): Promise<void>;
   /** The sessions that match. Only store storage, and only over a store that can search. */
   findMatching?(match: SessionMatch): Promise<FoundSession[]>;
 }
@@ -322,6 +328,10 @@ export function storeStorage({ store, secure }: StorageOptions & { store: Sessio
       // The record first: once it is gone, a copied cookie is dead.
       const current = await locate(cookies);
       if (current && current !== 'invalid') await store.delete(current.key);
+      await storage.clearCookies?.(cookies);
+    },
+
+    async clearCookies(cookies) {
       await deletePresent(cookies, [name, ...otherChunks], cookieOptions(secure, 0));
       await deleteLegacy(cookies, secure);
     },

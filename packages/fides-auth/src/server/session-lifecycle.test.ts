@@ -10,7 +10,12 @@ import type { SessionEvent } from '../shared/session-events.js';
 import type { TokenResponse } from '../shared/types.js';
 import { sealRecord } from '../session/record.js';
 import type { CookieStore } from './cookie-store.js';
-import { createSessionLifecycle, sessionKeyInfo, type SessionLifecycleOptions } from './session-lifecycle.js';
+import {
+  createSessionLifecycle,
+  SessionCookieLeftError,
+  sessionKeyInfo,
+  type SessionLifecycleOptions,
+} from './session-lifecycle.js';
 import { deriveKey, SessionSecretError } from './session-secret.js';
 import { cookieStorage, type SessionStorage, storeStorage } from './session-storage.js';
 import { createMemorySessionStore, type SessionStore } from './session-store.js';
@@ -1763,6 +1768,47 @@ describe('the session lifecycle, store storage only', () => {
     const next = await lifecycle.refresh(cookies);
     expect(next.ok && next.record.tokens.accessToken).toBe('access-3');
     expect(refreshTokens.mock.calls.map(([token]) => token)).toEqual(['refresh-1', 'refresh-1']);
+  });
+
+  it.each([
+    ['with', (store: SessionStore): SessionStore => store],
+    ['without', (store: SessionStore): SessionStore => ({ ...store, withLock: undefined })],
+  ])('ends a session whose cookie can\'t be deleted, and hands over its tokens with the error, %s a lock', async (_, locking) => {
+    const base = createMemorySessionStore();
+    const events: SessionEvent[] = [];
+    const lifecycle = createSessionLifecycle({
+      storage: storeStorage({ store: locking(base), secure: true }),
+      secret,
+      refreshTokens: vi.fn(async () => tokens(2)),
+      logger: quiet,
+      onSessionEvent: (event) => events.push(event),
+    });
+    const { cookies, jar } = cookieJar();
+    const created = await lifecycle.create(cookies, tokens(1));
+    const readOnly = new Error('Cookies can only be modified in a Server Action or Route Handler');
+    const inComponent: CookieStore = {
+      get: (name) => jar.get(name) ?? null,
+      set: () => {
+        throw readOnly;
+      },
+    };
+
+    const error = await lifecycle.end(inComponent, { trigger: 'logout' }).catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(SessionCookieLeftError);
+    expect((error as SessionCookieLeftError).ended).toEqual(created);
+    expect((error as SessionCookieLeftError).cause).toBe(readOnly);
+    expect(await lifecycle.read(cookies)).toEqual({ record: null, reason: 'session_not_found' });
+    expect(events.at(-1)).toEqual({
+      event: 'session.cleared',
+      correlationId: created.session.correlationId,
+      trigger: 'logout',
+    });
+    // Where cookies can be written, an end is as it was.
+    const other = cookieJar();
+    await lifecycle.create(other.cookies, tokens(1));
+    expect((await lifecycle.end(other.cookies))?.tokens.refreshToken).toBe('refresh-1');
+    expect(other.jar.size).toBe(0);
   });
 
   it('fails a refresh whose lock it can\'t take as a store failure, and keeps the session', async () => {
