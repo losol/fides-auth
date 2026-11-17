@@ -673,7 +673,10 @@ refresh from Server Components. Both seal the
 session with `secret`, so a new secret alone ends every session either way, and
 moving from one to the other logs users in again once.
 
-See [docs/server-sessions.md](./docs/server-sessions.md) for the store contract.
+See [docs/server-sessions.md](./docs/server-sessions.md) for the store contract,
+and [docs/session-format.md](./docs/session-format.md) for what is written to
+a cookie and to a store, what stays the same through 1.x, and how to start a
+session in a test.
 
 #### Replacing the secret
 
