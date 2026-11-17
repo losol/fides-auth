@@ -51,7 +51,7 @@ import {
   isReportedOnRead,
   SessionCookieLeftError,
 } from './session-lifecycle.js';
-import { assertSessionSecret, type SessionSecret } from './session-secret.js';
+import { assertSessionSecret, type SessionSecrets } from './session-secret.js';
 import { cookieStorage, sessionCookieName, storeStorage } from './session-storage.js';
 import type { SessionStore, StoreFields } from './session-store.js';
 
@@ -123,8 +123,15 @@ export interface LogoutError {
 export interface FidesAuthConfig<TData = Record<string, unknown>> {
   /** The provider and client. A BFF is a confidential client, so `clientAuth: 'none'` throws. */
   oauthConfig: OidcClientConfig;
-  /** Seals the session cookies, the store records and the login transaction. 32 bytes, as hex or raw. */
-  secret: SessionSecret;
+  /**
+   * Seals the session cookies, the store records and the login transaction.
+   * 32 bytes, as hex or raw.
+   *
+   * To replace it without logging anyone out, give a list: the first seals,
+   * and every one opens. Put the new secret first and keep the old one
+   * behind it for as long as a session lasts, then take the old one out.
+   */
+  secret: SessionSecrets;
   /** Keeps sessions in a store, with only a handle in the cookie. Without it, sessions live in the cookies. */
   sessionStore?: SessionStore;
   /**
