@@ -139,6 +139,53 @@ describe('createHeartbeat — expiry-driven cadence', () => {
   });
 });
 
+describe('createHeartbeat — delay cap', () => {
+  const DAY = 24 * 60 * 60_000;
+
+  it('waits at most a day when the expiry is 40 days ahead', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(expiryResponse(40 * DAY)));
+    // A long idle threshold, so the idle gate does not defer the beat after a day.
+    start({ idleThresholdMs: 2 * DAY });
+
+    // Prime.
+    await advance(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await advance(23 * 60 * 60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(61 * 60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not burst after a response with an expiry 40 days ahead', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(expiryResponse(40 * DAY)));
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    start();
+
+    await advance(60 * 60_000);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The overflow may not reproduce under fake timers, so check the delays too.
+    for (const call of setTimeoutSpy.mock.calls) {
+      expect(Number(call[1] ?? 0)).toBeLessThanOrEqual(DAY);
+    }
+  });
+
+  it('keeps the old timing for an expiry 30 minutes ahead', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(expiryResponse(30 * 60_000)));
+    start({ fraction: 0.3 });
+
+    await advance(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // lead = 0.3 * 30min = 9min → next refresh after 21min.
+    await advance(21 * 60_000 - 1000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('createHeartbeat — session expired', () => {
   it('fires onSessionExpired on 401 and stops further refreshes', async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }));
