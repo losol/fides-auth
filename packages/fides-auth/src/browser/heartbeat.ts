@@ -128,6 +128,9 @@ const DEFAULTS = {
 const FALLBACK_INTERVAL_MS = 60_000;
 // Upper bound for exponential backoff between transient-failure retries.
 const MAX_RETRY_DELAY_MS = 60_000;
+// Longest wait between beats. setTimeout fires at once when the delay is above
+// 2^31-1 ms (about 24.8 days), so a far expiry must not reach it unclamped.
+const MAX_DELAY_MS = 24 * 60 * 60 * 1000;
 
 /** Parses an ISO 8601 string or epoch-ms number into epoch ms, or null. */
 function toEpochMs(value: string | number | null | undefined): number | null {
@@ -227,7 +230,7 @@ export function createHeartbeat(config: HeartbeatConfig = {}): HeartbeatHandle {
   const scheduleRefresh = (delay = nextDelay()): void => {
     if (stopped) return;
     clearTimer();
-    timeoutId = setTimeout(onDue, delay);
+    timeoutId = setTimeout(onDue, Math.min(delay, MAX_DELAY_MS));
   };
 
   function onWake(): void {
