@@ -191,7 +191,7 @@ function hasDotSegment(pathname: string): boolean {
       .split(/[/\\]/)
       .some((segment) => segment === '.' || segment === '..' || /^\.\.?;/.test(segment));
     if (dotted) return true;
-    const decoded = path.replace(HIDING, (escape) => String.fromCharCode(Number.parseInt(escape.slice(1), 16)));
+    const decoded = path.replace(HIDING, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
     if (decoded === path) return false;
     path = decoded;
   }
