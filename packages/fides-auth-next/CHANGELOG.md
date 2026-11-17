@@ -1,5 +1,25 @@
 # @eventuras/fides-auth-next
 
+## 1.0.0-beta.7
+
+### Minor Changes
+
+- 1ee5467: The peer range for `next` is now `^16.4.1`, up from `^16.0.0`. Earlier 16 releases have known vulnerabilities:
+  below 16.2.11 a request can pass `proxy.ts` in some App Router setups, which is where an app guards its pages, and
+  below 16.4.1 there are several remote code execution advisories. An app on an older 16 gets a peer dependency
+  warning and should upgrade Next.
+
+### Patch Changes
+
+- Updated dependencies [cbf8d92]
+- Updated dependencies [1aa5c85]
+- Updated dependencies [727ecec]
+- Updated dependencies [4601dc4]
+- Updated dependencies [5524142]
+- Updated dependencies [09c5941]
+- Updated dependencies [ebed293]
+  - @eventuras/fides-auth@1.0.0-beta.7
+
 ## 1.0.0-beta.6
 
 ### Patch Changes

@@ -1,5 +1,39 @@
 # @eventuras/fides-auth
 
+## 1.0.0-beta.7
+
+### Minor Changes
+
+- cbf8d92: `authorizedFetch` now refuses a path with `.` or `..` segments that are percent-encoded (once or twice), written with a backslash, or written as `..;`. Before, these were sent with the access token, path unchanged. A gateway that decodes before it routes could then serve a path outside `allowedBase`. An encoded slash inside one segment, such as `group%2Fproject`, still passes. An access token with CR, LF or NUL no longer puts the token in a `TypeError` message: the call fails with `no_access_token`.
+- 09c5941: A session is now sealed with a key derived from the secret, the provider and client (`issuer` and `clientId`), and
+  where it is kept: its own store key under a `sessionStore`. Before, every session was sealed with the secret itself,
+  so a sealed record opened wherever the secret was. Someone with write access to the store could copy another user's
+  record over their own row and read it with their own handle; a row from a leaked store opened as a session cookie
+  on any instance running cookie storage with the same secret, during a rollout from cookies to a store say; and two
+  `createFidesAuth` instances on one origin with the same secret, for different providers or clients, read each
+  other's sessions, roles included. None of these open now: they read as `unreadable_session`.
+  
+  **Everyone logs in again once**, since sessions sealed by an earlier beta don't open. From here on, changing
+  `issuer` or `clientId` ends all sessions, as changing the secret does. Decryption also accepts only the algorithms
+  the library seals with (`dir`, `A256GCM`).
+  
+  A row put back under its own key after a logout still reads until `expiresAt`: sealing can't cover that, and
+  `docs/server-sessions.md` now says that write access to the store is trusted to that extent.
+- ebed293: `VippsLoginClient.getUserInfo` now takes a required `{ expectedSubject }`, the ID token's `sub`, and throws if the answer is for another subject (OIDC Core §5.3.2). It no longer follows redirects: a redirect from the userinfo endpoint sent the subscription key and merchant serial number to the new origin, and returned that origin's JSON as the user. The call gives up after 10 seconds. The error for a non-2xx answer no longer carries the response body.
+
+### Patch Changes
+
+- 1aa5c85: `endUserSessions` no longer ends a record it can't tie to the user. A `findMatching` that returned too much was already kept from ending another user's session, but a record without an ID token, or one that doesn't open, slipped through that check and was deleted, with its refresh token revoked. Such a record is now left alone. An `iss` that is an empty string, an unset variable say, is refused with a `TypeError`: it was read as no issuer, which matches the most. The `merge` example in `docs/server-sessions.md` now follows the rule for a continuation.
+- 727ecec: When the known access-token expiry was more than about 35 days ahead, the browser heartbeat passed a delay above 2^31-1 ms to `setTimeout`. The timer then fired at once, so the heartbeat posted in a tight loop and every post made the server refresh at the provider. The wait between beats is now at most 24 hours.
+- 4601dc4: `validateReturnUrl` now uses the default path when a `returnTo` such as `/.//evil.test` resolves to a path that starts with `//`, which code that navigates to the pathname could take for another site. The cookie reader of `fetchCookieStore` trims only space and tab around names and values, as a browser does, and skips a name that is not a valid cookie name. A `Cookie` header with a name padded by a non-breaking space can no longer stand in for a `__Host-` cookie. A `returnTo` is kept in the login cookie only up to 512 serialized bytes, down from 1024, so that a few logins started from another site stay under the header limit of common web servers.
+- 5524142: An error from the provider no longer carries the provider's response. When a token response arrived with a 2xx
+  status and then failed validation, a missing `token_type` say, `oauth4webapi` attached the whole response to the
+  error it threw, access and refresh tokens included. The library logged that error and handed it to `onLoginError`
+  as `cause`. The default logger prints only the name, the message and the stack, so nothing leaked there, but a
+  logger that prints an error in depth, or a `console.error(failure.cause)` in the app, wrote the tokens out. A
+  UserInfo response without a `sub` carried the user's claims the same way. The OIDC client now takes the response
+  off every error it lets out, and what the error says was wrong stays.
+
 ## 1.0.0-beta.6
 
 ### Minor Changes
