@@ -52,6 +52,14 @@ describe('validateReturnUrl', () => {
     expect(url.searchParams.get('q')).toBe('test');
   });
 
+  it.each(['/.//evil.test', '/a/..//evil.test', '/%2e//evil.test', '/%2E%2E//evil.test'])(
+    'uses the default when %s resolves to a path starting with //',
+    returnTo => {
+      const url = validateReturnUrl(quiet, returnTo, origin, '/home');
+      expect(url.href).toBe(`${origin}/home`);
+    },
+  );
+
   it('uses custom defaultPath', () => {
     const url = validateReturnUrl(quiet, null, origin, '/admin');
     expect(url.pathname).toBe('/admin');

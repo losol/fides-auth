@@ -24,8 +24,11 @@ const MAX_TRANSACTIONS = 3;
 /**
  * A longer returnTo is dropped, not stored in a cookie sent with every request.
  * Measured as serialized: JSON escaping grows a control character sixfold.
+ * Another site can start three logins in a browser, and their cookies sit on `/`
+ * for ten minutes. A small cap keeps them with a large session cookie under the
+ * 8 kB header limit of nginx and Apache.
  */
-const MAX_RETURN_TO_BYTES = 1024;
+const MAX_RETURN_TO_BYTES = 512;
 
 const DEFAULT_MAX_AGE_MS = 10 * 60 * 1000;
 
