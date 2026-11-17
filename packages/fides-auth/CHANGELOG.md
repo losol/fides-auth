@@ -1,5 +1,25 @@
 # @eventuras/fides-auth
 
+## 1.0.0-beta.9
+
+### Minor Changes
+
+- 2a14b0c: `secret` takes a list, so a secret can be replaced without logging anyone out. The first one seals, and every one of them opens: `secret: [newSecret, oldSecret]`. A session sealed with the old secret is read as it is, and sealed with the new one the next time it is refreshed or updated. A login that was under way when the secret changed finishes, and `endUserSessions` finds a user's sessions whichever secret their lookup hash was keyed with.
+  
+  In a fleet replaced one instance at a time, deploy `[old, new]` first, then `[new, old]`, then `new` alone once `sessionDurationSeconds` has passed. The README has the steps under "Replacing the secret". A single secret works as before.
+- 44a1dec: A session that opens but was written by a later major of the library is now told apart from one that doesn't open: it reads with the new reason `unsupported_session_version`, where it was `unreadable_session`. Every 1.x reads a session written by any 1.x.
+  
+  A read now emits `session.rejected` when a cookie is there and doesn't open, for both reasons. Before, only the heartbeat emitted that event, so an app that doesn't use the heartbeat saw nothing when a changed secret, or a rollback across a major, logged everyone out: `readSession` just answered null. The docs already suggested an alert on `unreadable_session`; now it fires. The heartbeat no longer reports these two itself, so one request is still one event.
+  
+  `SessionRejectedReason` has a new member, which an exhaustive `switch` over it has to handle.
+
+### Patch Changes
+
+- 9d1a151: `docs/session-format.md` says how a list of secrets seals and opens, and that a search for a user's sessions asks for the lookup hash of each secret.
+- 99b7dca: A new page, `docs/session-format.md`, says what the library writes to a cookie and to a store: the record, how it is sealed and what its key is derived from, the store's fields, and the cookie of a login under way. It also says what is stable: every 1.x reads what any 1.x wrote. A test with values written by 1.0.0-beta.8 holds the library to that, and the page shows the supported way to start and read a session in an app's own tests.
+  
+  The docs now say plainly that `storeFields` are not sealed, and what does and doesn't belong in them.
+
 ## 1.0.0-beta.8
 
 ### Patch Changes
