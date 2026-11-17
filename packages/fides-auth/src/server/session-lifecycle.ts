@@ -866,6 +866,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         throw new TypeError('Ending sessions without their cookies needs a sessionStore with findMatching');
       }
       if (!sub && !sid) throw new TypeError('Ending sessions needs a sub or a sid to match');
+      // An empty issuer is a variable that wasn't set. Read as "any issuer" it would match the most.
+      if (iss === '') throw new TypeError('Ending sessions needs an iss that is not empty, or none');
 
       // Only the keys to compare, so an adapter can hand the match to its query as it is.
       const match: SessionMatch = {};
@@ -884,6 +886,15 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
           logger.warn(
             { correlationId: entry.correlationId },
             'findMatching returned a session that does not match; left alone',
+          );
+          continue;
+        }
+        if (!idp) {
+          // No session of a user: it has no ID token to match, or it doesn't
+          // open. The store shouldn't have found it, and nothing says whose it is.
+          logger.warn(
+            { correlationId: entry.correlationId },
+            'findMatching returned a record without a user to match; left alone',
           );
           continue;
         }

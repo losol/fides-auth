@@ -399,7 +399,7 @@ export interface FidesAuth<TData = Record<string, unknown>> {
    * browsers keep their cookies, which then find no session.
    *
    * @returns How many sessions it ended.
-   * @throws TypeError without a `sessionStore` that has `findMatching`.
+   * @throws TypeError without a `sessionStore` that has `findMatching`, or with an `iss` that is an empty string.
    */
   endUserSessions(
     user: { sub: string; iss?: string },
@@ -910,7 +910,8 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       // By `sub` alone unless the caller names an issuer. The lookup hash is
       // keyed with the session secret, so it already belongs to this app, and
       // an issuer spelled another way than in the ID token would find nothing.
-      const ended = await settings().lifecycle.endMatching(iss ? { iss, sub } : { sub }, { trigger });
+      const match = iss === undefined ? { sub } : { iss, sub };
+      const ended = await settings().lifecycle.endMatching(match, { trigger });
       for (const record of ended) await revokeRefreshToken(record, log.logout);
       log.logout.info({ sessions: ended.length }, "Ended a user's sessions");
       return ended.length;
