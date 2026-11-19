@@ -1,6 +1,6 @@
 {
   "name": "@eventuras/fides-auth-conformance",
-  "version": "0.0.0",
+  "version": "0.0.1-beta.0",
   "private": true,
   "description": "Runs the OpenID Foundation conformance suite's relying-party tests against fides-auth, now and then",
   "license": "MIT",
