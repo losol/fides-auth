@@ -1,0 +1,36 @@
+# The OpenID Foundation conformance suite, from the images its own pipeline
+# publishes for a release. After the suite's docker-compose-prebuilt.yml.
+#
+# The tag is the pin: release-v5.3.4. Change it on both images, in
+# src/suite.ts (SUITE_RELEASE) and in the README together.
+name: fides-auth-conformance
+
+services:
+  mongodb:
+    image: mongo:6.0.13
+    # No volume: a run starts from an empty database and leaves nothing.
+
+  server:
+    image: registry.gitlab.com/openid/conformance-suite:release-v5.3.4
+    environment:
+      # Where the suite says it lives, and so the issuer of every test. The
+      # certificate in the nginx image is made for `localhost`.
+      BASE_URL: https://localhost:8443
+      BASE_MTLS_URL: https://localhost:8444
+      MONGODB_HOST: mongodb
+      # `dev` turns the suite's own login off: its API takes requests without
+      # a token. It is published on loopback only, below.
+      SPRING_PROFILES_ACTIVE: dev
+      OIDC_GOOGLE_CLIENTID: unused
+      OIDC_GOOGLE_SECRET: unused
+      OIDC_GITLAB_CLIENTID: unused
+      OIDC_GITLAB_SECRET: unused
+    depends_on:
+      - mongodb
+
+  nginx:
+    image: registry.gitlab.com/openid/conformance-suite/nginx:release-v5.3.4
+    ports:
+      - "127.0.0.1:8443:8443"
+    depends_on:
+      - server
