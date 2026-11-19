@@ -34,6 +34,21 @@ export function suiteCertificate(): Promise<string> {
   return compose('exec', '-T', 'nginx', 'cat', '/etc/ssl/certs/nginx-selfsigned.crt');
 }
 
+/** The name the suite's server reaches this machine by: see `extra_hosts` in docker-compose.yml. */
+export const HOST_FROM_SUITE = 'host.docker.internal';
+
+/**
+ * The address that name has in the suite's server container: on Linux the
+ * Docker bridge's own address on this machine, so a listener bound to it is
+ * reachable from the containers and from nowhere outside the machine.
+ */
+export async function hostAddressFromSuite(): Promise<string> {
+  const line = await compose('exec', '-T', 'server', 'getent', 'hosts', HOST_FROM_SUITE);
+  const address = line.trim().split(/\s+/)[0];
+  if (!address) throw new Error(`The suite's container doesn't know ${HOST_FROM_SUITE}`);
+  return address;
+}
+
 /** What the suite's server printed, for the artifact of a run. */
 export function suiteLogs(): Promise<string> {
   return compose('logs', '--no-color', 'server');
