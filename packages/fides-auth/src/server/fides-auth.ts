@@ -755,6 +755,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         const tokens = await oidc.exchangeCode(publicUrl, {
           codeVerifier: transaction.codeVerifier,
           state: transaction.state,
+          nonce: transaction.nonce,
         });
         const session = await lifecycle.create(cookies, tokens, { requestedScope: transaction.scope });
 

@@ -78,6 +78,7 @@ describe('createAuthorizationRequest', () => {
       code_challenge: pkce.codeChallenge,
       code_challenge_method: 'S256',
       state: pkce.state,
+      nonce: pkce.nonce,
     });
   });
 
@@ -121,6 +122,7 @@ describe('createAuthorizationRequest — extra authorization parameters', () => 
       prompt: 'login',
       resource: 'https://api.example.com',
       state: pkce.state,
+      nonce: pkce.nonce,
       code_challenge: pkce.codeChallenge,
     });
   });
@@ -136,6 +138,57 @@ describe('createAuthorizationRequest — extra authorization parameters', () => 
       ui_locales: 'nb',
       login_hint: 'user@example.com',
     });
+  });
+
+  it('sends a nonce of its own for each login that asks for openid', async () => {
+    const first = await createAuthorizationRequest(ctx(oauthConfig));
+    const second = await createAuthorizationRequest(ctx(oauthConfig));
+
+    // 32 random bytes, base64url.
+    expect(first.nonce).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(first.parameters.nonce).toBe(first.nonce);
+    expect(second.nonce).not.toBe(first.nonce);
+    expect(first.nonce).not.toBe(first.state);
+    expect(first.nonce).not.toBe(first.codeVerifier);
+  });
+
+  it('sends a nonce when the scope is unset, since the default scope has openid', async () => {
+    const pkce = await createAuthorizationRequest(ctx({ ...oauthConfig, scope: undefined as never }));
+
+    expect(pkce.parameters.scope).toBe(defaultScope);
+    expect(pkce.parameters.nonce).toBe(pkce.nonce);
+    expect(pkce.nonce).toBeTruthy();
+  });
+
+  it.each([
+    ['a string', 'api:read api:write'],
+    ['a list', ['api:read', 'api:write']],
+    ['a scope that only contains the word', 'openid-connect myopenid'],
+  ])('sends no nonce without the openid scope, given as %s', async (_, scope) => {
+    const pkce = await createAuthorizationRequest(ctx({ ...oauthConfig, scope }));
+
+    // No ID token comes back, so nothing could carry it.
+    expect(pkce.nonce).toBeUndefined();
+    expect('nonce' in pkce).toBe(false);
+    expect('nonce' in pkce.parameters).toBe(false);
+  });
+
+  it('decides the nonce from the scope as sent, when an extra scope replaces the configured one', async () => {
+    const dropped = await createAuthorizationRequest(ctx(oauthConfig), { parameters: { scope: 'api:read' } });
+    expect(dropped.nonce).toBeUndefined();
+    expect('nonce' in dropped.parameters).toBe(false);
+
+    const added = await createAuthorizationRequest(ctx({ ...oauthConfig, scope: 'api:read' }), {
+      parameters: { scope: 'openid api:read' },
+    });
+    expect(added.parameters.nonce).toBe(added.nonce);
+    expect(added.nonce).toBeTruthy();
+  });
+
+  it("doesn't log the nonce", async () => {
+    const pkce = await createAuthorizationRequest(ctx(oauthConfig));
+
+    expect(JSON.stringify(logs)).not.toContain(pkce.nonce);
   });
 
   it('lets an extra scope replace the configured scope', async () => {

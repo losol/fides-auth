@@ -169,6 +169,7 @@ describe('authorizationUrl — extra parameters over PAR', () => {
       code_challenge: request.codeChallenge,
       code_challenge_method: 'S256',
       state: request.state,
+      nonce: request.nonce,
     });
   });
 });

@@ -1,6 +1,6 @@
 // pkce.ts
 //
-// PKCE (RFC 7636) and `state` primitives on Web Crypto. No imports, so it runs
+// PKCE (RFC 7636), `state` and `nonce` primitives on Web Crypto. No imports, so it runs
 // in Node, browsers and edge runtimes.
 
 /** A PKCE code verifier and its S256 code challenge. */
@@ -29,5 +29,10 @@ export async function createPkcePair(): Promise<PkcePair> {
 
 /** Creates a random `state` value (32 random bytes, base64url). */
 export function createState(): string {
+  return randomBase64url(32);
+}
+
+/** Creates a random `nonce` value (32 random bytes, base64url). */
+export function createNonce(): string {
   return randomBase64url(32);
 }

@@ -56,8 +56,8 @@ export interface OidcClient {
   metadata(): Promise<openid.ServerMetadata>;
 
   /**
-   * Creates the PKCE pair, state and parameters for one login. Keep the result
-   * on the server until the callback.
+   * Creates the PKCE pair, state, nonce and parameters for one login. Keep the
+   * result on the server until the callback.
    *
    * @throws TypeError if the config has no `redirectUri`.
    */
@@ -74,14 +74,16 @@ export interface OidcClient {
   silentLoginUrl(request: AuthorizationRequest, options?: SilentLoginUrlOptions): Promise<URL>;
 
   /**
-   * Exchanges the code on the callback URL for tokens. Checks `state` and PKCE
-   * against the request the login started with.
+   * Exchanges the code on the callback URL for tokens. Checks `state`, PKCE
+   * and the ID token's `nonce` against the request the login started with.
+   * Pass the request as `createAuthorizationRequest` returned it: when it has
+   * a `nonce` and the exchange isn't given it, the ID token is refused.
    *
    * @throws TypeError if the config has no `redirectUri`.
    */
   exchangeCode(
     callbackUrl: URL,
-    request: Pick<AuthorizationRequest, 'codeVerifier' | 'state'>,
+    request: Pick<AuthorizationRequest, 'codeVerifier' | 'state' | 'nonce'>,
   ): Promise<openid.TokenEndpointResponse>;
 
   /** Runs a refresh token grant. Sends no `scope`, so the granted scope is kept. */
@@ -180,7 +182,7 @@ export function createOidcClient(
     },
 
     exchangeCode: (callbackUrl, request) =>
-      calling(() => exchangeCode(context, callbackUrl, request.codeVerifier, request.state)),
+      calling(() => exchangeCode(context, callbackUrl, request.codeVerifier, request.state, request.nonce)),
 
     refresh: (refreshToken) => calling(() => refresh(context, refreshToken)),
 

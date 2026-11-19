@@ -284,6 +284,38 @@ describe('login transaction cookie', () => {
     expect((await readTransaction(store, 'st', secret, { logger: quiet }))?.scope).toBe('openid profile');
   });
 
+  it('keeps the nonce through seal and read, out of sight in the cookie', async () => {
+    const { store, jar } = memoryStore();
+    const transaction = createTransaction({ ...pkce('st'), nonce: 'nonce-for-st' }, { logger: quiet });
+    expect(transaction.nonce).toBe('nonce-for-st');
+
+    await persistTransaction(store, transaction, secret);
+
+    expect(jar.get(SLOT_0)).not.toContain('nonce-for-st');
+    expect((await readTransaction(store, 'st', secret, { logger: quiet }))?.nonce).toBe('nonce-for-st');
+  });
+
+  it('has no nonce for a login that sent none', async () => {
+    const { store } = memoryStore();
+    const transaction = createTransaction(pkce('st'), { logger: quiet });
+    expect('nonce' in transaction).toBe(false);
+
+    await persistTransaction(store, transaction, secret);
+
+    const read = await readTransaction(store, 'st', secret, { logger: quiet });
+    expect(read?.state).toBe('st');
+    expect(read?.nonce).toBeUndefined();
+  });
+
+  it('rejects a transaction whose nonce is not a string', async () => {
+    const { store } = memoryStore();
+    const transaction = { ...createTransaction(pkce('st'), { logger: quiet }), nonce: 7 as unknown as string };
+
+    await persistTransaction(store, transaction, secret);
+
+    expect(await readTransaction(store, 'st', secret, { logger: quiet })).toBeNull();
+  });
+
   it('still reads a transaction without a scope', async () => {
     const { store } = memoryStore();
     const transaction = createTransaction(pkce('st'), { logger: quiet });

@@ -37,6 +37,7 @@ export type OidcClientConfig = ClientAuthConfig & {
    * Extra authorization request parameters (e.g. `prompt`, `resource`), added by `createAuthorizationRequest`.
    * Reserved keys throw: `state`, `code_challenge`, `code_challenge_method`, `redirect_uri`,
    * `client_id`, `response_type`, `request`, `request_uri` and `nonce`.
+   * fides-auth sets `nonce` itself when the scope has `openid`.
    */
   authorizationParameters?: Record<string, string>;
   /**
