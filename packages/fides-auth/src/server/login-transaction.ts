@@ -36,6 +36,17 @@ const DEFAULT_MAX_AGE_MS = 10 * 60 * 1000;
 
 const KEY_INFO = 'fides-auth login-tx';
 
+/**
+ * What a transaction's key is derived for: the instance's audience, its
+ * provider and client. Two instances that share a secret and an origin, one
+ * for each of two providers, then can't finish each other's logins: without
+ * it, a provider could send the browser to the other instance's callback with
+ * a code of its choosing, and the transaction would open there.
+ */
+function keyInfo(audience: string): string {
+  return JSON.stringify([KEY_INFO, audience]);
+}
+
 export interface LoginTransaction {
   state: string;
   codeVerifier: string;
@@ -86,6 +97,13 @@ export interface CreateTransactionOptions {
 export interface TransactionCookieOptions {
   /** A Secure, `__Host-` prefixed cookie. Turn off only for plain-http development. @default true */
   secure?: boolean;
+  /**
+   * Who the login is for, e.g. the provider and the client. Part of the key
+   * the transaction is sealed with, so it opens only for an instance with the
+   * same audience.
+   * @default ''
+   */
+  audience?: string;
 }
 
 export interface ReadTransactionOptions extends TransactionCookieOptions {
@@ -129,9 +147,9 @@ export async function persistTransaction(
   cookies: CookieStore,
   transaction: LoginTransaction,
   secret: SessionSecrets,
-  { secure = true }: TransactionCookieOptions = {},
+  { secure = true, audience = '' }: TransactionCookieOptions = {},
 ): Promise<void> {
-  const keys = await transactionKeys(secret);
+  const keys = await transactionKeys(secret, audience);
   const [key] = keys;
   const slots = await readSlots(cookies, keys, secure);
   const free = slots.filter((candidate) => !candidate.transaction);
@@ -154,9 +172,9 @@ export async function readTransaction(
   cookies: CookieStore,
   state: string,
   secret: SessionSecrets,
-  { secure = true, logger }: ReadTransactionOptions,
+  { secure = true, audience = '', logger }: ReadTransactionOptions,
 ): Promise<LoginTransaction | null> {
-  const slots = await readSlots(cookies, await transactionKeys(secret), secure);
+  const slots = await readSlots(cookies, await transactionKeys(secret, audience), secure);
   const match = findSlot(slots, state);
   if (match) return match.transaction;
 
@@ -172,17 +190,17 @@ export async function clearTransaction(
   cookies: CookieStore,
   state: string,
   secret: SessionSecrets,
-  { secure = true }: TransactionCookieOptions = {},
+  { secure = true, audience = '' }: TransactionCookieOptions = {},
 ): Promise<void> {
-  const match = findSlot(await readSlots(cookies, await transactionKeys(secret), secure), state);
+  const match = findSlot(await readSlots(cookies, await transactionKeys(secret, audience), secure), state);
   if (!match) return;
   // With the attributes it was set with: a delete that isn't Secure is ignored for a __Host- cookie.
   await cookies.set(match.name, '', { ...defaultOAuthCookieOptions, secure, maxAge: 0 });
 }
 
 /** What the handlers use: Secure and `__Host-` unless the callback is plain http. */
-export function transactionCookieOptions(redirectUri: string): TransactionCookieOptions {
-  return { secure: !/^http:/i.test(redirectUri) };
+export function transactionCookieOptions(redirectUri: string, audience = ''): TransactionCookieOptions {
+  return { secure: !/^http:/i.test(redirectUri), audience };
 }
 
 /**
@@ -219,11 +237,16 @@ export function validateCallback(
 }
 
 /**
- * Keys of their own, so a transaction and a session never share one. The
- * first seals; a login started under an older secret still opens with its key.
+ * Keys of their own, so a transaction and a session never share one, and for
+ * this audience alone. The first seals; a login started under an older secret
+ * still opens with its key.
+ *
+ * A transaction sealed without an audience, as the versions before this did,
+ * doesn't open: read, it would let an instance finish a login that an older
+ * one started for another provider.
  */
-function transactionKeys(secret: SessionSecrets): Promise<[Uint8Array, ...Uint8Array[]]> {
-  return Promise.all(secretsOf(secret).map((one) => deriveKey(one, KEY_INFO))) as Promise<
+function transactionKeys(secret: SessionSecrets, audience: string): Promise<[Uint8Array, ...Uint8Array[]]> {
+  return Promise.all(secretsOf(secret).map((one) => deriveKey(one, keyInfo(audience)))) as Promise<
     [Uint8Array, ...Uint8Array[]]
   >;
 }

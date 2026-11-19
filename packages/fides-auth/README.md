@@ -842,10 +842,6 @@ working with bound tokens: call the API with `authorizedFetch`, or make the
 proof with `createDpopProof(tokens.dpopKey, { method, url, accessToken })`
 from `/oidc`.
 
-Turn `dpop` on only when every instance runs a version that has it: an older
-one reads a bound session's token as a bearer token. Roll the version out
-first, then the setting.
-
 A session's own `tokenType` decides how its token is sent, not the config: a
 session that was bound stays bound when `dpop` is turned off, and a bearer
 session stays one when it is turned on, until the user logs in again.
@@ -898,6 +894,10 @@ const auth = createFidesAuth({
 - **The code is bound to the DPoP key**: `createAuthorizationRequest` needs
   a `dpopKey` and sends its thumbprint as `dpop_jkt`. `createFidesAuth` does
   that by itself.
+- **Every token is bound.** `exchangeCode`, `refresh` and `userInfo` throw
+  without a `dpopKey`, the client credentials grant is not available,
+  `createSession` refuses a response that isn't DPoP-bound with its key, and
+  a bearer session from before the profile was turned on is not refreshed.
 - **The callback** must carry the `iss` parameter (RFC 9207). Without it the
   code is not sent to the token endpoint and the login fails as
   `login_failed`, whether or not the provider's metadata says it sends one.
@@ -1042,6 +1042,7 @@ const user = await vipps.getUserInfo(tokens.access_token, { expectedSubject: cla
 
 - **PKCE** — All OAuth flows use Proof Key for Code Exchange
 - **AES-256-GCM** — Sessions encrypted with authenticated encryption
+- **Bound logins** — A login under way is sealed for its provider and client too, so one instance can't finish a login another started
 - **Bound sessions** — A session is sealed for its provider and client, and in a store for its own key. Another instance with the same secret can't read it, and a stored record can't be moved to another key or sent as a cookie
 - **Open redirect protection** — Return paths are validated and kept on the app's origin
 - **Nonce** — A login sends a `nonce`, and the ID token must carry it

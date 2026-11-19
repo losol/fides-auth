@@ -3,6 +3,7 @@ import * as openid from 'openid-client';
 import type { DpopKey } from '../shared/types.js';
 import type { ProtocolContext } from './context.js';
 import { dpopHandle } from './dpop-grant.js';
+import { requireDpopKey } from './fapi-profile.js';
 
 /** Options for `OidcClient.userInfo`. */
 export interface UserInfoOptions {
@@ -28,6 +29,7 @@ export async function userInfo(
   accessToken: string,
   { expectedSubject, dpopKey }: UserInfoOptions,
 ): Promise<openid.UserInfoResponse> {
+  requireDpopKey(oauthConfig, dpopKey, 'userInfo');
   logger.debug(
     { issuer: oauthConfig.issuer, clientId: oauthConfig.clientId },
     'Fetching UserInfo',

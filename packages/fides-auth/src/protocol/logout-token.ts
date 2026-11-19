@@ -9,6 +9,17 @@ import { type JWTPayload, jwtVerify } from 'jose';
 
 import { DEFAULT_ALGORITHMS, type IdTokenExpectations, type RemoteJwks } from './id-token.js';
 
+/**
+ * How old a logout token may be, by its `iat`. A provider sends it the moment
+ * the user logs out, so an old one is a copy: a token with only a `sub` would
+ * otherwise end sessions the user has started since, for as long as its `exp`
+ * allows.
+ */
+const MAX_AGE_SECONDS = 300;
+
+/** What the clocks of the provider and this server may differ by. */
+const CLOCK_TOLERANCE_SECONDS = 30;
+
 /** The member of `events` that makes a JWT a logout token (§2.4). */
 export const BACK_CHANNEL_LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout';
 
@@ -83,6 +94,8 @@ export async function verifyLogoutTokenWith(
       algorithms: options.algorithms ?? DEFAULT_ALGORITHMS,
       // §2.4 requires all four. jose checks `exp` only when it is there.
       requiredClaims: ['iss', 'aud', 'iat', 'exp', 'jti'],
+      maxTokenAge: MAX_AGE_SECONDS,
+      clockTolerance: CLOCK_TOLERANCE_SECONDS,
     });
     payload = verified.payload;
     typ = verified.protectedHeader.typ;

@@ -140,9 +140,29 @@ describe('login transaction cookie', () => {
   });
 
   it('derives the handlers\' cookie options from the redirect_uri', () => {
-    expect(transactionCookieOptions('https://app.test/cb')).toEqual({ secure: true });
-    expect(transactionCookieOptions('http://localhost:3000/cb')).toEqual({ secure: false });
-    expect(transactionCookieOptions('HTTP://dev.test/cb')).toEqual({ secure: false });
+    expect(transactionCookieOptions('https://app.test/cb')).toEqual({ secure: true, audience: '' });
+    expect(transactionCookieOptions('http://localhost:3000/cb')).toEqual({ secure: false, audience: '' });
+    expect(transactionCookieOptions('HTTP://dev.test/cb', 'idp and client')).toEqual({
+      secure: false,
+      audience: 'idp and client',
+    });
+  });
+
+  it('opens only for the audience it was sealed for', async () => {
+    const { store } = memoryStore();
+    const transaction = createTransaction(pkce('st'), { logger: quiet });
+
+    await persistTransaction(store, transaction, secret, { audience: 'provider A, client 1' });
+
+    expect((await readTransaction(store, 'st', secret, { audience: 'provider A, client 1', logger: quiet }))?.state).toBe('st');
+    // Another provider, another client, or no audience at all: the login is not theirs to finish.
+    for (const audience of ['provider B, client 1', 'provider A, client 2', '']) {
+      expect(await readTransaction(store, 'st', secret, { audience, logger: quiet })).toBeNull();
+    }
+    expect(await readTransaction(store, 'st', secret, { logger: quiet })).toBeNull();
+    // Nor can another audience clear it.
+    await clearTransaction(store, 'st', secret, { audience: 'provider B, client 1' });
+    expect(await readTransaction(store, 'st', secret, { audience: 'provider A, client 1', logger: quiet })).not.toBeNull();
   });
 
   it('ignores an unprefixed cookie when secure, so a subdomain cannot plant one', async () => {

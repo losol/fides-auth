@@ -3,7 +3,7 @@ import * as openid from 'openid-client';
 import type { DpopKey } from '../shared/types.js';
 import type { ProtocolContext } from './context.js';
 import { assertBound, dpopHandle } from './dpop-grant.js';
-import { checkIdTokenAlgorithm } from './fapi-profile.js';
+import { checkIdTokenAlgorithm, requireDpopKey } from './fapi-profile.js';
 import { getOAuthErrorLogContext } from './logging.js';
 
 /**
@@ -21,6 +21,7 @@ export async function refresh(
   refreshToken: string,
   dpopKey?: DpopKey,
 ): Promise<openid.TokenEndpointResponse> {
+  requireDpopKey(oAuthConfig, dpopKey, 'refresh');
   logger.debug({ issuer: oAuthConfig.issuer }, 'Starting token refresh');
 
   try {

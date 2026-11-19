@@ -606,6 +606,9 @@ export function createFidesAuth<TData = Record<string, unknown>>(
     fetch: loggers.create({ namespace: 'fides-auth:server:authorized-fetch' }),
   };
   const oidc = createOidcClient(oauthConfig, { logger: loggers });
+  // Read once: changing the caller's object later doesn't turn a protection off.
+  const dpopOn = oauthConfig.dpop === true;
+  const fapi2 = oauthConfig.profile === 'fapi2';
   // The nonce each API asked for last. The instance's own: two instances share nothing.
   const dpopNonces: DpopNonces = new Map();
 
@@ -613,7 +616,11 @@ export function createFidesAuth<TData = Record<string, unknown>>(
   function resolveSettings() {
     const redirectUri = redirectUriOf(oauthConfig);
     const applicationUrl = config.applicationUrl ?? new URL(redirectUri).origin;
-    const txCookie = transactionCookieOptions(redirectUri);
+    // A session, and a login on its way to one, is for this provider and this
+    // client. Another instance that shares the secret, for another of either,
+    // can neither read the session nor finish the login.
+    const audience = JSON.stringify([issuerForKey(oauthConfig.issuer), oauthConfig.clientId]);
+    const txCookie = transactionCookieOptions(redirectUri, audience);
     const secure = txCookie.secure !== false;
     return {
       applicationUrl,
@@ -626,7 +633,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         secret,
         // A session is for this provider and this client. Another instance
         // that shares the secret, for another of either, can't read it.
-        audience: JSON.stringify([issuerForKey(oauthConfig.issuer), oauthConfig.clientId]),
+        audience,
         sessionDurationSeconds,
         rolesClaim: config.rolesClaim,
         // The lifecycle doesn't know what `data` holds; the type is the app's own.
@@ -634,6 +641,10 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         mapRefresh: config.mapRefresh as MapRecordSession | undefined,
         storeFields: config.storeFields as ((session: Session) => StoreFields) | undefined,
         refreshGraceSeconds,
+        // Under the profile every session's tokens are bound, however the session was started.
+        requireBoundTokens: fapi2,
+        // Tokens a refresh got for a session that had ended meanwhile: nobody holds them.
+        onTokensDropped: (dropped) => revokeRefreshToken(dropped, log.logout),
         // Tokens bound with DPoP are refreshed with a proof from their key.
         refreshTokens: (refreshToken, tokens) =>
           tokens.dpopKey ? oidc.refresh(refreshToken, { dpopKey: tokens.dpopKey }) : oidc.refresh(refreshToken),
@@ -769,7 +780,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         // A key of its own for each login, so one session's tokens are of no
         // use in another. It exists before the redirect, so the provider can
         // bind the code to it (`dpop_jkt`) and only this login can exchange it.
-        const dpopKey = oauthConfig.dpop ? await oidc.createDpopKey() : undefined;
+        const dpopKey = dpopOn ? await oidc.createDpopKey() : undefined;
         const authRequest = await oidc.createAuthorizationRequest({
           parameters: options.authorizationParameters,
           ...(dpopKey ? { dpopKey } : {}),
@@ -845,7 +856,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         // The key the code was bound to. A login that was started before the
         // key was made at the redirect has none, and gets one here.
         const dpopKey =
-          transaction.dpopKey ?? (oauthConfig.dpop ? await oidc.createDpopKey() : undefined);
+          transaction.dpopKey ?? (dpopOn ? await oidc.createDpopKey() : undefined);
         const tokens = await oidc.exchangeCode(
           publicUrl,
           { codeVerifier: transaction.codeVerifier, state: transaction.state, nonce: transaction.nonce },

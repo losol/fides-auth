@@ -14,7 +14,7 @@ export interface ClientCredentialsOptions {
  * Runs a client credentials grant against the discovered token endpoint, with
  * the client's own credentials. Used by `OidcClient.clientCredentials`.
  *
- * @throws TypeError if the client is public (`clientAuth: 'none'`).
+ * @throws TypeError if the client is public (`clientAuth: 'none'`), or under `profile: 'fapi2'`.
  */
 export async function clientCredentials(
   { config, configuration, logger }: ProtocolContext,
@@ -22,6 +22,12 @@ export async function clientCredentials(
 ): Promise<openid.TokenEndpointResponse> {
   if (config.clientAuth === 'none') {
     throw new TypeError("The client credentials grant needs client authentication, not clientAuth 'none'");
+  }
+  if (config.profile === 'fapi2') {
+    // This grant has no DPoP here yet, so its tokens would be bearer tokens.
+    throw new TypeError(
+      "profile 'fapi2': the client credentials grant is not available, since its tokens would not be bound",
+    );
   }
 
   let tokenEndpoint: string | undefined;
