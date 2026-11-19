@@ -1,5 +1,28 @@
 # @eventuras/fides-auth
 
+## 1.0.0-beta.11
+
+### Minor Changes
+
+- 6630716: Fixes from a second security review.
+  
+  A login under way is now sealed for its provider and client, as a session already was. Two instances that share a secret and an origin, one for each of two providers, could finish each other's logins: provider B could send the browser to A's callback with a code of its choosing, and A would take B's login transaction for its own and sign the user in as whoever the code was for. The transaction's key now has the instance's audience in it, and a login sealed by an earlier beta is not read: one that is under way during the upgrade ends as `login_expired`, and the user starts it again.
+  
+  `profile: 'fapi2'` now holds on every path, not only the login the handlers run. `exchangeCode`, `refresh` and `userInfo` throw without a `dpopKey`, `clientCredentials` throws, `createSession` refuses a token response that isn't DPoP-bound with its key, and a bearer session from before the profile was turned on is not refreshed.
+  
+  The tokens of a refresh that finds its session ended meanwhile, by a logout on another instance say, are revoked instead of dropped: they were good at the provider with nobody holding them. So are the tokens of a refresh the store never took, when the session is then ended with `endUserSessions` or a back-channel logout.
+  
+  A logout token whose `iat` is more than five minutes old is refused, whatever its `exp`, with 30 seconds allowed for clocks that differ.
+  
+  `dpop` and `profile` are read when the instance is created. Changing the config object afterwards doesn't turn either off.
+
+### Patch Changes
+
+- 936e20b: A back-channel logout token must be signed with the algorithm of the ID token the session was started with. A provider signs both the same way for one client (OpenID Connect Back-Channel Logout 1.0 §2.6), and until now a token signed with any asymmetric algorithm by one of the provider's keys was taken. A token that names a session and has another algorithm is answered with 400 and the session is left as it is. Found by the OpenID conformance suite's back-channel logout plan.
+  
+  `oidc.verifyLogoutToken` returns the token's `alg`.
+- 327a3cc: An ID token that is not signed, with `alg: "none"`, is refused at the code exchange and at a refresh, whatever the provider's metadata lists. openid-client checks an ID token's `alg` against the provider's `id_token_signing_alg_values_supported`, so a provider that listed `none` there had an unsigned ID token taken. The login then fails as `login_failed`, and a refresh as `idp_error`. Found by the OpenID conformance suite's basic client plan.
+
 ## 1.0.0-beta.10
 
 ### Minor Changes
