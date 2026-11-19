@@ -3,7 +3,7 @@
  * with real keys signs logout tokens, and the handler verifies them with the
  * real OIDC client against a JWKS that a stubbed fetch serves.
  */
-import { exportJWK, generateKeyPair, type JWK, SignJWT, UnsecuredJWT } from 'jose';
+import { exportJWK, generateKeyPair, type JWK, SignJWT } from 'jose';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FidesLoggerFactory } from '../shared/logger.js';
@@ -112,6 +112,8 @@ async function signIn(
   sub: string,
   sid: string | undefined,
   iss = ISSUER,
+  /** The algorithm of the session's ID token, or null for a session without one. */
+  idTokenAlg: string | null = 'RS256',
 ): Promise<CookieStore> {
   const cookies = browser();
   await auth.createSession(cookies, {
@@ -119,10 +121,18 @@ async function signIn(
     token_type: 'bearer',
     expires_in: 300,
     refresh_token: `refresh-${sub}-${sid}`,
-    // Decoded, not verified: as it comes from the code exchange.
-    id_token: new UnsecuredJWT({ iss, sub, ...(sid ? { sid } : {}) }).encode(),
+    // Decoded, not verified: as it comes from the code exchange. Its header
+    // names the algorithm the provider signs this client's tokens with.
+    ...(idTokenAlg === null ? {} : { id_token: idTokenWith({ iss, sub, ...(sid ? { sid } : {}) }, idTokenAlg) }),
   });
   return cookies;
+}
+
+const b64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+
+/** An ID token as the token endpoint returns it, signed with `alg` as far as its header says. */
+function idTokenWith(claims: Record<string, unknown>, alg: string): string {
+  return `${b64({ alg, typ: 'JWT' })}.${b64(claims)}.c2lnbmF0dXJl`;
 }
 
 interface TokenOptions {
@@ -311,6 +321,35 @@ describe('handleBackChannelLogout', () => {
 
     expect(response.status).toBe(200);
     expect(await auth.readSession(cookies)).toBeNull();
+  });
+
+  it("refuses a token signed with another algorithm than the session's ID token, though the key is the provider's", async () => {
+    const { auth, events } = setup();
+    // The provider signs this client's ID tokens with ES256. The logout token is RS256.
+    const cookies = await signIn(auth, 'ada', 'idp-1', ISSUER, 'ES256');
+
+    const response = await auth.handleBackChannelLogout(posted(await logoutToken({ claims: { sub: 'ada', sid: 'idp-1' } })));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid_request' });
+    expect(await auth.readSession(cookies)).not.toBeNull();
+    expect(revoked).toEqual([]);
+    expect(events.some((event) => event.event === 'session.cleared')).toBe(false);
+    expect(logged.some(({ level, args }) => level === 'warn' && JSON.stringify(args).includes('another algorithm'))).toBe(true);
+  });
+
+  it('ends the sessions whose ID token has the algorithm of the logout token, and leaves the others', async () => {
+    const { auth } = setup();
+    const same = await signIn(auth, 'ada', 'idp-1', ISSUER, 'RS256');
+    const other = await signIn(auth, 'ada', 'idp-2', ISSUER, 'ES256');
+
+    const response = await auth.handleBackChannelLogout(posted(await logoutToken({ claims: { sub: 'ada' } })));
+
+    // Something was ended on the token's word, so it is answered as done.
+    expect(response.status).toBe(200);
+    expect(await auth.readSession(same)).toBeNull();
+    expect(await auth.readSession(other)).not.toBeNull();
+    expect(revoked).toEqual(['refresh-ada-idp-1']);
   });
 
   it('answers 405 to anything but a POST', async () => {

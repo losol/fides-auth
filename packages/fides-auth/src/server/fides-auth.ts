@@ -29,6 +29,7 @@ import { getOAuthErrorLogContext } from '../protocol/logging.js';
 import { LogoutTokenError } from '../protocol/logout-token.js';
 import {
   checkSessionDuration,
+  idTokenAlgorithmOf,
   type MapRecordSession,
   type SessionRecord,
   tokenStatusOf,
@@ -1033,7 +1034,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         return logoutRefused('invalid_request');
       }
 
-      let named: { iss: string; sub?: string; sid?: string; jti: string };
+      let named: { iss: string; sub?: string; sid?: string; jti: string; alg: string };
       try {
         named = await oidc.verifyLogoutToken(logoutToken);
       } catch (error) {
@@ -1051,12 +1052,26 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       }
 
       let ended: SessionRecord[];
+      // Sessions the token names but may not end: see `accept` below.
+      let refused = 0;
       try {
         // With a `sid` only that session, which must also be the `sub`'s when
         // both are given. With a `sub` alone, every session of the user.
         ended = await settings().lifecycle.endMatching(
           { iss: named.iss, sub: named.sub, sid: named.sid },
-          { trigger: 'back_channel_logout' },
+          {
+            trigger: 'back_channel_logout',
+            // A logout token is signed as the client's ID tokens are (§2.6).
+            // The algorithm of the ID token a session was started with is the
+            // one the provider uses for this client, so a logout token with
+            // another doesn't end that session.
+            accept: (record) => {
+              const expected = idTokenAlgorithmOf(record);
+              if (expected === undefined || expected === named.alg) return true;
+              refused += 1;
+              return false;
+            },
+          },
         );
       } catch (error) {
         log.backChannel.error(
@@ -1064,6 +1079,14 @@ export function createFidesAuth<TData = Record<string, unknown>>(
           'Could not end the sessions; the provider may try again',
         );
         return logoutRefused('server_error');
+      }
+      if (refused > 0) {
+        log.backChannel.warn(
+          { jti: named.jti, alg: named.alg, sessions: refused },
+          "Logout token signed with another algorithm than the session's ID token; the session is left as it is",
+        );
+        // Nothing was ended on the token's word: it is refused, as one with a wrong signature is.
+        if (ended.length === 0) return logoutRefused('invalid_request');
       }
       for (const record of ended) await revokeRefreshToken(record, log.backChannel);
       log.backChannel.info({ jti: named.jti, sessions: ended.length }, 'Back-channel logout');
