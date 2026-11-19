@@ -114,7 +114,7 @@ const oidc = createOidcClient(oauthConfig, { logger, discoveryTtlMs });
 | `buildPKCEOptions(config, options)` | `oidc.createAuthorizationRequest(options)`. The fields are `codeVerifier`, `codeChallenge`, `state` and `parameters` |
 | `buildAuthorizationUrl`, `buildAuthorizationUrlWithPAR`, `discoverAndBuildAuthorizationUrl` | `oidc.authorizationUrl(request)`, through PAR when `usePar` is set |
 | `buildSilentLoginUrl(config, options)` | `oidc.silentLoginUrl(request, options)`, with a request from `createAuthorizationRequest` |
-| `exchangeAuthorizationCode(config, callbackUrl, codeVerifier, state)` | `oidc.exchangeCode(callbackUrl, { codeVerifier, state })` |
+| `exchangeAuthorizationCode(config, callbackUrl, codeVerifier, state)` | `oidc.exchangeCode(callbackUrl, request)`, with the request from `createAuthorizationRequest`: it carries the `nonce` the ID token is checked against |
 | `refreshAccessToken(config, refreshToken)` | `oidc.refresh(refreshToken)` |
 | `clientCredentialsGrant({ tokenEndpoint, clientId, … })` | `oidc.clientCredentials({ scope })`. Without discovery, set `serverMetadata: { issuer, token_endpoint }` |
 | `buildOidcLogoutUrl(config, options)` | `oidc.logoutUrl(options)`. No string shorthand |
@@ -134,7 +134,7 @@ underneath. `getUserInfo(accessToken, { expectedSubject })` takes the ID token's
 |---|---|
 | `buildPKCEOptions(options)` | `createAuthorizationRequest(options)` |
 | `buildAuthorizationUrl(pkce)` | `authorizationUrl(request)` |
-| `exchangeCodeForTokens(callbackUrl, codeVerifier, state)` | `exchangeCode(callbackUrl, { codeVerifier, state })` |
+| `exchangeCodeForTokens(callbackUrl, codeVerifier, state)` | `exchangeCode(callbackUrl, request)`, with the request from `createAuthorizationRequest` |
 | `refreshTokens(refreshToken)` | `refresh(refreshToken)` |
 
 ## Browser and React
