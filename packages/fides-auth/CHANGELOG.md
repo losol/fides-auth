@@ -1,5 +1,44 @@
 # @eventuras/fides-auth
 
+## 1.0.0-beta.10
+
+### Minor Changes
+
+- f510999: `handleBackChannelLogout` lets the provider end a user's sessions: OpenID Connect Back-Channel Logout 1.0. Register its route as the client's `backchannel_logout_uri`. The provider posts a signed logout token there when the user logs out with it, or when an administrator ends their session, and the handler ends the sessions the token names, the one with its `sid` or else all of its `sub`, and revokes their refresh tokens, as `endUserSessions` does. It answers 200 when they are ended, also when there were none, and 400 when the token is refused or the store failed.
+  
+  It needs a `sessionStore` with `findMatching`, and throws a `TypeError` without one rather than tell the provider that it logged anyone out: a session kept in cookies can't be ended from the server.
+  
+  `oidc.verifyLogoutToken(logoutToken)` is the check on its own, for an app that ends its sessions another way. It verifies the signature, `iss`, `aud`, `iat`, `exp` and `jti`, that the token has a `sub` or a `sid` and the back-channel logout event, and that it has no `nonce`. It throws a `LogoutTokenError` with a `reason`.
+  
+  A session ended this way is a `session.cleared` event with the new `trigger: "back_channel_logout"`. Code that switches over the triggers gets one more.
+- 49f587f: With `dpop: true`, the authorization code is now bound to the DPoP key too (`dpop_jkt`, RFC 9449 §10). The key is made when the login starts instead of at the callback, its thumbprint goes in the authorization request, through PAR when `usePar` is set, and the key is sealed in the login transaction cookie next to the PKCE verifier. A provider that supports `dpop_jkt` then issues a code only that key can exchange, so a code that leaks is of no use to anyone else. A provider that doesn't ignores the parameter. A login that was started before the upgrade has no key in its transaction and gets one at the callback, as before.
+  
+  On the OIDC client, `createAuthorizationRequest({ dpopKey })` sends the thumbprint; pass the same key to `exchangeCode`. `dpop_jkt` is now a reserved authorization parameter. With `profile: 'fapi2'`, `createAuthorizationRequest` throws without a `dpopKey`; `createFidesAuth` passes one by itself.
+- 1b9c8f0: DPoP (RFC 9449): with `dpop: true` in `oauthConfig`, the tokens of a login are bound to a key that never leaves the server, so an access token that leaks is of no use without it. The callback makes a P-256 key for each session and sends a proof with the code exchange; the key is kept with the tokens, sealed in the session. A refresh carries a proof from the same key, and `authorizedFetch` sends the token as `Authorization: DPoP` with a proof for that method, URL and token, answering an API's `DPoP-Nonce` by asking once more. A provider that answers with a bearer token fails the login, so turn it on only where the provider supports DPoP.
+  
+  Roll this version out to every instance before turning `dpop` on: an earlier beta reads a bound session's token as a bearer token.
+  
+  Code that sets `Authorization: Bearer` itself from `getTokens` must move to `authorizedFetch` before it turns `dpop` on, or make the proof with `createDpopProof` from `/oidc`.
+  
+  On the OIDC client: `createDpopKey()`, and a `dpopKey` option on `exchangeCode`, `refresh` and `userInfo`. A response that isn't bound throws a `DpopError`, after its tokens are revoked where the provider has a revocation endpoint. `AuthorizedFetchError.bearerError` now also reads the `error` of a `DPoP` challenge. `/oidc` also exports `createDpopProof` and `dpopThumbprint`.
+  
+  `Tokens` has two new optional fields, `tokenType` and `dpopKey`. A session with bearer tokens has neither and is sealed as before. A session whose `tokenType` this version doesn't know, as a later version may write, is never sent as a bearer token and never refreshed: `authorizedFetch` throws `unsupported_token_type`, `refreshSession` answers with that reason, the heartbeat answers 503, and the session is left as it is. `createSession` takes a `dpopKey` for tokens that were bound outside the handlers.
+- 1b9c8f0: A FAPI 2.0 profile: `profile: 'fapi2'` in the OIDC config enforces what the FAPI 2.0 Security Profile asks of a client, so a config that falls short throws instead of running as something weaker. Creating the client, with `createOidcClient` or `createFidesAuth`, throws a `TypeError` naming every requirement that isn't met: `clientAuth` must be `private_key_jwt`, `usePar` and `dpop` must be true, `allowInsecureRequests` must not be set, and the private key must not be an RS256 key.
+  
+  With the profile, `verifyIdToken` and `verifyLogoutToken` accept only `PS256`, `ES256` and `EdDSA`, and an `algorithms` option with anything else throws a `TypeError`. A token response whose ID token is signed with another algorithm is refused at the code exchange and at a refresh. `exchangeCode` refuses a callback without the `iss` parameter (RFC 9207) before the code is sent to the token endpoint, whatever the provider's metadata says of it.
+  
+  It is not a certification, and the provider must follow FAPI 2.0 too. mTLS, `dpop_jkt` and FAPI 2.0 Message Signing (JAR, JARM) are not implemented. Without `profile`, nothing changes.
+- aaec2de: A login now sends a `nonce`, and the callback takes the ID token only when it carries it. PKCE and `state` already tie the code to the browser that started the login; the nonce ties the ID token itself to that login, so one issued for another login is refused even where the provider's PKCE check fails. The nonce is 32 random bytes, sealed in the login transaction cookie with the verifier. It is sent when the scope has `openid`, and with it the token response must have an ID token.
+  
+  With `createFidesAuth` there is nothing to change. A login that was started before the upgrade and finishes after it sent no nonce and is checked for none.
+  
+  With the OIDC client on its own, `createAuthorizationRequest` returns the `nonce` and puts it in `parameters`, and `exchangeCode` reads it from the request. Pass `exchangeCode` the request as it was returned, or its `nonce` along with `codeVerifier` and `state`: without it the provider's ID token carries a nonce the exchange doesn't expect, and is refused. `nonce` stays a reserved authorization parameter.
+- f510999: `strictOriginCheck: true` makes logout and the heartbeat refuse a request that has neither `Sec-Fetch-Site` nor `Origin`. Such a request isn't a browser's, so it has passed the CSRF guard, and still does by default: a script or a server of the app's own can call the two. Every browser in use sends one of the headers on a POST, so an app that only browsers call can turn it on and refuse the rest with 403.
+
+### Patch Changes
+
+- acbcdef: The same secret listed twice in `secret` counts once. A config that always passes a current and a previous secret has the same value in both between two changes, and that now costs nothing: before, each key was derived and each search for a user's sessions was made twice. It is logged once as a warning when the instance starts to work, since a list like that is also what a change of secret that didn't happen looks like. The same bytes written as hex in another case, or as a `Uint8Array`, are the same secret.
+
 ## 1.0.0-beta.9
 
 ### Minor Changes

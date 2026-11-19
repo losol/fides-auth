@@ -1,5 +1,37 @@
 # @eventuras/fides-auth-next
 
+## 1.0.0-beta.10
+
+### Minor Changes
+
+- f510999: `handleBackChannelLogout` lets the provider end a user's sessions: OpenID Connect Back-Channel Logout 1.0. Register its route as the client's `backchannel_logout_uri`. The provider posts a signed logout token there when the user logs out with it, or when an administrator ends their session, and the handler ends the sessions the token names, the one with its `sid` or else all of its `sub`, and revokes their refresh tokens, as `endUserSessions` does. It answers 200 when they are ended, also when there were none, and 400 when the token is refused or the store failed.
+  
+  It needs a `sessionStore` with `findMatching`, and throws a `TypeError` without one rather than tell the provider that it logged anyone out: a session kept in cookies can't be ended from the server.
+  
+  `oidc.verifyLogoutToken(logoutToken)` is the check on its own, for an app that ends its sessions another way. It verifies the signature, `iss`, `aud`, `iat`, `exp` and `jti`, that the token has a `sub` or a `sid` and the back-channel logout event, and that it has no `nonce`. It throws a `LogoutTokenError` with a `reason`.
+  
+  A session ended this way is a `session.cleared` event with the new `trigger: "back_channel_logout"`. Code that switches over the triggers gets one more.
+- 1b9c8f0: DPoP (RFC 9449): with `dpop: true` in `oauthConfig`, the tokens of a login are bound to a key that never leaves the server, so an access token that leaks is of no use without it. The callback makes a P-256 key for each session and sends a proof with the code exchange; the key is kept with the tokens, sealed in the session. A refresh carries a proof from the same key, and `authorizedFetch` sends the token as `Authorization: DPoP` with a proof for that method, URL and token, answering an API's `DPoP-Nonce` by asking once more. A provider that answers with a bearer token fails the login, so turn it on only where the provider supports DPoP.
+  
+  Roll this version out to every instance before turning `dpop` on: an earlier beta reads a bound session's token as a bearer token.
+  
+  Code that sets `Authorization: Bearer` itself from `getTokens` must move to `authorizedFetch` before it turns `dpop` on, or make the proof with `createDpopProof` from `/oidc`.
+  
+  On the OIDC client: `createDpopKey()`, and a `dpopKey` option on `exchangeCode`, `refresh` and `userInfo`. A response that isn't bound throws a `DpopError`, after its tokens are revoked where the provider has a revocation endpoint. `AuthorizedFetchError.bearerError` now also reads the `error` of a `DPoP` challenge. `/oidc` also exports `createDpopProof` and `dpopThumbprint`.
+  
+  `Tokens` has two new optional fields, `tokenType` and `dpopKey`. A session with bearer tokens has neither and is sealed as before. A session whose `tokenType` this version doesn't know, as a later version may write, is never sent as a bearer token and never refreshed: `authorizedFetch` throws `unsupported_token_type`, `refreshSession` answers with that reason, the heartbeat answers 503, and the session is left as it is. `createSession` takes a `dpopKey` for tokens that were bound outside the handlers.
+
+### Patch Changes
+
+- Updated dependencies [f510999]
+- Updated dependencies [acbcdef]
+- Updated dependencies [49f587f]
+- Updated dependencies [1b9c8f0]
+- Updated dependencies [1b9c8f0]
+- Updated dependencies [aaec2de]
+- Updated dependencies [f510999]
+  - @eventuras/fides-auth@1.0.0-beta.10
+
 ## 1.0.0-beta.9
 
 ### Patch Changes
