@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
   - "config/*"
+  - "interop"
 allowBuilds:
   '@swc/core': true
   sharp: true
