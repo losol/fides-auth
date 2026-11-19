@@ -4,7 +4,7 @@
 
 Fixes from a second security review.
 
-A login under way is now sealed for its provider and client, as a session already was. Two instances that share a secret and an origin, one for each of two providers, could finish each other's logins: provider B could send the browser to A's callback with a code of its choosing, and A would take B's login transaction for its own and sign the user in as whoever the code was for. The transaction's key now has the instance's audience in it. A login that an earlier version started still opens, so one that is under way during an upgrade finishes; until every instance is upgraded, an older one's logins can still be finished by another.
+A login under way is now sealed for its provider and client, as a session already was. Two instances that share a secret and an origin, one for each of two providers, could finish each other's logins: provider B could send the browser to A's callback with a code of its choosing, and A would take B's login transaction for its own and sign the user in as whoever the code was for. The transaction's key now has the instance's audience in it, and a login sealed by an earlier beta is not read: one that is under way during the upgrade ends as `login_expired`, and the user starts it again.
 
 `profile: 'fapi2'` now holds on every path, not only the login the handlers run. `exchangeCode`, `refresh` and `userInfo` throw without a `dpopKey`, `clientCredentials` throws, `createSession` refuses a token response that isn't DPoP-bound with its key, and a bearer session from before the profile was turned on is not refreshed.
 

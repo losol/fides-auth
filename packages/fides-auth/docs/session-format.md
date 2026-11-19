@@ -142,11 +142,11 @@ session.
 The key's info is `["fides-auth login-tx", audience]`, with the same audience
 as a session's: the provider and the client. An instance for another
 provider, with the same secret on the same origin, can't finish the login.
-The versions before this sealed with the info `fides-auth login-tx` alone.
-Such a login still opens, so one that is under way during an upgrade
-finishes; nothing is sealed that way any more. Until every instance runs a
-version that seals for its audience, an older one's logins can still be
-finished by another instance.
+
+The betas up to 1.0.0-beta.10 sealed with the info `fides-auth login-tx`
+alone. Such a login is not read any more: a login that is under way while an
+app is upgraded from one of them ends as `login_expired`, and the user starts
+it again.
 
 ## In a test
 

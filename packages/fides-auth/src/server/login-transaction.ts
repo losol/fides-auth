@@ -237,24 +237,18 @@ export function validateCallback(
 }
 
 /**
- * Keys of their own, so a transaction and a session never share one. The
- * first seals; a login started under an older secret still opens with its key.
+ * Keys of their own, so a transaction and a session never share one, and for
+ * this audience alone. The first seals; a login started under an older secret
+ * still opens with its key.
  *
- * After the keys for this audience come the ones without an audience, which
- * the versions before it sealed with. They only open: a login that was under
- * way when the app was upgraded still finishes. Nothing is sealed with them
- * any more, and without the secret nobody can make such a transaction, so
- * once every instance runs a version that seals for its audience there are
- * none left to take.
+ * A transaction sealed without an audience, as the versions before this did,
+ * doesn't open: read, it would let an instance finish a login that an older
+ * one started for another provider.
  */
-async function transactionKeys(
-  secret: SessionSecrets,
-  audience: string,
-): Promise<[Uint8Array, ...Uint8Array[]]> {
-  const secrets = secretsOf(secret);
-  const own = await Promise.all(secrets.map((one) => deriveKey(one, keyInfo(audience))));
-  const before = await Promise.all(secrets.map((one) => deriveKey(one, KEY_INFO)));
-  return [...own, ...before] as [Uint8Array, ...Uint8Array[]];
+function transactionKeys(secret: SessionSecrets, audience: string): Promise<[Uint8Array, ...Uint8Array[]]> {
+  return Promise.all(secretsOf(secret).map((one) => deriveKey(one, keyInfo(audience)))) as Promise<
+    [Uint8Array, ...Uint8Array[]]
+  >;
 }
 
 interface Slot {
