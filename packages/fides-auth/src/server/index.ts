@@ -23,6 +23,7 @@ export {
 export type { RolesClaim } from '../session/user-claims.js';
 export { SessionSecretError, type SessionSecret, type SessionSecrets } from './session-secret.js';
 export { AuthorizedFetchError, type AuthorizedFetchErrorReason } from './authorized-fetch.js';
+export type { DpopKey } from '../shared/types.js';
 
 export {
   createMemorySessionStore,

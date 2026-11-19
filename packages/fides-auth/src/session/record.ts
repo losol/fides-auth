@@ -7,8 +7,9 @@
 
 import { decodeJwt, type JWTPayload } from 'jose';
 
+import { isDpopKey } from '../shared/dpop-key.js';
 import { newSessionId } from '../shared/session-events.js';
-import type { Session, SessionUser, Tokens, TokenResponse, TokenStatus } from '../shared/types.js';
+import type { DpopKey, Session, SessionUser, Tokens, TokenResponse, TokenStatus } from '../shared/types.js';
 import { rolesFromClaims, type RolesClaim } from './user-claims.js';
 import { createEncryptedJWT, decryptJWT } from './utils.js';
 
@@ -40,6 +41,8 @@ export interface CreateRecordOptions {
    * which RFC 6749 §5.1 allows only when the two are identical.
    */
   requestedScope?: string;
+  /** The key the tokens were bound to with DPoP at the code exchange. */
+  dpopKey?: DpopKey;
   /** Milliseconds since the epoch. */
   now?: number;
 }
@@ -71,6 +74,34 @@ function lifetimeOf(
     accessTokenExpiresAt: new Date(now + tokens.expires_in * 1000).toISOString(),
     accessTokenIssuedAt: new Date(now).toISOString(),
   };
+}
+
+/**
+ * How the tokens of a response are presented, for the record: nothing for a
+ * bearer token, which is what a record without a type holds, and otherwise
+ * the type with its key. A key is kept only with a `dpop` token.
+ */
+function presentationOf(
+  tokens: TokenResponse,
+  dpopKey: DpopKey | undefined,
+): Pick<Tokens, 'tokenType' | 'dpopKey'> {
+  const type = typeof tokens.token_type === 'string' ? tokens.token_type.toLowerCase() : 'bearer';
+  if (type === 'bearer') return { tokenType: undefined, dpopKey: undefined };
+  return { tokenType: type, dpopKey: type === 'dpop' ? dpopKey : undefined };
+}
+
+/**
+ * How this version can present the record's access token: as a `bearer`
+ * token, with a `dpop` proof, or not at all (null). Not at all for a type it
+ * doesn't know, which a later version wrote, and for a DPoP-bound token whose
+ * key is missing: sent as a bearer token, either would be refused where it
+ * arrives, and a refresh without the proof could end the session.
+ */
+export function presentationOfRecord(tokens: Tokens): 'bearer' | 'dpop' | null {
+  const type = tokens.tokenType ?? 'bearer';
+  if (type === 'bearer') return 'bearer';
+  if (type === 'dpop' && isDpopKey(tokens.dpopKey)) return 'dpop';
+  return null;
 }
 
 function splitScope(scope: unknown): string[] | undefined {
@@ -122,6 +153,14 @@ export function createRecord(tokens: TokenResponse, options: CreateRecordOptions
   if (!tokens.access_token) {
     throw new Error('OIDC token response is missing access_token');
   }
+  const presentation = presentationOf(tokens, options.dpopKey);
+  if (options.dpopKey && presentation.tokenType !== 'dpop') {
+    // The caller says the tokens are bound. Kept as bearer tokens, they would
+    // be sent without a proof, and the key that proves them would be dropped.
+    throw new TypeError(
+      'A dpopKey was given, but the token response is not DPoP-bound: its token_type must be "DPoP"',
+    );
+  }
   const now = options.now ?? Date.now();
   const claims = claimsOf(tokens);
   const sub = claims && stringClaim(claims, 'sub');
@@ -146,8 +185,14 @@ export function createRecord(tokens: TokenResponse, options: CreateRecordOptions
       ...lifetimeOf(tokens, now),
       refreshToken: tokens.refresh_token,
       idToken: tokens.id_token,
+      ...defined(presentation),
     },
   };
+}
+
+/** Without the keys that are undefined, so a bearer record is the same as before the type was kept. */
+function defined<T extends object>(value: T): Partial<T> {
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
 /**
@@ -211,16 +256,19 @@ export function refreshRecord(
   let session = record.session;
   if (fresh && user) session = { ...session, user: { ...user, ...fresh, sub: user.sub } };
   if (scopes) session = { ...session, scopes };
+  const { tokenType: _type, dpopKey: boundTo, ...kept } = record.tokens;
   return {
     v: 1,
     session,
     tokens: {
-      ...record.tokens,
+      ...kept,
       accessToken: tokens.access_token,
       ...lifetimeOf(tokens, now),
       refreshToken: tokens.refresh_token ?? record.tokens.refreshToken,
       // A refresh doesn't always return an ID token, and a stale hint still works.
       idToken: tokens.id_token ?? record.tokens.idToken,
+      // The new access token's own type, bound to the key the session already has.
+      ...defined(presentationOf(tokens, boundTo)),
     },
   };
 }

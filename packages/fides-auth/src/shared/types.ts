@@ -1,3 +1,15 @@
+/**
+ * The key a session's tokens are bound to with DPoP (RFC 9449): a P-256 key
+ * pair as a JWK, private part included. A secret, like the tokens.
+ */
+export interface DpopKey {
+  kty: 'EC';
+  crv: 'P-256';
+  x: string;
+  y: string;
+  d: string;
+}
+
 /** The tokens of a session. Only the library and `getTokens` see them. */
 export interface Tokens {
   /**
@@ -16,6 +28,16 @@ export interface Tokens {
   refreshToken?: string;
   /** Raw (encoded) ID token, sent as `id_token_hint` on RP-initiated logout. */
   idToken?: string;
+  /**
+   * How the access token is presented, as the token response's `token_type`
+   * in lower case. Absent means `bearer`. `dpop` means the tokens are bound
+   * to {@link dpopKey}, and each request needs a proof made with it:
+   * `authorizedFetch` does that. A type this version doesn't know is never
+   * sent as a bearer token.
+   */
+  tokenType?: string;
+  /** The key the tokens are bound to, when {@link tokenType} is `dpop`. */
+  dpopKey?: DpopKey;
 }
 
 /** The IdP's own session, from the ID token. Back-channel logout matches on it. */

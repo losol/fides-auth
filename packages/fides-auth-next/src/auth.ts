@@ -5,7 +5,7 @@
  */
 
 import type { CookieOptions, Session, TokenResponse, Tokens } from '@eventuras/fides-auth';
-import type { OidcClient } from '@eventuras/fides-auth/oidc';
+import type { DpopKey, OidcClient } from '@eventuras/fides-auth/oidc';
 import {
   createFidesAuth as createCoreFidesAuth,
   type CookieStore,
@@ -96,9 +96,10 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   /**
    * Starts a session from a token response, for a login that doesn't go through
    * the handlers. `scopes` come from the response's `scope`; when the provider
-   * leaves it out, pass it along, e.g. `{ ...tokens, scope }`.
+   * leaves it out, pass it along, e.g. `{ ...tokens, scope }`. `dpopKey` is
+   * the key the tokens were bound to with DPoP, kept with them.
    */
-  createSession(tokens: TokenResponse): Promise<Session<TData>>;
+  createSession(tokens: TokenResponse, options?: { dpopKey?: DpopKey }): Promise<Session<TData>>;
   /**
    * Changes the user or data. Null when there is no session. It waits its
    * turn after a refresh or another update of the session, and `update` gets
@@ -246,7 +247,8 @@ export function createFidesAuth<TData = Record<string, unknown>>(
     getTokens: async () => core.getTokens(await nextCookieStore()),
     readSessionWithTokens: async () => core.readSessionWithTokens(await nextCookieStore()),
     refreshSession: async (options) => core.refreshSession(await nextCookieStore(), options),
-    createSession: async (tokens) => core.createSession(await nextCookieStore(), tokens),
+    createSession: async (tokens, options) =>
+      core.createSession(await nextCookieStore(), tokens, options),
     updateSession: async (update) => core.updateSession(await nextCookieStore(), update),
     clearSession: async (options) => core.clearSession(await nextCookieStore(), options),
     endUserSessions: (user, options) => core.endUserSessions(user, options),

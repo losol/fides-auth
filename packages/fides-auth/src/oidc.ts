@@ -4,6 +4,7 @@
 export {
   createOidcClient,
   type OidcClient,
+  type DpopOptions,
   type OidcClientOptions,
   type SilentLoginUrlOptions,
   type VerifyOptions,
@@ -24,6 +25,14 @@ export type { RevokeOptions } from './protocol/revocation.js';
 export type { UserInfoOptions } from './protocol/userinfo.js';
 
 export { createPkcePair, createState, type PkcePair } from './protocol/pkce.js';
+export {
+  createDpopKey,
+  createDpopProof,
+  DpopError,
+  dpopThumbprint,
+  type DpopKey,
+  type DpopProofOptions,
+} from './protocol/dpop.js';
 export { defaultScope, joinScope } from './protocol/scope.js';
 export { userFromClaims, type OidcUserInfo, type RolesClaim } from './session/user-claims.js';
 export {

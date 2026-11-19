@@ -248,8 +248,9 @@ const claims = await oidc.verifyIdToken(tokens.id_token!);
 const user = userFromClaims(claims, "roles"); // { sub, name?, email?, roles }
 ```
 
-`algorithms` defaults to `RS*`, `PS*`, `ES*` and `EdDSA`. The JWKS is cached on
-the client.
+`algorithms` defaults to `RS*`, `PS*`, `ES*` and `EdDSA`, and with
+[`profile: "fapi2"`](#fapi-20) to `PS256`, `ES256` and `EdDSA`. The JWKS is
+cached on the client.
 
 `oidc.verifyLogoutToken(logoutToken)` verifies the token of a back-channel
 logout the same way, and then that it has the logout event, a `sub` or a `sid`,
@@ -257,6 +258,25 @@ and no `nonce`. It returns `{ iss, sub?, sid?, jti, claims }` and throws a
 `LogoutTokenError` with a `reason`. On the server,
 [`handleBackChannelLogout`](./docs/server-sessions.md#back-channel-logout) calls
 it and ends the sessions.
+
+#### DPoP
+
+`oidc.createDpopKey()` makes a key to bind one login's tokens to (RFC 9449).
+Pass it where the tokens are asked for and used:
+
+```typescript
+const dpopKey = await oidc.createDpopKey();
+const tokens = await oidc.exchangeCode(callbackUrl, request, { dpopKey });
+await oidc.refresh(tokens.refresh_token!, { dpopKey });
+await oidc.userInfo(tokens.access_token, { expectedSubject, dpopKey });
+```
+
+A response that isn't bound, with a `token_type` other than `DPoP`, throws a
+`DpopError`. For a request to an API, `createDpopProof(dpopKey, { method, url,
+accessToken, nonce? })` returns the value of its `DPoP` header, and the token
+goes as `Authorization: DPoP <token>`. The key is a JWK with its private
+part, so keep it where the tokens are kept. On the server, `dpop: true` does
+all of this: see [DPoP](#dpop-tokens-bound-to-a-key).
 
 #### UserInfo
 
@@ -748,7 +768,8 @@ const { data } = await auth.authorizedFetch(cookies, `users/${id}`, {
 });
 ```
 
-A refused URL, a missing token, a non-2xx response (401 included), a timeout or
+A refused URL, a missing token, a token of a type this version can't send
+(`unsupported_token_type`), a non-2xx response (401 included), a timeout or
 a failed `parse` throws an `AuthorizedFetchError` with a `reason`, the status,
 and the URL without its query.
 
@@ -758,7 +779,8 @@ decide whether to refresh and retry:
 - `accessTokenExpired` is true when the token had passed its expiry by this
   server's clock, and undefined when the provider gave no lifetime.
 - `bearerError` is the `error` from the API's `WWW-Authenticate: Bearer`
-  challenge (RFC 6750). `invalid_token` means the token is expired, revoked or
+  challenge (RFC 6750), or from its `DPoP` challenge for a bound token.
+  `invalid_token` means the token is expired, revoked or
   malformed, so a refresh may help; `insufficient_scope` means it won't.
 
 ```typescript
@@ -775,6 +797,115 @@ try {
   throw error;
 }
 ```
+
+#### DPoP: tokens bound to a key
+
+With `dpop: true` in `oauthConfig`, the tokens of a login are bound to a key
+that never leaves the server (RFC 9449). An access token that leaks, from a
+log or a proxy, is then of no use without the key:
+
+```typescript
+const auth = createFidesAuth({
+  oauthConfig: { ...oauthConfig, dpop: true },
+  secret,
+});
+```
+
+- **At login** the callback makes a P-256 key for that session and sends a
+  proof with the code exchange. A provider that answers with a bearer token
+  fails the login, as `login_failed`: turn it on only for a provider that
+  supports DPoP.
+- **The key is kept with the tokens**, sealed in the session: `getTokens`
+  returns it as `dpopKey`, with `tokenType: "dpop"`. The session the app sees
+  has neither.
+- **A refresh** carries a proof from the same key, and the new tokens must be
+  bound to it too. The provider's `DPoP-Nonce` is answered by itself. A
+  provider that answers a refresh with a bearer token is refused, and those
+  tokens are revoked where it has a revocation endpoint. If it rotated the
+  refresh token on the way, the session can't be refreshed again and ends
+  when its access token does.
+- **`authorizedFetch`** sends the token as `Authorization: DPoP` with a proof
+  for that method, URL and token. An API that asks for a nonce (a 401 with
+  `use_dpop_nonce`) is asked once more with it, and the nonce is remembered
+  for the next request. Only a body that is held whole is sent twice: a
+  string, `URLSearchParams`, `FormData`, a `Blob` or bytes. For a stream the
+  401 is the answer.
+
+Code that sets `Authorization: Bearer` itself, from `getTokens`, stops
+working with bound tokens: call the API with `authorizedFetch`, or make the
+proof with `createDpopProof(tokens.dpopKey, { method, url, accessToken })`
+from `/oidc`.
+
+Turn `dpop` on only when every instance runs a version that has it: an older
+one reads a bound session's token as a bearer token. Roll the version out
+first, then the setting.
+
+A session's own `tokenType` decides how its token is sent, not the config: a
+session that was bound stays bound when `dpop` is turned off, and a bearer
+session stays one when it is turned on, until the user logs in again.
+
+A session kept in cookies carries the key in the cookie, sealed like the
+tokens. With a `sessionStore`, the key stays on the server.
+
+Not there yet: `dpop_jkt`, which also binds the authorization code to the
+key, and DPoP for the client credentials grant.
+
+#### FAPI 2.0
+
+`profile: "fapi2"` in `oauthConfig` enforces what the
+[FAPI 2.0 Security Profile](https://openid.net/specs/fapi-security-profile-2_0-final.html)
+asks of a client. It adds no mechanism of its own: it requires the options
+above, and throws where a config would otherwise run as something weaker.
+
+```typescript
+const auth = createFidesAuth({
+  oauthConfig: {
+    issuer: "https://auth.example.com",
+    clientId: "your-client-id",
+    clientAuth: "private_key_jwt",
+    privateKey, // a PS256, ES256 or EdDSA key
+    redirectUri: "https://app.example.com/api/auth/callback",
+    scope: "openid profile offline_access",
+    usePar: true,
+    dpop: true,
+    profile: "fapi2",
+  },
+  secret,
+});
+```
+
+- **At creation**, `createFidesAuth` and `createOidcClient` throw a
+  `TypeError` that names every requirement the config doesn't meet:
+  `clientAuth` must be `private_key_jwt`, `usePar` and `dpop` must be `true`,
+  `allowInsecureRequests` must not be set, and `privateKey` must not be an
+  RS256 key (`RSASSA-PKCS1-v1_5`).
+- **Signatures**: `oidc.verifyIdToken` and `oidc.verifyLogoutToken` accept
+  only `PS256`, `ES256` and `EdDSA`, so a back-channel logout token signed
+  with RS256 is refused. An `algorithms` option with anything else throws a
+  `TypeError`.
+- **The callback** must carry the `iss` parameter (RFC 9207). Without it the
+  code is not sent to the token endpoint and the login fails as
+  `login_failed`, whether or not the provider's metadata says it sends one.
+
+What it does not cover:
+
+- It is not a certification, and the library has not been through the OpenID
+  conformance suite.
+- The provider must follow FAPI 2.0 too. The profile checks the client's
+  config, not that the provider requires PAR, binds its tokens or supports
+  only the algorithms above.
+- mTLS, for client authentication or for binding tokens, is not implemented.
+  The tokens are bound with DPoP.
+- `dpop_jkt` is not sent, so the authorization code is not bound to the key.
+- FAPI 2.0 Message Signing is not implemented: no signed request objects
+  (JAR) and no signed authorization responses (JARM).
+- The ID token of a code exchange or a refresh comes straight from the token
+  endpoint over TLS. Its `alg` must be one of the three, or the response is
+  refused, but its signature is not verified: openid-client checks its claims
+  and takes TLS's word for where it came from. Verify it with
+  `oidc.verifyIdToken` where that matters.
+- With `createOidcClient` on its own, `dpop: true` is checked but the key is
+  yours to pass: see [DPoP](#dpop).
 
 ### Browser (`/browser`)
 
@@ -900,6 +1031,8 @@ const user = await vipps.getUserInfo(tokens.access_token, { expectedSubject: cla
 - **Bound sessions** — A session is sealed for its provider and client, and in a store for its own key. Another instance with the same secret can't read it, and a stored record can't be moved to another key or sent as a cookie
 - **Open redirect protection** — Return paths are validated and kept on the app's origin
 - **Nonce** — A login sends a `nonce`, and the ID token must carry it
+- **DPoP** — With `dpop: true`, tokens are bound to a key held with the session, and each request proves it
+- **FAPI 2.0** — With `profile: "fapi2"`, a config without `private_key_jwt`, PAR and DPoP throws instead of running weaker. Not a certification: see [FAPI 2.0](#fapi-20)
 - **CSRF** — Logout and heartbeat answer only a same-origin `POST`. With `strictOriginCheck`, they also refuse a request that has neither `Sec-Fetch-Site` nor `Origin`
 - **Back-channel logout** — A signed logout token from the provider ends the user's stored sessions
 - **No secret logging** — Tokens, keys, and PII are never logged

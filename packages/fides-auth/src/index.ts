@@ -4,6 +4,7 @@ export type { ClientAuthConfig, OidcClientConfig } from './protocol/config.js';
 export type { CookieOptions } from './shared/cookies.js';
 export type { FidesLogger, FidesLoggerFactory, FidesLoggerOptions } from './shared/logger.js';
 export type {
+  DpopKey,
   HeartbeatResponse,
   IdpSession,
   Session,
