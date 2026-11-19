@@ -74,21 +74,28 @@ export function profileAlgorithms(
 }
 
 /**
- * Under the profile, refuses a token response whose ID token is signed with an
- * algorithm outside its three. openid-client takes an ID token from the token
- * endpoint on the word of TLS and checks its `alg` only against the metadata,
- * where RS256 is the default.
+ * Refuses a token response whose ID token is not signed, and under the
+ * profile one that is signed with an algorithm outside its three.
  *
- * @throws Error under the profile, for an ID token with another `alg` or a header that can't be read.
+ * openid-client takes an ID token from the token endpoint on the word of TLS:
+ * it doesn't verify the signature, and checks the `alg` only against the
+ * provider's metadata. A provider that lists `none` there would have an
+ * unsigned ID token taken, which nothing could verify afterwards either.
+ *
+ * @throws Error for an unsigned ID token, and under the profile for one with another `alg` or a header that can't be read.
  */
 export function checkIdTokenAlgorithm(config: OidcClientConfig, idToken: string | undefined): void {
-  if (config.profile !== 'fapi2' || !idToken) return;
+  if (!idToken) return;
   let alg: unknown;
   try {
     alg = decodeProtectedHeader(idToken).alg;
   } catch {
     alg = undefined;
   }
+  if (typeof alg === 'string' && alg.toLowerCase() === 'none') {
+    throw new Error('The ID token is not signed (alg "none"), and an unsigned ID token is never taken');
+  }
+  if (config.profile !== 'fapi2') return;
   if (typeof alg !== 'string' || !FAPI2_ALGORITHMS.includes(alg)) {
     throw new Error(
       `profile 'fapi2': the ID token is signed with ${String(alg)}, and only ${FAPI2_ALGORITHMS.join(', ')} are allowed`,

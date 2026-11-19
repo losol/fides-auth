@@ -114,7 +114,7 @@ Connect Core 3.1.3.7 allows.
 | Module | The library | The suite |
 |---|---|---|
 | `kid-absent-multiple-jwks` | Logs in: it doesn't have to choose a key. | PASSED either way |
-| `idtoken-sig-none` | Logs in with the unsigned ID token: the suite's metadata lists `none` among its algorithms, and that list is what the `alg` is checked against. | PASSED when the client goes on, SKIPPED when it refuses |
+| `idtoken-sig-none` | Refuses the unsigned ID token, though the suite's metadata lists `none` among its algorithms. | SKIPPED when the client refuses, PASSED when it goes on |
 | `invalid-sig-rs256` | Logs in with the wrong signature and calls UserInfo, which the suite then answers with an error. | SKIPPED: "clients are not required to validate the signatures on id tokens received over a TLS protected connection" |
 
 `userinfo-invalid-sub` is the other way round: the suite ends the test at the

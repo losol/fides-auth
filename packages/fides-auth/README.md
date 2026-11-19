@@ -253,6 +253,12 @@ const user = userFromClaims(claims, "roles"); // { sub, name?, email?, roles }
 [`profile: "fapi2"`](#fapi-20) to `PS256`, `ES256` and `EdDSA`. The JWKS is
 cached on the client.
 
+The ID token of a code exchange or a refresh comes straight from the token
+endpoint over TLS, and its signature is not verified there: call
+`verifyIdToken` where that matters. An ID token that is not signed at all,
+with `alg: "none"`, is refused, also when the provider's metadata lists
+`none`: the login or the refresh fails.
+
 `oidc.verifyLogoutToken(logoutToken)` verifies the token of a back-channel
 logout the same way, and then that it has the logout event, a `sub` or a `sid`,
 and no `nonce`. It returns `{ iss, sub?, sid?, jti, claims }` and throws a

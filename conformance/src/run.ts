@@ -147,8 +147,9 @@ const BASIC: PlanRun = {
     // not its signature (OpenID Connect Core 3.1.3.7, step 6). So it never
     // has to choose between keys without a `kid`,
     'kid-absent-multiple-jwks': 'done',
-    // it takes an unsigned ID token when the provider's metadata lists `none`,
-    'idtoken-sig-none': 'done',
+    // it refuses an unsigned ID token, also when the provider's metadata lists
+    // `none`, which the suite ends as SKIPPED,
+    'idtoken-sig-none': 'callback',
     // and it goes on to UserInfo with a signature that is wrong, where the
     // suite ends the test as SKIPPED and answers with an error.
     'invalid-sig-rs256': 'userinfo',
