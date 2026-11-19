@@ -1,7 +1,7 @@
 /**
- * Under `profile: 'fapi2'`, the ID token a token response carries must be
- * signed with one of the profile's algorithms. openid-client would take RS256
- * on the metadata's default, so the check is the library's own.
+ * The ID token a token response carries must be signed, and under
+ * `profile: 'fapi2'` with one of the profile's algorithms. openid-client goes
+ * by the provider's metadata, so the check is the library's own.
  */
 import { generateKeyPair, SignJWT, UnsecuredJWT } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -34,10 +34,24 @@ describe('checkIdTokenAlgorithm', () => {
     expect(() => checkIdTokenAlgorithm(fapi, tokens[alg])).not.toThrow();
   });
 
-  it.each(['RS256', 'ES384', 'none'])('refuses an ID token signed with %s under the profile', (alg) => {
+  it.each(['RS256', 'ES384'])('refuses an ID token signed with %s under the profile', (alg) => {
     expect(() => checkIdTokenAlgorithm(fapi, tokens[alg])).toThrow(
       `profile 'fapi2': the ID token is signed with ${alg}`,
     );
+  });
+
+  it.each([
+    ['under the profile', () => fapi],
+    ['without the profile', () => plain],
+  ])('refuses an unsigned ID token %s, whatever the provider lists', (_, config) => {
+    expect(() => checkIdTokenAlgorithm(config(), tokens.none)).toThrow('The ID token is not signed (alg "none")');
+  });
+
+  it('reads none whatever its case', () => {
+    const b64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const shouting = `${b64({ alg: 'NONE' })}.${b64({ sub: 'ada' })}.`;
+
+    expect(() => checkIdTokenAlgorithm(plain, shouting)).toThrow('The ID token is not signed');
   });
 
   it('refuses what has no readable header under the profile', () => {
@@ -48,7 +62,7 @@ describe('checkIdTokenAlgorithm', () => {
     expect(() => checkIdTokenAlgorithm(fapi, undefined)).not.toThrow();
   });
 
-  it.each(['RS256', 'ES384', 'none'])('leaves %s alone without the profile', (alg) => {
+  it.each(['RS256', 'ES384', 'PS256'])('leaves %s alone without the profile', (alg) => {
     expect(() => checkIdTokenAlgorithm(plain, tokens[alg])).not.toThrow();
   });
 
