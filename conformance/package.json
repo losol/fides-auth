@@ -1,0 +1,24 @@
+{
+  "name": "@eventuras/fides-auth-conformance",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runs the OpenID Foundation conformance suite's relying-party tests against fides-auth, now and then",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "conformance": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/run.ts"
+  },
+  "dependencies": {
+    "@eventuras/fides-auth": "workspace:*"
+  },
+  "devDependencies": {
+    "@eventuras/typescript-config": "workspace:*",
+    "@types/node": "^22.20.5",
+    "jose": "^6.2.15",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.19"
+  }
+}
