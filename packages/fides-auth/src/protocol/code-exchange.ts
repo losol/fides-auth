@@ -1,15 +1,23 @@
 import * as openid from 'openid-client';
 
+import type { DpopKey } from '../shared/types.js';
 import { redirectUriOf } from './config.js';
+import { assertBound, dpopHandle } from './dpop-grant.js';
+import { checkIdTokenAlgorithm } from './fapi-profile.js';
 import type { ProtocolContext } from './context.js';
 
 /**
  * Exchanges the code in `callbackUrl` for tokens, checking `expectedState` and PKCE.
  * With `expectedNonce`, the response must have an ID token whose `nonce` is
  * that value. Without it, an ID token that carries a `nonce` is refused.
+ * With `dpopKey`, the tokens are asked to be bound to it, and a response that
+ * isn't is refused.
+ * With `profile: 'fapi2'`, a callback without `iss` is refused, whatever the
+ * provider's metadata says of it.
  * The core of `OidcClient.exchangeCode`.
  *
  * @throws TypeError if the config has no redirect URI.
+ * @throws Error under `profile: 'fapi2'`, if the callback has no `iss`.
  */
 export async function exchangeCode(
   { config: oauthConfig, configuration, logger }: ProtocolContext,
@@ -17,8 +25,16 @@ export async function exchangeCode(
   codeVerifier: string,
   expectedState: string,
   expectedNonce?: string,
+  dpopKey?: DpopKey,
 ): Promise<openid.TokenEndpointResponse> {
   const redirectUri = redirectUriOf(oauthConfig);
+  // openid-client requires `iss` only when the metadata says the provider sends
+  // it. The profile requires it always (RFC 9207), and before the code goes anywhere.
+  if (oauthConfig.profile === 'fapi2' && !callbackUrl.searchParams.get('iss')) {
+    throw new Error(
+      "profile 'fapi2': the callback has no iss parameter (RFC 9207), so the code was not exchanged",
+    );
+  }
   logger.debug(
     { issuer: oauthConfig.issuer, clientId: oauthConfig.clientId },
     'Exchanging authorization code for tokens',
@@ -47,7 +63,10 @@ export async function exchangeCode(
       ...(expectedNonce ? { expectedNonce } : {}),
     },
     { redirect_uri: redirectUri },
+    dpopKey ? { DPoP: await dpopHandle(config, dpopKey) } : undefined,
   );
+  if (dpopKey) await assertBound(config, tokens);
+  checkIdTokenAlgorithm(oauthConfig, tokens.id_token);
 
   logger.info(
     {

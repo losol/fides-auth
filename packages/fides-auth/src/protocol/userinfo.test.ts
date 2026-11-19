@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('openid-client', () => ({
   fetchUserInfo: vi.fn(),
+  getDPoPHandle: vi.fn(),
 }));
 
 import * as openid from 'openid-client';
@@ -13,6 +14,7 @@ import * as openid from 'openid-client';
 import type { FidesLogger } from '../shared/logger.js';
 import type { OidcClientConfig } from './config.js';
 import type { ProtocolContext } from './context.js';
+import { createDpopKey } from './dpop.js';
 import { userInfo } from './userinfo.js';
 
 const issuer = 'https://auth.example.test';
@@ -45,6 +47,20 @@ describe('userInfo', () => {
     await userInfo(context, 'access-token', { expectedSubject: 'user-1' });
 
     expect(openid.fetchUserInfo).toHaveBeenCalledWith(configuration, 'access-token', 'user-1');
+  });
+
+  it('sends a DPoP proof with a bound token, from the key it is bound to', async () => {
+    const { context } = contextWithLog();
+    const handle = { handle: true };
+    vi.mocked(openid.getDPoPHandle).mockReturnValue(handle as never);
+    vi.mocked(openid.fetchUserInfo).mockResolvedValue({ sub: 'user-1' });
+    const dpopKey = await createDpopKey();
+
+    await userInfo(context, 'access-token', { expectedSubject: 'user-1', dpopKey });
+
+    expect(openid.fetchUserInfo).toHaveBeenCalledWith(configuration, 'access-token', 'user-1', { DPoP: handle });
+    const [, keyPair] = vi.mocked(openid.getDPoPHandle).mock.calls[0] ?? [];
+    expect((keyPair as CryptoKeyPair).privateKey.extractable).toBe(false);
   });
 
   it('returns what openid-client returns', async () => {

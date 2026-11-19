@@ -3,9 +3,15 @@
 // fetch() with an access token, locked to one API base. The token goes only to
 // URLs under `allowedBase` and never follows a redirect. It never refreshes: a
 // caller that wants fresh tokens asks for them first, with refreshSession.
+//
+// A DPoP-bound token (RFC 9449) goes as `Authorization: DPoP`, with a proof
+// for this method and URL. An API that asks for a nonce is asked once more
+// with it, when the body can be sent twice.
 
 import type { FidesLogger } from '../shared/logger.js';
 import type { Tokens } from '../shared/types.js';
+import { createDpopProof } from '../protocol/dpop.js';
+import { presentationOfRecord } from '../session/record.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -15,6 +21,12 @@ export type AuthorizedFetchErrorReason =
   | 'url_not_allowed'
   /** The session has no access token. Nothing was sent. */
   | 'no_access_token'
+  /**
+   * The access token is of a type this version can't present: a later version
+   * wrote the session, or the key a DPoP-bound token needs is missing.
+   * Nothing was sent.
+   */
+  | 'unsupported_token_type'
   /** The request failed before a response, including a refused redirect. */
   | 'network_error'
   /** No response within `timeoutMs`. */
@@ -50,7 +62,7 @@ export class AuthorizedFetchError extends Error {
   readonly accessTokenExpired?: boolean;
   /**
    * For `http_error`: the `error` of the API's `Bearer` challenge in
-   * `WWW-Authenticate` (RFC 6750 §3). `invalid_token` means the token is expired,
+   * `WWW-Authenticate` (RFC 6750 §3), or of its `DPoP` challenge (RFC 9449 §7.1). `invalid_token` means the token is expired,
    * revoked or malformed, so a refresh may help; `insufficient_scope` means it
    * won't. Only a snake_case code is kept.
    */
@@ -104,13 +116,14 @@ export async function authorizedFetch<T = undefined>(
   url: string | URL,
   options: AuthorizedFetchOptions<T>,
   logger: FidesLogger,
+  dpopNonces: DpopNonces = new Map(),
 ): Promise<AuthorizedFetchResult<T>> {
   const { allowedBase, parse, timeoutMs = DEFAULT_TIMEOUT_MS, ...init } = options;
   const target = resolveAllowedUrl(url, allowedBase, logger);
   const request = { method: (init.method ?? 'GET').toUpperCase(), url: redactUrl(target) };
 
   const sentAt = Date.now();
-  const { response, timeout, signal, unlink } = await send(tokens, target, init, timeoutMs, request);
+  const { response, timeout, signal, unlink } = await send(tokens, target, init, timeoutMs, request, dpopNonces);
   if (!response.ok) {
     const expiresAt = Date.parse(tokens?.accessTokenExpiresAt ?? '');
     throw new AuthorizedFetchError('http_error', {
@@ -207,31 +220,116 @@ interface Attempt {
   unlink: () => void;
 }
 
+/**
+ * The `DPoP-Nonce` each API gave last, by origin. An instance has its own, so
+ * a request rarely needs to be sent twice.
+ */
+export type DpopNonces = Map<string, string>;
+
+/** At most this many origins are remembered. An app calls a handful. */
+const MAX_NONCE_ORIGINS = 100;
+
+function rememberNonce(nonces: DpopNonces, origin: string, response: Response): void {
+  const nonce = response.headers.get('dpop-nonce');
+  if (!nonce) return;
+  nonces.delete(origin);
+  nonces.set(origin, nonce);
+  if (nonces.size > MAX_NONCE_ORIGINS) {
+    const oldest = nonces.keys().next().value;
+    if (oldest !== undefined) nonces.delete(oldest);
+  }
+}
+
+/** Whether a response asks for the request again, with the nonce it gives (RFC 9449 §9). */
+function asksForNonce(response: Response): boolean {
+  return (
+    response.status === 401 &&
+    !!response.headers.get('dpop-nonce') &&
+    /\buse_dpop_nonce\b/.test(response.headers.get('www-authenticate') ?? '')
+  );
+}
+
+/**
+ * Whether a body can be sent a second time: the kinds that are held whole.
+ * A stream, or anything else that is read as it is sent, is spent by the
+ * first request and would go out empty the second time.
+ */
+function canSendAgain(body: RequestInit['body']): boolean {
+  return (
+    body === undefined ||
+    body === null ||
+    typeof body === 'string' ||
+    body instanceof URLSearchParams ||
+    body instanceof FormData ||
+    body instanceof Blob ||
+    body instanceof ArrayBuffer ||
+    ArrayBuffer.isView(body)
+  );
+}
+
 async function send(
   tokens: Tokens | null | undefined,
   target: URL,
   init: RequestInit,
   timeoutMs: number,
   request: { method: string; url: string },
+  dpopNonces: DpopNonces,
 ): Promise<Attempt> {
   const token = tokens?.accessToken;
-  if (!token) throw new AuthorizedFetchError('no_access_token', request);
+  if (!tokens || !token) throw new AuthorizedFetchError('no_access_token', request);
+  const presentation = presentationOfRecord(tokens);
+  // Never as a bearer token: where it is refused, it has still been sent.
+  if (presentation === null) throw new AuthorizedFetchError('unsupported_token_type', request);
 
-  const headers = new Headers(init.headers);
-  try {
-    headers.set('Authorization', `Bearer ${token}`);
-  } catch {
-    // A token with CR, LF or NUL: the TypeError's message would carry the token.
-    throw new AuthorizedFetchError('no_access_token', request);
-  }
   const timeout = AbortSignal.timeout(timeoutMs);
   const { signal, unlink } = linkSignals(timeout, init.signal);
 
+  const attempt = async (): Promise<Response> => {
+    const headers = new Headers(init.headers);
+    try {
+      headers.set('Authorization', `${presentation === 'dpop' ? 'DPoP' : 'Bearer'} ${token}`);
+    } catch {
+      // A token with CR, LF or NUL: the TypeError's message would carry the token.
+      throw new AuthorizedFetchError('no_access_token', request);
+    }
+    if (presentation === 'dpop' && tokens.dpopKey) {
+      let proof: string;
+      try {
+        proof = await createDpopProof(tokens.dpopKey, {
+          method: request.method,
+          url: target,
+          accessToken: token,
+          nonce: dpopNonces.get(target.origin),
+        });
+      } catch {
+        // A key that doesn't sign: nothing was sent, and sending again won't help.
+        throw new AuthorizedFetchError('unsupported_token_type', request);
+      }
+      headers.set('DPoP', proof);
+    }
+    // The method as the proof names it: `patch` is sent as it is written, and refused.
+    const response = await fetch(target, {
+      ...init,
+      method: request.method,
+      headers,
+      signal,
+      redirect: 'error',
+    });
+    if (presentation === 'dpop') rememberNonce(dpopNonces, target.origin, response);
+    return response;
+  };
+
   try {
-    const response = await fetch(target, { ...init, headers, signal, redirect: 'error' });
+    let response = await attempt();
+    if (presentation === 'dpop' && asksForNonce(response) && canSendAgain(init.body)) {
+      // Nothing of this answer is read: the API only said which nonce it wants.
+      await response.body?.cancel();
+      response = await attempt();
+    }
     return { response, timeout, signal, unlink };
   } catch (error) {
     unlink();
+    if (error instanceof AuthorizedFetchError) throw error;
     // The caller's own abort is theirs to handle.
     if (init.signal?.aborted) throw error;
     const reason = timeout.aborted ? 'timeout' : 'network_error';
@@ -289,12 +387,12 @@ function linkSignals(
 }
 
 /**
- * The `error` of the `Bearer` challenge in a `WWW-Authenticate` header, such as
+ * The `error` of the `Bearer` or `DPoP` challenge in a `WWW-Authenticate` header, such as
  * `invalid_token`. Registered codes are snake_case, and nothing else is kept, so
  * an API can't put arbitrary text in the error.
  */
 function bearerErrorOf(header: string | null): string | undefined {
-  const params = header ? /\bBearer\b(.*)$/is.exec(header)?.[1] : undefined;
+  const params = header ? /\b(?:Bearer|DPoP)\b(.*)$/is.exec(header)?.[1] : undefined;
   if (!params) return undefined;
   const match = /(?:^|[\s,])error\s*=\s*(?:"([^"]*)"|([^\s,"]+))/i.exec(params);
   const code = match?.[1] ?? match?.[2];

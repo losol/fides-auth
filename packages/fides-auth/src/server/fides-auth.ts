@@ -15,6 +15,7 @@ import {
   type SessionRejectedReason,
 } from '../shared/session-events.js';
 import type {
+  DpopKey,
   HeartbeatResponse,
   Session,
   SessionInfo,
@@ -33,7 +34,11 @@ import {
   tokenStatusOf,
 } from '../session/record.js';
 import type { RolesClaim } from '../session/user-claims.js';
-import { authorizedFetch as fetchWithTokens, type AuthorizedFetchOptions } from './authorized-fetch.js';
+import {
+  authorizedFetch as fetchWithTokens,
+  type AuthorizedFetchOptions,
+  type DpopNonces,
+} from './authorized-fetch.js';
 import type { CookieStore } from './cookie-store.js';
 import { isSameOriginRequest } from './csrf.js';
 import {
@@ -404,7 +409,12 @@ export interface FidesAuth<TData = Record<string, unknown>> {
    * the handlers. `scopes` come from the response's `scope`; when the provider
    * leaves it out, pass it along, e.g. `{ ...tokens, scope }`.
    */
-  createSession(cookies: CookieStore, tokens: TokenResponse): Promise<Session<TData>>;
+  createSession(
+    cookies: CookieStore,
+    tokens: TokenResponse,
+    /** `dpopKey`: the key the tokens were bound to with DPoP, kept with them. */
+    options?: { dpopKey?: DpopKey },
+  ): Promise<Session<TData>>;
   /**
    * Changes the user or data. Null when there is no session. It waits its
    * turn after a refresh or another update of the session, under the store's
@@ -596,6 +606,8 @@ export function createFidesAuth<TData = Record<string, unknown>>(
     fetch: loggers.create({ namespace: 'fides-auth:server:authorized-fetch' }),
   };
   const oidc = createOidcClient(oauthConfig, { logger: loggers });
+  // The nonce each API asked for last. The instance's own: two instances share nothing.
+  const dpopNonces: DpopNonces = new Map();
 
   /** What the redirect URI decides: the app's origin, the cookie flavour and the storage. */
   function resolveSettings() {
@@ -622,7 +634,9 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         mapRefresh: config.mapRefresh as MapRecordSession | undefined,
         storeFields: config.storeFields as ((session: Session) => StoreFields) | undefined,
         refreshGraceSeconds,
-        refreshTokens: (refreshToken) => oidc.refresh(refreshToken),
+        // Tokens bound with DPoP are refreshed with a proof from their key.
+        refreshTokens: (refreshToken, tokens) =>
+          tokens.dpopKey ? oidc.refresh(refreshToken, { dpopKey: tokens.dpopKey }) : oidc.refresh(refreshToken),
         logger: loggers.create({ namespace: 'fides-auth:server:session' }),
         onSessionEvent: config.onSessionEvent,
       }),
@@ -823,12 +837,17 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         }
         validateCallback(currentUrl.searchParams, transaction);
 
-        const tokens = await oidc.exchangeCode(publicUrl, {
-          codeVerifier: transaction.codeVerifier,
-          state: transaction.state,
-          nonce: transaction.nonce,
+        // A key of its own for each login, so one session's tokens are of no use in another.
+        const dpopKey = oauthConfig.dpop ? await oidc.createDpopKey() : undefined;
+        const tokens = await oidc.exchangeCode(
+          publicUrl,
+          { codeVerifier: transaction.codeVerifier, state: transaction.state, nonce: transaction.nonce },
+          dpopKey ? { dpopKey } : undefined,
+        );
+        const session = await lifecycle.create(cookies, tokens, {
+          requestedScope: transaction.scope,
+          dpopKey,
         });
-        const session = await lifecycle.create(cookies, tokens, { requestedScope: transaction.scope });
 
         const url = returnUrl(transaction.returnTo);
         if (config.loginSuccessParam !== false) url.searchParams.set('login', 'success');
@@ -942,9 +961,16 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       }
       // The provider or the store was unreachable or broken. The session is
       // probably fine, so keep it and let the client retry rather than log the user out.
-      if (result.cause === 'transport' || result.cause === 'idp_error' || result.cause === 'store') {
+      // So is a session whose tokens this version can't use: a later one wrote
+      // it, and ending it here would log out a user that version serves.
+      if (
+        result.cause === 'transport' ||
+        result.cause === 'idp_error' ||
+        result.cause === 'store' ||
+        result.reason === 'unsupported_token_type'
+      ) {
         log.heartbeat.warn(
-          { correlationId: result.correlationId, cause: result.cause },
+          { correlationId: result.correlationId, cause: result.cause ?? result.reason },
           'Heartbeat refresh could not be completed; keeping the session',
         );
         return new Response(null, { status: 503, headers: NO_STORE });
@@ -1068,8 +1094,8 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         : { session: null, tokens: null, reason: read.reason };
     },
     refreshSession,
-    createSession: async (cookies, tokens) =>
-      typed((await settings().lifecycle.create(cookies, tokens)).session),
+    createSession: async (cookies, tokens, options) =>
+      typed((await settings().lifecycle.create(cookies, tokens, { dpopKey: options?.dpopKey })).session),
     async updateSession(cookies, update) {
       const updated = await settings().lifecycle.update(
         cookies,
@@ -1104,7 +1130,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
 
     async authorizedFetch(cookies, url, options) {
       const tokens = (await settings().lifecycle.read(cookies)).record?.tokens;
-      return fetchWithTokens(tokens, url, options, log.fetch);
+      return fetchWithTokens(tokens, url, options, log.fetch, dpopNonces);
     },
 
     get cookieNames() {

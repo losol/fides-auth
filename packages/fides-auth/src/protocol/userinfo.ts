@@ -1,11 +1,15 @@
 import * as openid from 'openid-client';
 
+import type { DpopKey } from '../shared/types.js';
 import type { ProtocolContext } from './context.js';
+import { dpopHandle } from './dpop-grant.js';
 
 /** Options for `OidcClient.userInfo`. */
 export interface UserInfoOptions {
   /** The `sub` the response must be for: the ID token's, e.g. `session.idp.sub`. */
   expectedSubject: string;
+  /** The key the access token is bound to, for a DPoP-bound token: `tokens.dpopKey`. */
+  dpopKey?: DpopKey;
 }
 
 /**
@@ -22,12 +26,16 @@ export interface UserInfoOptions {
 export async function userInfo(
   { config: oauthConfig, configuration, logger }: ProtocolContext,
   accessToken: string,
-  { expectedSubject }: UserInfoOptions,
+  { expectedSubject, dpopKey }: UserInfoOptions,
 ): Promise<openid.UserInfoResponse> {
   logger.debug(
     { issuer: oauthConfig.issuer, clientId: oauthConfig.clientId },
     'Fetching UserInfo',
   );
   const config = await configuration();
-  return openid.fetchUserInfo(config, accessToken, expectedSubject);
+  // Without a key, the call is the one it always was.
+  if (!dpopKey) return openid.fetchUserInfo(config, accessToken, expectedSubject);
+  return openid.fetchUserInfo(config, accessToken, expectedSubject, {
+    DPoP: await dpopHandle(config, dpopKey),
+  });
 }

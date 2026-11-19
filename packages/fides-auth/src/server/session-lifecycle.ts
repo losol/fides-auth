@@ -33,7 +33,7 @@ import {
   type SessionEvent,
   type SessionRejectedReason,
 } from '../shared/session-events.js';
-import type { Session, TokenResponse } from '../shared/types.js';
+import type { DpopKey, Session, TokenResponse, Tokens } from '../shared/types.js';
 import { hexToUint8Array } from '../session/utils.js';
 import {
   checkSessionDuration,
@@ -45,6 +45,7 @@ import {
   type MapRecordSession,
   type OpenedRecord,
   openSealed,
+  presentationOfRecord,
   refreshRecord,
   sealRecord,
   type SessionRecord,
@@ -152,7 +153,7 @@ export interface SessionLifecycleOptions {
    */
   saveRetryDelaysMs?: readonly number[];
   /** Runs the refresh token grant, e.g. `oidc.refresh`. */
-  refreshTokens(refreshToken: string): Promise<TokenResponse>;
+  refreshTokens(refreshToken: string, tokens: Tokens): Promise<TokenResponse>;
   logger: FidesLogger;
   /** Gets every lifecycle event, next to the logger. */
   onSessionEvent?(event: SessionEvent): void;
@@ -164,12 +165,13 @@ export interface SessionLifecycle {
   /**
    * Starts a new session from a token response, discarding whatever the browser
    * held. `requestedScope` is the scope the login asked for: the session's
-   * scopes when the response names none.
+   * scopes when the response names none. `dpopKey` is the key the tokens were
+   * bound to with DPoP, kept with them.
    */
   create(
     cookies: CookieStore,
     tokens: TokenResponse,
-    options?: { requestedScope?: string },
+    options?: { requestedScope?: string; dpopKey?: DpopKey },
   ): Promise<SessionRecord>;
   /**
    * Refreshes the tokens, keeping the session's identity and lifetime. With
@@ -662,7 +664,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     const correlationId = current.session.correlationId;
     let tokens: TokenResponse;
     try {
-      tokens = await options.refreshTokens(refreshToken);
+      tokens = await options.refreshTokens(refreshToken, current.tokens);
     } catch (error) {
       const cause = classifyRefreshFailure(error);
       if (cause === 'invalid_grant' && storage.lock) {
@@ -786,6 +788,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         sessionDurationSeconds,
         rolesClaim,
         requestedScope: options?.requestedScope,
+        dpopKey: options?.dpopKey,
       });
       if (mapSession) {
         const mapped = await mapSession(tokens, claimsOf(tokens), record.session);
@@ -821,6 +824,16 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       if (unless?.(current)) return { ok: true, record: current, rotatedRefreshToken: false, skipped: true };
       const correlationId = current.session.correlationId;
       notFromInside(correlationId, 'A refresh');
+      if (presentationOfRecord(current.tokens) === null) {
+        // Written by a later version, or bound to a key that isn't there. A
+        // refresh without the proof it needs could end the session at the
+        // provider, so nothing is sent and the session is left as it is.
+        logger.warn(
+          { correlationId, tokenType: current.tokens.tokenType },
+          'The session holds tokens of a type this version cannot use; not refreshed',
+        );
+        return { ok: false, reason: 'unsupported_token_type', correlationId };
+      }
       const refreshToken = current.tokens.refreshToken;
       if (!refreshToken) return { ok: false, reason: 'no_refresh_token', correlationId };
 

@@ -17,8 +17,10 @@ import { exchangeCode } from './code-exchange.js';
 import type { OidcClientConfig } from './config.js';
 import type { ProtocolContext } from './context.js';
 import { checkTtl, createDiscoveryCache } from './discovery.js';
+import { checkProfile, profileAlgorithms } from './fapi-profile.js';
 import { createJwksCache, verifyIdTokenWith } from './id-token.js';
 import { type LogoutToken, verifyLogoutTokenWith } from './logout-token.js';
+import { createDpopKey, type DpopKey } from './dpop.js';
 import { withoutResponseBody } from './logging.js';
 import { logoutUrl, type OidcLogoutOptions } from './logout-url.js';
 import { refresh } from './refresh.js';
@@ -45,9 +47,23 @@ export interface SilentLoginUrlOptions {
   maxAge?: number;
 }
 
+/** Options for the calls that can bind tokens with DPoP. */
+export interface DpopOptions {
+  /**
+   * The key to bind the tokens to, from {@link OidcClient.createDpopKey}. The
+   * request then carries a DPoP proof, and a token response that isn't bound
+   * (`token_type` other than `DPoP`) throws a `DpopError`.
+   */
+  dpopKey?: DpopKey;
+}
+
 /** Options for {@link OidcClient.verifyIdToken}. */
 export interface VerifyOptions {
-  /** Accepted `alg` values. Defaults to `RS*`, `PS*`, `ES*` and `EdDSA`. */
+  /**
+   * Accepted `alg` values. Defaults to `RS*`, `PS*`, `ES*` and `EdDSA`. With
+   * `profile: 'fapi2'` the default is `PS256`, `ES256` and `EdDSA`, and any
+   * other value throws a TypeError.
+   */
   algorithms?: string[];
 }
 
@@ -85,10 +101,22 @@ export interface OidcClient {
   exchangeCode(
     callbackUrl: URL,
     request: Pick<AuthorizationRequest, 'codeVerifier' | 'state' | 'nonce'>,
+    options?: DpopOptions,
   ): Promise<openid.TokenEndpointResponse>;
 
-  /** Runs a refresh token grant. Sends no `scope`, so the granted scope is kept. */
-  refresh(refreshToken: string): Promise<openid.TokenEndpointResponse>;
+  /**
+   * Runs a refresh token grant. Sends no `scope`, so the granted scope is
+   * kept. For tokens bound with DPoP, pass the key they are bound to.
+   */
+  refresh(refreshToken: string, options?: DpopOptions): Promise<openid.TokenEndpointResponse>;
+
+  /**
+   * Creates a key to bind one login's tokens to with DPoP (RFC 9449). Pass it
+   * to {@link exchangeCode}, keep it with the tokens, and pass it again to
+   * {@link refresh} and `userInfo`. `createDpopProof` makes the proof a
+   * request to an API needs.
+   */
+  createDpopKey(): Promise<DpopKey>;
 
   /**
    * Runs a client credentials grant with this client's credentials.
@@ -143,12 +171,13 @@ export interface OidcClient {
 /**
  * Creates an OIDC client. It does no I/O until a method needs the provider.
  *
- * @throws TypeError if `discoveryTtlMs` is not a finite, non-negative number.
+ * @throws TypeError if `discoveryTtlMs` is not a finite, non-negative number, or if the config doesn't meet its `profile`.
  */
 export function createOidcClient(
   config: OidcClientConfig,
   options: OidcClientOptions = {},
 ): OidcClient {
+  checkProfile(config);
   const loggers = options.logger ?? consoleLoggerFactory;
   const ttlMs =
     options.discoveryTtlMs === undefined
@@ -194,10 +223,26 @@ export function createOidcClient(
       return calling(() => authorizationUrl(context, parameters));
     },
 
-    exchangeCode: (callbackUrl, request) =>
-      calling(() => exchangeCode(context, callbackUrl, request.codeVerifier, request.state, request.nonce)),
+    exchangeCode: (callbackUrl, request, exchangeOptions) =>
+      calling(() =>
+        exchangeCode(
+          context,
+          callbackUrl,
+          request.codeVerifier,
+          request.state,
+          request.nonce,
+          exchangeOptions?.dpopKey,
+        ),
+      ),
 
-    refresh: (refreshToken) => calling(() => refresh(context, refreshToken)),
+    refresh: (refreshToken, refreshOptions) =>
+      calling(() =>
+        refreshOptions?.dpopKey
+          ? refresh(context, refreshToken, refreshOptions.dpopKey)
+          : refresh(context, refreshToken),
+      ),
+
+    createDpopKey,
 
     clientCredentials: (grantOptions) => calling(() => clientCredentials(context, grantOptions)),
 
@@ -209,24 +254,26 @@ export function createOidcClient(
       calling(() => userInfo(context, accessToken, userInfoOptions)),
 
     async verifyIdToken(idToken, verifyOptions = {}) {
+      const algorithms = profileAlgorithms(ownConfig, verifyOptions.algorithms);
       const { issuer, jwks_uri } = await metadata();
       if (!issuer) throw new TypeError('The provider metadata has no issuer');
       if (!jwks_uri) throw new TypeError('The provider metadata has no jwks_uri');
       return verifyIdTokenWith(jwks.get(jwks_uri), idToken, {
         issuer,
         audience: ownConfig.clientId,
-        algorithms: verifyOptions.algorithms,
+        algorithms,
       });
     },
 
     async verifyLogoutToken(logoutToken, verifyOptions = {}) {
+      const algorithms = profileAlgorithms(ownConfig, verifyOptions.algorithms);
       const { issuer, jwks_uri } = await metadata();
       if (!issuer) throw new TypeError('The provider metadata has no issuer');
       if (!jwks_uri) throw new TypeError('The provider metadata has no jwks_uri');
       return verifyLogoutTokenWith(jwks.get(jwks_uri), logoutToken, {
         issuer,
         audience: ownConfig.clientId,
-        algorithms: verifyOptions.algorithms,
+        algorithms,
       });
     },
   };

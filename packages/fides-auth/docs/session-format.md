@@ -47,9 +47,21 @@ One JSON object, the same under both storages:
     accessTokenIssuedAt?: string,
     refreshToken?: string,
     idToken?: string,
+    tokenType?: string,      // absent means bearer; "dpop" for tokens bound with DPoP
+    dpopKey?: { kty: "EC", crv: "P-256", x: string, y: string, d: string },
   },
 }
 ```
+
+`tokenType` is the token response's `token_type` in lower case, kept only
+when it isn't `bearer`. With `dpop`, `dpopKey` is the private key the tokens
+are bound to. A version that meets a type it doesn't know never sends the
+access token as a bearer token and never refreshes with it: the session reads,
+and its tokens are left for the version that wrote them.
+
+The versions before `tokenType` don't have that guard: they read a bound
+token as a bearer token. So every instance must run a version that knows
+`tokenType` before `dpop` is turned on.
 
 `session` is what the app sees. `tokens` never leaves the server.
 

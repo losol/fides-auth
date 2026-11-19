@@ -49,6 +49,26 @@ export type OidcClientConfig = ClientAuthConfig & {
    */
   usePar?: boolean;
   /**
+   * Binds the tokens of a login to a key that never leaves the server, with
+   * DPoP (RFC 9449): a token that leaks is then of no use without the key.
+   * With it, a token response that isn't DPoP-bound fails the login, so turn
+   * it on only for a provider that supports DPoP, and call your APIs with
+   * `authorizedFetch`, which sends the proof each request needs.
+   * @default false
+   */
+  dpop?: boolean;
+  /**
+   * Enforces the client requirements of the FAPI 2.0 Security Profile. With
+   * `'fapi2'`, creating the client throws a TypeError unless `clientAuth` is
+   * `'private_key_jwt'` with a key that isn't RS256, `usePar` and `dpop` are
+   * true and `allowInsecureRequests` is not set. `verifyIdToken` and
+   * `verifyLogoutToken` then accept only `PS256`, `ES256` and `EdDSA`, and
+   * `exchangeCode` refuses a callback without the `iss` parameter (RFC 9207).
+   * It is not a certification: the provider must follow the profile too, and
+   * mTLS, `dpop_jkt` and FAPI 2.0 Message Signing are not implemented.
+   */
+  profile?: 'fapi2';
+  /**
    * Server metadata to use instead of OIDC discovery, e.g. an RFC 8414 document.
    * Must include `issuer` when `scope` has `openid`. `issuer` above is then used
    * only for logs and caching.

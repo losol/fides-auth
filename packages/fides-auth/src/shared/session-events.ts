@@ -49,6 +49,8 @@ export type SessionRejectedReason =
   | 'unsupported_session_version'
   /** The session decoded but carries no refresh token — usually `offline_access` was never granted. */
   | 'no_refresh_token'
+  /** The session's tokens are of a type this version can't use: a later version wrote them, or their DPoP key is missing. Nothing was sent. */
+  | 'unsupported_token_type'
   /** The refresh token was rejected by the provider. See {@link RefreshFailureCause}. */
   | 'refresh_failed'
   /** A handle was sent but the server store has no live record for it: revoked, expired or evicted. Server persistence only. */
@@ -153,6 +155,7 @@ const REJECTED_LEVEL: Record<SessionRejectedReason, Level> = {
   unreadable_session: 'warn',
   unsupported_session_version: 'error',
   no_refresh_token: 'warn',
+  unsupported_token_type: 'error',
 };
 
 /** Only `invalid_grant` is business as usual; the rest are someone's infrastructure failing. */
@@ -208,6 +211,7 @@ export const SESSION_REJECTED_REASONS = [
   'unreadable_session',
   'unsupported_session_version',
   'no_refresh_token',
+  'unsupported_token_type',
   'refresh_failed',
   'session_not_found',
   'session_expired',

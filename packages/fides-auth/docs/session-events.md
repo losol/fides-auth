@@ -65,6 +65,7 @@ endpoint all report the same word for the same situation.
 | `unreadable_session`   | warn  | A cookie arrived but would not decrypt. Corruption, or a changed `issuer` or `clientId`, or a secret replaced without keeping the old one in the list. |
 | `unsupported_session_version` | error | The session opened, but a later major of the library wrote it. A rollback, or two versions running side by side. Comes with `version`. |
 | `no_refresh_token`     | warn  | The session has no refresh token — usually `offline_access` was never granted. |
+| `unsupported_token_type` | error | The session's tokens are of a type this version can't use: a later version wrote them, or their DPoP key is missing. Nothing was sent, and the session is left as it is. |
 
 The level follows the **reason**, not the event. A single level for the whole
 event would be wrong in both directions: an anonymous request hitting a protected
