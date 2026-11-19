@@ -1,8 +1,8 @@
 /**
  * The session format, pinned.
  *
- * The values below were written by 1.0.0-beta.8 with the secret, the provider
- * and the client in this file. Every 1.x must keep reading them: a cookie in a
+ * The values below were written with the secret, the provider and the client
+ * in this file. Every 1.x must keep reading them: a cookie in a
  * browser, a record in a store and a lookup hash in an index all outlive the
  * deploy that wrote them.
  *
@@ -77,6 +77,15 @@ const SEALED_FOR_STORE =
 
 /** A login under way: state `state-1`, verifier `verifier-1`, return path `/after`, scope `openid`. */
 const TRANSACTION_COOKIE =
+  'eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..y85MQ49Wt0ElX68H.qqRXlE49LHU2nyjG5qTgV6GSNva_EDfeQPCllX' +
+  'mINA5V4ofahtCFjKg7NsHM8iyosKqkNwJXXB-LiyBqZlwWZHurGqXgCcmUWo_5SUTqM0oNycXukCKL2nXNqHSJfEVOUn3Zbu' +
+  '9v_dmuocTxjUzuM8jT6evkt-mu9psWj6fYXw.iURoY8eqC8jGNq6Q-wKp4w';
+
+/**
+ * The same login sealed under a key without the provider and the client in
+ * it, which any instance with the secret could open.
+ */
+const TRANSACTION_COOKIE_WITHOUT_AUDIENCE =
   'eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..qzQdCbVWjZe0RlL6.nrXy_oS33fP3oCZosPLCNBvRjXwfnXctf-Xjqi' +
   'utYU9eGZj2xIOgduclg180fottmmt_TsOD16CgJ6HxYV7OFDu8Pi82VmDOluX7BD0DrzG4VcBdIjehciCna2IpFDFNIonNnh' +
   'C9M4zDbmhxaOsJCh2hHyMCF_BUHya4ND85DQ.xOWjrUXH5KK4FHo7XyeZ4g';
@@ -216,13 +225,27 @@ describe('a login a 1.x started', () => {
   it('is read back from its cookie', async () => {
     const cookies = withCookie(`__Host-oauth_tx_0=${TRANSACTION_COOKIE}`);
 
-    expect(await readTransaction(cookies, 'state-1', SECRET, { logger: quiet })).toEqual({
+    const audience = JSON.stringify([ISSUER, CLIENT]);
+
+    expect(await readTransaction(cookies, 'state-1', SECRET, { audience, logger: quiet })).toEqual({
       state: 'state-1',
       codeVerifier: 'verifier-1',
       returnTo: '/after',
       scope: 'openid',
       createdAt: 1767225600000,
     });
+    // For its own provider and client only.
+    const other = JSON.stringify(['https://another-idp.example', CLIENT]);
+    expect(await readTransaction(cookies, 'state-1', SECRET, { audience: other, logger: quiet })).toBeNull();
+  });
+
+  it('is not read when it was sealed for no provider in particular', async () => {
+    // Such a login could be finished by an instance for another provider.
+    const cookies = withCookie(`__Host-oauth_tx_0=${TRANSACTION_COOKIE_WITHOUT_AUDIENCE}`);
+    const audience = JSON.stringify([ISSUER, CLIENT]);
+
+    expect(await readTransaction(cookies, 'state-1', SECRET, { audience, logger: quiet })).toBeNull();
+    expect(await readTransaction(cookies, 'state-1', SECRET, { logger: quiet })).toBeNull();
   });
 });
 

@@ -22,8 +22,8 @@ not by opening these values itself: see [In a test](#in-a-test).
   old one in the list for a while: see
   [Replacing the secret](../README.md#replacing-the-secret).
 
-`src/server/session-format.test.ts` holds values written by 1.0.0-beta.8 and
-fails the moment one of them stops reading.
+`src/server/session-format.test.ts` holds pinned values and fails the moment
+one of them stops reading.
 
 ## The record
 
@@ -58,10 +58,6 @@ when it isn't `bearer`. With `dpop`, `dpopKey` is the private key the tokens
 are bound to. A version that meets a type it doesn't know never sends the
 access token as a bearer token and never refreshes with it: the session reads,
 and its tokens are left for the version that wrote them.
-
-The versions before `tokenType` don't have that guard: they read a bound
-token as a bearer token. So every instance must run a version that knows
-`tokenType` before `dpop` is turned on.
 
 `session` is what the app sees. `tokens` never leaves the server.
 
@@ -134,9 +130,14 @@ anything else that identifies a person is not: put that in the session's
 
 Between the redirect to the provider and the callback, the state, the PKCE
 verifier, the return path and the scope asked for are sealed in a cookie of
-their own: `__Host-oauth_tx_0`, `_1` or `_2`, for ten minutes. It is a JWE
-like the session's, under a key with the info `fides-auth login-tx`, so a
-login never opens as a session.
+their own: `__Host-oauth_tx_0`, `_1` or `_2`, for ten minutes. With a login
+that sends them, the `nonce` and the DPoP key are sealed there too. It is a
+JWE like the session's, under a key of its own, so a login never opens as a
+session.
+
+The key's info is `["fides-auth login-tx", audience]`, with the same audience
+as a session's: the provider and the client. An instance for another
+provider, with the same secret on the same origin, can't finish the login.
 
 ## In a test
 

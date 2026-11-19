@@ -95,3 +95,16 @@ export function checkIdTokenAlgorithm(config: OidcClientConfig, idToken: string 
     );
   }
 }
+
+/**
+ * Under the profile, a call that asks for tokens, or uses one, must have the
+ * DPoP key to bind or prove it with. Without the check a caller who leaves
+ * the key out gets bearer tokens and no error.
+ *
+ * @throws TypeError under the profile, without a key.
+ */
+export function requireDpopKey(config: OidcClientConfig, dpopKey: unknown, calling: string): void {
+  if (config.profile === 'fapi2' && !dpopKey) {
+    throw new TypeError(`profile 'fapi2': ${calling} needs a dpopKey, so the tokens are bound`);
+  }
+}

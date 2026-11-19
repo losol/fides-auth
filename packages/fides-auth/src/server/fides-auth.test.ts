@@ -310,6 +310,34 @@ describe('login, session and logout', () => {
     expect(jar.size).toBe(0);
   });
 
+  it('revokes the tokens of a refresh that finds the session ended on another instance', async () => {
+    // A store without a lock: nothing keeps a refresh here and an end elsewhere apart.
+    const store: SessionStore = { ...createMemorySessionStore(), withLock: undefined };
+    const keys: string[] = [];
+    const tracking: SessionStore = {
+      ...store,
+      set: (key, record, context) => {
+        keys.push(key);
+        return store.set(key, record, context);
+      },
+    };
+    const { auth, cookies } = setup({ sessionStore: tracking });
+    await login(auth, cookies);
+    let finish: (value: TokenResponse) => void = () => {};
+    oidc.refresh.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+
+    const refreshing = auth.refreshSession(cookies);
+    await vi.waitFor(() => expect(oidc.refresh).toHaveBeenCalled());
+    // Another instance ends the session, a back-channel logout say, and revokes what it held.
+    await store.delete(keys[0] ?? '');
+    finish(tokens(2));
+
+    expect(await refreshing).toMatchObject({ ok: false, reason: 'session_not_found' });
+    // The refresh token this refresh was given is good at the provider, and nobody holds it.
+    expect(oidc.revoke).toHaveBeenCalledWith('refresh-2', { tokenTypeHint: 'refresh_token' });
+    expect(await auth.readSession(cookies)).toBeNull();
+  });
+
   it('revokes the tokens a refresh still running brings back', async () => {
     const { auth, cookies, jar } = setup();
     await login(auth, cookies);

@@ -154,6 +154,19 @@ export interface SessionLifecycleOptions {
   saveRetryDelaysMs?: readonly number[];
   /** Runs the refresh token grant, e.g. `oidc.refresh`. */
   refreshTokens(refreshToken: string, tokens: Tokens): Promise<TokenResponse>;
+  /**
+   * Refuses a session whose tokens aren't bound with DPoP: at `create`, and
+   * at a refresh of one that is already there. For a profile that requires
+   * bound tokens.
+   * @default false
+   */
+  requireBoundTokens?: boolean;
+  /**
+   * Gets the record of a refresh that was not kept, because the session was
+   * ended while the refresh ran: its tokens are good at the provider and
+   * nobody holds them, so they are the caller's to revoke. A throw is logged.
+   */
+  onTokensDropped?(record: SessionRecord): void | Promise<void>;
   logger: FidesLogger;
   /** Gets every lifecycle event, next to the logger. */
   onSessionEvent?(event: SessionEvent): void;
@@ -345,6 +358,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
   const { storage, secret, rolesClaim, mapSession, mapRefresh, logger } = options;
   const sessionDurationSeconds = checkSessionDuration(options.sessionDurationSeconds);
   const refreshGraceSeconds = checkRefreshGrace(options.refreshGraceSeconds);
+  const requireBoundTokens = options.requireBoundTokens === true;
   if (hasRepeatedSecret(secret)) {
     // Harmless, and worth a line: someone who meant to replace the secret hasn't.
     logger.warn('The same session secret is listed more than once; it counts once, so nothing is being replaced');
@@ -765,6 +779,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     unsaved.delete(correlationId);
     if (!written.saved) {
       logger.info({ correlationId }, 'Session ended during refresh; not saved');
+      await dropped(updated);
       return { ok: false, reason: 'session_not_found', correlationId, ended: true };
     }
     remember(spent, updated);
@@ -779,6 +794,15 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
     return { ok: true, record: updated, rotatedRefreshToken };
   }
 
+  /** Hands tokens that were not kept to the caller, to revoke. */
+  async function dropped(record: SessionRecord): Promise<void> {
+    try {
+      await options.onTokensDropped?.(record);
+    } catch (error) {
+      logger.error({ correlationId: record.session.correlationId, error }, 'onTokensDropped threw');
+    }
+  }
+
   return {
     read,
 
@@ -790,6 +814,11 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         requestedScope: options?.requestedScope,
         dpopKey: options?.dpopKey,
       });
+      if (requireBoundTokens && presentationOfRecord(record.tokens) !== 'dpop') {
+        throw new TypeError(
+          'This instance takes only DPoP-bound tokens: the token response must be of type "DPoP", with its dpopKey',
+        );
+      }
       if (mapSession) {
         const mapped = await mapSession(tokens, claimsOf(tokens), record.session);
         checkMappedRoles(record.session, mapped);
@@ -824,6 +853,12 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       if (unless?.(current)) return { ok: true, record: current, rotatedRefreshToken: false, skipped: true };
       const correlationId = current.session.correlationId;
       notFromInside(correlationId, 'A refresh');
+      if (requireBoundTokens && presentationOfRecord(current.tokens) === 'bearer') {
+        // A bearer session from before the instance took only bound tokens.
+        // Refreshed, it would get more bearer tokens: it ends with the ones it has.
+        logger.warn({ correlationId }, 'The session holds bearer tokens and this instance takes only bound ones; not refreshed');
+        return { ok: false, reason: 'unsupported_token_type', correlationId };
+      }
       if (presentationOfRecord(current.tokens) === null) {
         // Written by a later version, or bound to a key that isn't there. A
         // refresh without the proof it needs could end the session at the
@@ -1031,7 +1066,15 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
         const running = entry.correlationId ? inflight.get(entry.correlationId) : undefined;
         if (running) await running.catch(() => undefined);
         const sealed = await entry.remove();
-        const record = sealed ? (await open(sealed, entry.binding)).record : null;
+        const stored = sealed ? (await open(sealed, entry.binding)).record : null;
+        // As in `end`: when the store still held the refresh token of a
+        // refresh whose tokens it never took, those are the ones to revoke.
+        const kept = stored ? unsaved.get(stored.session.correlationId) : undefined;
+        const record = stored && kept && kept.spent === stored.tokens.refreshToken ? kept.record : stored;
+        if (stored) {
+          recent.delete(stored.session.correlationId);
+          unsaved.delete(stored.session.correlationId);
+        }
         if (record) ended.push(record);
         if (trigger && sealed) {
           emit({

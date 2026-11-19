@@ -113,6 +113,22 @@ describe('verifyLogoutTokenWith: what it refuses', () => {
     expect(await refusal(sign(options))).toBe('invalid_token');
   });
 
+  it('a token issued more than five minutes ago, though it has not expired: a copy sent again', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const old = sign({ claims: { iat: now - 6 * 60 }, iat: false, exp: now + 3600 });
+    const recent = sign({ claims: { iat: now - 4 * 60 }, iat: false, exp: now + 3600 });
+
+    expect(await refusal(old)).toBe('invalid_token');
+    expect(await refusal(recent)).toBe('accepted');
+  });
+
+  it('a token from the future, beyond what two clocks differ by', async () => {
+    const now = Math.floor(Date.now() / 1000);
+
+    expect(await refusal(sign({ claims: { iat: now + 20 }, iat: false }))).toBe('accepted');
+    expect(await refusal(sign({ claims: { iat: now + 120 }, iat: false }))).toBe('invalid_token');
+  });
+
   it('a signature by a key the provider does not have', async () => {
     const forged = sign({ key: otherKey });
 

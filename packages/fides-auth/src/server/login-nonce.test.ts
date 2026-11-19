@@ -9,13 +9,15 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { FidesLoggerFactory } from '../shared/logger.js';
 import type { CookieStore } from './cookie-store.js';
-import { createFidesAuth, type FidesAuth, type LoginError } from './fides-auth.js';
+import { createFidesAuth, type FidesAuth, issuerForKey, type LoginError } from './fides-auth.js';
 import { createTransaction, persistTransaction } from './login-transaction.js';
 
 const APP = 'https://app.test';
 const ISSUER = 'https://idp.test';
 const CLIENT_ID = 'web';
 const secret = 'a'.repeat(64);
+/** What the instance seals its sessions and its logins for: its provider and its client. */
+const AUDIENCE = JSON.stringify([issuerForKey(ISSUER), CLIENT_ID]);
 
 const quiet: FidesLoggerFactory = { create: () => ({ debug() {}, info() {}, warn() {}, error() {} }) };
 
@@ -214,7 +216,7 @@ describe('the nonce of a login', () => {
       { state: 'state-from-before', codeVerifier: 'verifier-from-before' },
       { logger: quiet.create({ namespace: 'test' }) },
     );
-    await persistTransaction(cookies, transaction, secret);
+    await persistTransaction(cookies, transaction, secret, { audience: AUDIENCE });
     tokenResponse = async () => tokensWith(await idToken());
 
     const done = await callback(auth, cookies, 'state-from-before');
@@ -231,7 +233,7 @@ describe('the nonce of a login', () => {
       { state: 'state-from-before', codeVerifier: 'verifier-from-before' },
       { logger: quiet.create({ namespace: 'test' }) },
     );
-    await persistTransaction(cookies, transaction, secret);
+    await persistTransaction(cookies, transaction, secret, { audience: AUDIENCE });
     tokenResponse = async () => tokensWith(await idToken('a-nonce-nobody-sent'));
 
     const done = await callback(auth, cookies, 'state-from-before');
