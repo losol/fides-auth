@@ -5,7 +5,7 @@
 // (server/session-lifecycle.ts), and where the sealed string is kept is up to
 // a storage (server/session-storage.ts).
 
-import { decodeJwt, type JWTPayload } from 'jose';
+import { decodeJwt, decodeProtectedHeader, type JWTPayload } from 'jose';
 
 import { isDpopKey } from '../shared/dpop-key.js';
 import { newSessionId } from '../shared/session-events.js';
@@ -283,6 +283,19 @@ export function tokenStatusOf(tokens: Tokens, now = Date.now()): TokenStatus {
   const usable = !!tokens.accessToken && (Number.isNaN(expiresAt) || expiresAt > now);
   if (usable) return 'active';
   return tokens.refreshToken ? 'refreshable' : 'expired';
+}
+
+/**
+ * The algorithm the session's ID token is signed with, from its header.
+ * Undefined without an ID token, or with one whose header doesn't read.
+ */
+export function idTokenAlgorithmOf(record: SessionRecord): string | undefined {
+  if (!record.tokens.idToken) return undefined;
+  try {
+    return decodeProtectedHeader(record.tokens.idToken).alg;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Whether the session's lifetime has run out. */

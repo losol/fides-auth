@@ -239,7 +239,14 @@ export interface SessionLifecycle {
    */
   endMatching(
     match: { iss?: string; sub?: string; sid?: string },
-    options?: { trigger?: SessionClearedTrigger },
+    options?: {
+      trigger?: SessionClearedTrigger;
+      /**
+       * Asked for each session that matches, before it is ended. False leaves
+       * that session as it is.
+       */
+      accept?: (record: SessionRecord) => boolean;
+    },
   ): Promise<SessionRecord[]>;
 }
 
@@ -1016,7 +1023,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       return ended;
     },
 
-    async endMatching({ iss, sub, sid }, { trigger } = {}) {
+    async endMatching({ iss, sub, sid }, { trigger, accept } = {}) {
       assertSessionSecret(secret);
       if (!storage.findMatching) {
         throw new TypeError('Ending sessions without their cookies needs a sessionStore with findMatching');
@@ -1043,7 +1050,8 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
       for (const entry of found.values()) {
         // The plain fields are the store's word. Check them against the sealed
         // record, so a search that matches too much can't end someone else's session.
-        const idp = (await open(entry.sealed, entry.binding)).record?.session.idp;
+        const matched = (await open(entry.sealed, entry.binding)).record;
+        const idp = matched?.session.idp;
         if (idp && ((iss && idp.iss !== iss) || (sub && idp.sub !== sub) || (sid && idp.sid !== sid))) {
           logger.warn(
             { correlationId: entry.correlationId },
@@ -1060,6 +1068,7 @@ export function createSessionLifecycle(options: SessionLifecycleOptions): Sessio
           );
           continue;
         }
+        if (matched && accept && !accept(matched)) continue;
 
         notFromInside(entry.correlationId, 'An end of the session');
         // As in `end`: the tokens a running refresh brings back are the ones ended.

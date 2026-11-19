@@ -414,7 +414,10 @@ each sealed record and revoking its refresh token:
 | `sub` and `sid` | The same, when it is also that user's. |
 | `sub` alone | Every session of the user. |
 
-Only sessions whose ID token had the token's `iss` are ended.
+Only sessions whose ID token had the token's `iss` are ended, and only when
+the logout token is signed with the algorithm of that ID token: a provider
+signs both the same way for one client. A token that names a session and is
+signed with another algorithm is answered with 400, and the session stays.
 
 | Answer | When |
 |---|---|

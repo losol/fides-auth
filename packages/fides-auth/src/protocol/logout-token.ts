@@ -58,6 +58,8 @@ export interface LogoutToken {
   sid?: string;
   /** The token's own id. */
   jti: string;
+  /** The algorithm the token is signed with: its header's `alg`. */
+  alg: string;
   /** Every verified claim. */
   claims: JWTPayload;
 }
@@ -87,6 +89,7 @@ export async function verifyLogoutTokenWith(
 ): Promise<LogoutToken> {
   let payload: JWTPayload;
   let typ: unknown;
+  let alg: string;
   try {
     const verified = await jwtVerify(logoutToken, jwks, {
       issuer: options.issuer,
@@ -99,6 +102,7 @@ export async function verifyLogoutTokenWith(
     });
     payload = verified.payload;
     typ = verified.protectedHeader.typ;
+    alg = verified.protectedHeader.alg;
   } catch (cause) {
     throw new LogoutTokenError('invalid_token', { cause });
   }
@@ -128,6 +132,7 @@ export async function verifyLogoutTokenWith(
     ...(sub === undefined ? {} : { sub: sub as string }),
     ...(sid === undefined ? {} : { sid: sid as string }),
     jti,
+    alg,
     claims: payload,
   };
 }
