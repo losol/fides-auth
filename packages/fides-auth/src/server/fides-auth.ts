@@ -766,12 +766,17 @@ export function createFidesAuth<TData = Record<string, unknown>>(
       const returnTo = raw ? validateReturnTo(raw) : null;
       let url: URL;
       try {
+        // A key of its own for each login, so one session's tokens are of no
+        // use in another. It exists before the redirect, so the provider can
+        // bind the code to it (`dpop_jkt`) and only this login can exchange it.
+        const dpopKey = oauthConfig.dpop ? await oidc.createDpopKey() : undefined;
         const authRequest = await oidc.createAuthorizationRequest({
           parameters: options.authorizationParameters,
+          ...(dpopKey ? { dpopKey } : {}),
         });
         url = await oidc.authorizationUrl(authRequest);
 
-        const transaction = createTransaction(authRequest, { returnTo, logger: log.login });
+        const transaction = createTransaction(authRequest, { returnTo, dpopKey, logger: log.login });
         try {
           await persistTransaction(cookies, transaction, secret, txCookie);
         } catch (error) {
@@ -837,8 +842,10 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         }
         validateCallback(currentUrl.searchParams, transaction);
 
-        // A key of its own for each login, so one session's tokens are of no use in another.
-        const dpopKey = oauthConfig.dpop ? await oidc.createDpopKey() : undefined;
+        // The key the code was bound to. A login that was started before the
+        // key was made at the redirect has none, and gets one here.
+        const dpopKey =
+          transaction.dpopKey ?? (oauthConfig.dpop ? await oidc.createDpopKey() : undefined);
         const tokens = await oidc.exchangeCode(
           publicUrl,
           { codeVerifier: transaction.codeVerifier, state: transaction.state, nonce: transaction.nonce },

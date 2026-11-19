@@ -18,6 +18,7 @@ import {
   validateCallback,
   type LoginTransaction,
 } from './login-transaction.js';
+import { createDpopKey } from '../protocol/dpop.js';
 import { openRecord } from '../session/record.js';
 import { sessionKeyInfo } from './session-lifecycle.js';
 import { deriveKey } from './session-secret.js';
@@ -310,6 +311,45 @@ describe('login transaction cookie', () => {
   it('rejects a transaction whose nonce is not a string', async () => {
     const { store } = memoryStore();
     const transaction = { ...createTransaction(pkce('st'), { logger: quiet }), nonce: 7 as unknown as string };
+
+    await persistTransaction(store, transaction, secret);
+
+    expect(await readTransaction(store, 'st', secret, { logger: quiet })).toBeNull();
+  });
+
+  it('keeps the DPoP key through seal and read, out of sight in the cookie', async () => {
+    const { store, jar } = memoryStore();
+    const dpopKey = await createDpopKey();
+    const transaction = createTransaction(pkce('st'), { logger: quiet, dpopKey, returnTo: '/dash' });
+
+    await persistTransaction(store, transaction, secret);
+
+    expect(jar.get(SLOT_0)).not.toContain(dpopKey.d);
+    expect((await readTransaction(store, 'st', secret, { logger: quiet }))?.dpopKey).toEqual(dpopKey);
+    // With the longest returnTo it keeps, a transaction with a key still fits a cookie with room to spare.
+    const longest = createTransaction(pkce('st'), { logger: quiet, dpopKey, returnTo: `/${'a'.repeat(500)}` });
+    const big = memoryStore();
+    await persistTransaction(big.store, { ...longest, nonce: 'n'.repeat(43), scope: 'openid profile email offline_access' }, secret);
+    expect(big.jar.get(SLOT_0)?.length ?? 0).toBeLessThan(2500);
+  });
+
+  it('has no key for a login without DPoP', async () => {
+    const { store } = memoryStore();
+    const transaction = createTransaction(pkce('st'), { logger: quiet });
+    expect('dpopKey' in transaction).toBe(false);
+
+    await persistTransaction(store, transaction, secret);
+
+    expect((await readTransaction(store, 'st', secret, { logger: quiet }))?.dpopKey).toBeUndefined();
+  });
+
+  it.each<[string, unknown]>([
+    ['a string', 'key'],
+    ['a public key only', { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' }],
+    ['null', null],
+  ])('rejects a transaction whose DPoP key is %s', async (_, dpopKey) => {
+    const { store } = memoryStore();
+    const transaction = { ...createTransaction(pkce('st'), { logger: quiet }), dpopKey: dpopKey as never };
 
     await persistTransaction(store, transaction, secret);
 

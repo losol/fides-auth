@@ -36,7 +36,7 @@ export type OidcClientConfig = ClientAuthConfig & {
   /**
    * Extra authorization request parameters (e.g. `prompt`, `resource`), added by `createAuthorizationRequest`.
    * Reserved keys throw: `state`, `code_challenge`, `code_challenge_method`, `redirect_uri`,
-   * `client_id`, `response_type`, `request`, `request_uri` and `nonce`.
+   * `client_id`, `response_type`, `request`, `request_uri`, `nonce` and `dpop_jkt`.
    * fides-auth sets `nonce` itself when the scope has `openid`.
    */
   authorizationParameters?: Record<string, string>;
@@ -51,6 +51,7 @@ export type OidcClientConfig = ClientAuthConfig & {
   /**
    * Binds the tokens of a login to a key that never leaves the server, with
    * DPoP (RFC 9449): a token that leaks is then of no use without the key.
+   * The key's thumbprint is sent as `dpop_jkt`, so the code is bound to it too.
    * With it, a token response that isn't DPoP-bound fails the login, so turn
    * it on only for a provider that supports DPoP, and call your APIs with
    * `authorizedFetch`, which sends the proof each request needs.
@@ -63,9 +64,10 @@ export type OidcClientConfig = ClientAuthConfig & {
    * `'private_key_jwt'` with a key that isn't RS256, `usePar` and `dpop` are
    * true and `allowInsecureRequests` is not set. `verifyIdToken` and
    * `verifyLogoutToken` then accept only `PS256`, `ES256` and `EdDSA`, and
-   * `exchangeCode` refuses a callback without the `iss` parameter (RFC 9207).
+   * `exchangeCode` refuses a callback without the `iss` parameter (RFC 9207),
+   * and `createAuthorizationRequest` needs a `dpopKey` to send as `dpop_jkt`.
    * It is not a certification: the provider must follow the profile too, and
-   * mTLS, `dpop_jkt` and FAPI 2.0 Message Signing are not implemented.
+   * mTLS and FAPI 2.0 Message Signing are not implemented.
    */
   profile?: 'fapi2';
   /**

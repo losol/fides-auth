@@ -313,11 +313,32 @@ describe('the iss of the callback', () => {
   /** Exchanges the code of a callback with `parameters` next to its `code` and `state`. */
   async function exchange(oidcConfig: OidcClientConfig, parameters: Record<string, string> = {}) {
     const client = createOidcClient(oidcConfig, { logger: quiet });
-    const request = await client.createAuthorizationRequest();
+    // One key for the login: named in the request as dpop_jkt, and proved at the exchange.
+    const dpopKey = await client.createDpopKey();
+    const request = await client.createAuthorizationRequest({ dpopKey });
     const callbackUrl = new URL(redirectUri);
     callbackUrl.search = new URLSearchParams({ code: 'code-1', state: request.state, ...parameters }).toString();
-    return client.exchangeCode(callbackUrl, request, { dpopKey: await client.createDpopKey() });
+    return client.exchangeCode(callbackUrl, request, { dpopKey });
   }
+
+  it('needs the key before the redirect, to bind the code to it', async () => {
+    const client = createOidcClient(config(), { logger: quiet });
+
+    await expect(client.createAuthorizationRequest()).rejects.toThrow(
+      "profile 'fapi2': createAuthorizationRequest needs a dpopKey",
+    );
+    const dpopKey = await client.createDpopKey();
+    const request = await client.createAuthorizationRequest({ dpopKey });
+    expect(request.parameters.dpop_jkt).toMatch(/^[\w-]{43}$/);
+  });
+
+  it('asks for no key without the profile', async () => {
+    const client = createOidcClient(withoutProfile(), { logger: quiet });
+
+    const request = await client.createAuthorizationRequest();
+
+    expect('dpop_jkt' in request.parameters).toBe(false);
+  });
 
   // The metadata here says nothing of `authorization_response_iss_parameter_supported`.
   it.each([
@@ -423,6 +444,8 @@ describe('a login through createFidesAuth with profile fapi2', () => {
     expect(tokens).toMatchObject({ accessToken: 'access-1', tokenType: 'dpop' });
     const { x, y } = tokens?.dpopKey ?? { x: '', y: '' };
     expect(boundTo).toBe(await calculateJwkThumbprint({ kty: 'EC', crv: 'P-256', x, y }));
+    // The code was bound to that same key: its thumbprint was pushed with the request, as dpop_jkt.
+    expect(pushedBody.get('dpop_jkt')).toBe(boundTo);
   });
 
   it('fails the login when the callback has no iss, and sends the code nowhere', async () => {
