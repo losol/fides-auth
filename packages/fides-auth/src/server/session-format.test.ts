@@ -1,9 +1,8 @@
 /**
  * The session format, pinned.
  *
- * The values below were written by 1.0.0-beta.8 with the secret, the provider
- * and the client in this file, except the login under way, which 1.0.0-beta.11
- * wrote: see there. Every 1.x must keep reading them: a cookie in a
+ * The values below were written with the secret, the provider and the client
+ * in this file. Every 1.x must keep reading them: a cookie in a
  * browser, a record in a store and a lookup hash in an index all outlive the
  * deploy that wrote them.
  *
@@ -76,20 +75,15 @@ const SEALED_FOR_STORE =
   '1rxRb8VdXrG-f66UGOj3Y3hMSeDf29uSZrd7mbwVVuNMznwCM6p8EMxc_j7hZzA4JfJ8cSQ-d7ErnQJYvY9Bz39FndB3xmSZ' +
   'ngHrcbESWMpPmEdtnlgjc1.d_LVTQZJ-QCYTFKp2WCavQ';
 
-/**
- * A login under way: state `state-1`, verifier `verifier-1`, return path
- * `/after`, scope `openid`. Written by 1.0.0-beta.11, the first to seal a
- * login for its provider and client.
- */
+/** A login under way: state `state-1`, verifier `verifier-1`, return path `/after`, scope `openid`. */
 const TRANSACTION_COOKIE =
   'eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..y85MQ49Wt0ElX68H.qqRXlE49LHU2nyjG5qTgV6GSNva_EDfeQPCllX' +
   'mINA5V4ofahtCFjKg7NsHM8iyosKqkNwJXXB-LiyBqZlwWZHurGqXgCcmUWo_5SUTqM0oNycXukCKL2nXNqHSJfEVOUn3Zbu' +
   '9v_dmuocTxjUzuM8jT6evkt-mu9psWj6fYXw.iURoY8eqC8jGNq6Q-wKp4w';
 
 /**
- * The same login as the betas up to 1.0.0-beta.10 sealed it: under a key
- * without the provider and the client in it, which any instance with the
- * secret could open. It is kept here to show that it no longer does.
+ * The same login sealed under a key without the provider and the client in
+ * it, which any instance with the secret could open.
  */
 const TRANSACTION_COOKIE_WITHOUT_AUDIENCE =
   'eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..qzQdCbVWjZe0RlL6.nrXy_oS33fP3oCZosPLCNBvRjXwfnXctf-Xjqi' +
@@ -245,10 +239,8 @@ describe('a login a 1.x started', () => {
     expect(await readTransaction(cookies, 'state-1', SECRET, { audience: other, logger: quiet })).toBeNull();
   });
 
-  it('is not read when a beta before 1.0.0-beta.11 sealed it, for no provider in particular', async () => {
-    // A deliberate break, before 1.0: such a login could be finished by an
-    // instance for another provider. It costs a login that was under way
-    // during the upgrade, which the user starts again.
+  it('is not read when it was sealed for no provider in particular', async () => {
+    // Such a login could be finished by an instance for another provider.
     const cookies = withCookie(`__Host-oauth_tx_0=${TRANSACTION_COOKIE_WITHOUT_AUDIENCE}`);
     const audience = JSON.stringify([ISSUER, CLIENT]);
 

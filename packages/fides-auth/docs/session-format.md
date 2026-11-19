@@ -22,8 +22,8 @@ not by opening these values itself: see [In a test](#in-a-test).
   old one in the list for a while: see
   [Replacing the secret](../README.md#replacing-the-secret).
 
-`src/server/session-format.test.ts` holds values written by 1.0.0-beta.8 and
-fails the moment one of them stops reading.
+`src/server/session-format.test.ts` holds pinned values and fails the moment
+one of them stops reading.
 
 ## The record
 
@@ -58,10 +58,6 @@ when it isn't `bearer`. With `dpop`, `dpopKey` is the private key the tokens
 are bound to. A version that meets a type it doesn't know never sends the
 access token as a bearer token and never refreshes with it: the session reads,
 and its tokens are left for the version that wrote them.
-
-The versions before `tokenType` don't have that guard: they read a bound
-token as a bearer token. So every instance must run a version that knows
-`tokenType` before `dpop` is turned on.
 
 `session` is what the app sees. `tokens` never leaves the server.
 
@@ -142,11 +138,6 @@ session.
 The key's info is `["fides-auth login-tx", audience]`, with the same audience
 as a session's: the provider and the client. An instance for another
 provider, with the same secret on the same origin, can't finish the login.
-
-The betas up to 1.0.0-beta.10 sealed with the info `fides-auth login-tx`
-alone. Such a login is not read any more: a login that is under way while an
-app is upgraded from one of them ends as `login_expired`, and the user starts
-it again.
 
 ## In a test
 

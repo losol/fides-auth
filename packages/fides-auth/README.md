@@ -842,10 +842,6 @@ working with bound tokens: call the API with `authorizedFetch`, or make the
 proof with `createDpopProof(tokens.dpopKey, { method, url, accessToken })`
 from `/oidc`.
 
-Turn `dpop` on only when every instance runs a version that has it: an older
-one reads a bound session's token as a bearer token. Roll the version out
-first, then the setting.
-
 A session's own `tokenType` decides how its token is sent, not the config: a
 session that was bound stays bound when `dpop` is turned off, and a bearer
 session stays one when it is turned on, until the user logs in again.
