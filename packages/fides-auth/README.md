@@ -98,7 +98,7 @@ const oidc = createOidcClient(
 const request = await oidc.createAuthorizationRequest({ parameters: { ui_locales: "nb" } });
 const url = await oidc.authorizationUrl(request); // through PAR when usePar is set
 
-// Callback: checks state and PKCE against the request.
+// Callback: checks state, PKCE and the ID token's nonce against the request.
 const tokens = await oidc.exchangeCode(new URL(callbackUrl), request);
 const claims = await oidc.verifyIdToken(tokens.id_token!);
 
@@ -203,7 +203,8 @@ the config's `scope`. These keys are reserved, and passing one throws:
   fides-auth sets.
 - `client_id` and `response_type`, which openid-client sets.
 - `request` and `request_uri`, which would bypass PKCE and `state`.
-- `nonce`, which the callback doesn't check, so the login would fail.
+- `nonce`, which fides-auth sets when the scope has `openid` and checks in
+  the ID token at the callback.
 
 #### Pushed Authorization Requests (PAR, RFC 9126)
 

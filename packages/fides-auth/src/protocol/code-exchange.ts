@@ -5,6 +5,8 @@ import type { ProtocolContext } from './context.js';
 
 /**
  * Exchanges the code in `callbackUrl` for tokens, checking `expectedState` and PKCE.
+ * With `expectedNonce`, the response must have an ID token whose `nonce` is
+ * that value. Without it, an ID token that carries a `nonce` is refused.
  * The core of `OidcClient.exchangeCode`.
  *
  * @throws TypeError if the config has no redirect URI.
@@ -14,6 +16,7 @@ export async function exchangeCode(
   callbackUrl: URL,
   codeVerifier: string,
   expectedState: string,
+  expectedNonce?: string,
 ): Promise<openid.TokenEndpointResponse> {
   const redirectUri = redirectUriOf(oauthConfig);
   logger.debug(
@@ -40,6 +43,8 @@ export async function exchangeCode(
     {
       pkceCodeVerifier: codeVerifier,
       expectedState,
+      // A string makes openid-client require the ID token and compare its `nonce`.
+      ...(expectedNonce ? { expectedNonce } : {}),
     },
     { redirect_uri: redirectUri },
   );

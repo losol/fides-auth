@@ -253,6 +253,23 @@ describe('login, session and logout', () => {
     ]);
   });
 
+  it("checks the ID token against the nonce the login's request had", async () => {
+    const { auth, cookies, jar } = setup();
+    oidc.createAuthorizationRequest.mockResolvedValueOnce({
+      codeVerifier: 'v',
+      codeChallenge: 'challenge',
+      state: 'state-n',
+      nonce: 'nonce-n',
+      parameters: { nonce: 'nonce-n' },
+    } as never);
+
+    await auth.handleOidcLogin(get('/api/auth/login'), cookies);
+    expect([...jar.values()].join('\n')).not.toContain('nonce-n');
+    await auth.handleOidcCallback(get('/api/auth/callback?code=abc&state=state-n'), cookies);
+
+    expect(oidc.exchangeCode.mock.calls[0]?.[1]).toEqual({ codeVerifier: 'v', state: 'state-n', nonce: 'nonce-n' });
+  });
+
   it('sends the code exchange the public callback URL, not the one the proxy saw', async () => {
     const { auth, cookies } = setup();
     const started = await auth.handleOidcLogin(get('/api/auth/login'), cookies);

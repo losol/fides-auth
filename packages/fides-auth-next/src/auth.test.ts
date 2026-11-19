@@ -54,10 +54,22 @@ const quiet = { debug() {}, info() {}, warn() {}, error() {} };
 
 const b64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
 
-/** An ID token as the token endpoint returns it. Its signature isn't checked there. */
-function idToken(): string {
+/**
+ * An ID token as the token endpoint returns it, with the `nonce` of the login
+ * it answers. Its signature isn't checked there.
+ */
+function idToken(nonce?: string | null): string {
   const now = Math.floor(Date.now() / 1000);
-  const claims = { iss: ISSUER, aud: 'web', sub: 'user-1', sid: 'idp-1', name: 'Ada', iat: now, exp: now + 300 };
+  const claims = {
+    iss: ISSUER,
+    aud: 'web',
+    sub: 'user-1',
+    sid: 'idp-1',
+    name: 'Ada',
+    iat: now,
+    exp: now + 300,
+    ...(nonce ? { nonce } : {}),
+  };
   return `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64(claims)}.c2lnbmF0dXJl`;
 }
 
@@ -72,6 +84,8 @@ interface Provider {
   rejectNextRefresh(): void;
   /** Lifetime of the access tokens it issues, in seconds. */
   expiresIn: number;
+  /** The `nonce` of the authorization request it last got, which the next ID token carries. */
+  nonce: string | null;
 }
 
 /** Stubs fetch with the provider's token endpoint, and an API that rejects `access-1`. */
@@ -86,6 +100,7 @@ function stubProvider(): Provider {
       reject = true;
     },
     expiresIn: 300,
+    nonce: null,
   };
   vi.stubGlobal(
     'fetch',
@@ -99,7 +114,7 @@ function stubProvider(): Provider {
           return Response.json({ error: 'invalid_grant' }, { status: 400 });
         }
         issued += 1;
-        const id = body.get('grant_type') === 'authorization_code' ? idToken() : undefined;
+        const id = body.get('grant_type') === 'authorization_code' ? idToken(provider.nonce) : undefined;
         if (id) provider.idTokens.push(id);
         return Response.json({
           access_token: `access-${issued}`,
@@ -157,7 +172,10 @@ const post = (path: string) =>
 
 async function login(auth: Pick<FidesAuth, 'handleOidcLogin' | 'handleOidcCallback'>): Promise<Response> {
   const started = await auth.handleOidcLogin(new Request(`${APP}/api/auth/login?returnTo=%2Faccount`));
-  const state = new URL(started.headers.get('location') ?? '').searchParams.get('state');
+  const authorize = new URL(started.headers.get('location') ?? '');
+  const state = authorize.searchParams.get('state');
+  // The provider reads the nonce off the authorization request, as a real one does.
+  provider.nonce = authorize.searchParams.get('nonce');
   newRender();
   return auth.handleOidcCallback(new Request(`${APP}/api/auth/callback?code=abc&state=${state}`));
 }

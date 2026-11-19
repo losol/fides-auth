@@ -1,7 +1,7 @@
 // server/login-transaction.ts
 //
 // One login between the authorize redirect and the callback: state, PKCE
-// verifier, returnTo and start time, sealed into one of a few cookie slots, so
+// verifier, nonce, returnTo and start time, sealed into one of a few cookie slots, so
 // parallel logins in one browser neither overwrite each other nor pile up. It is
 // sealed under a key derived from the secret, so it never opens as a session.
 
@@ -37,6 +37,8 @@ const KEY_INFO = 'fides-auth login-tx';
 export interface LoginTransaction {
   state: string;
   codeVerifier: string;
+  /** The `nonce` the ID token must carry. Absent for a login without `openid`. */
+  nonce?: string;
   /** Path to return to after login, already validated. */
   returnTo?: string;
   /** The scope the login asked for, as sent. */
@@ -88,7 +90,7 @@ export interface ValidateCallbackOptions {
 
 /** Starts a login transaction from the authorization request sent to the provider. */
 export function createTransaction(
-  request: Pick<AuthorizationRequest, 'state' | 'codeVerifier'> &
+  request: Pick<AuthorizationRequest, 'state' | 'codeVerifier' | 'nonce'> &
     Partial<Pick<AuthorizationRequest, 'parameters'>>,
   { returnTo, logger }: CreateTransactionOptions,
 ): LoginTransaction {
@@ -101,6 +103,7 @@ export function createTransaction(
   return {
     state: request.state,
     codeVerifier: request.codeVerifier,
+    ...(request.nonce ? { nonce: request.nonce } : {}),
     ...(kept ? { returnTo: kept } : {}),
     ...(typeof scope === 'string' && scope ? { scope } : {}),
     createdAt: Date.now(),
@@ -256,12 +259,14 @@ async function openWith(value: string, key: Uint8Array): Promise<LoginTransactio
       typeof sealed.state === 'string' &&
       typeof sealed.codeVerifier === 'string' &&
       typeof sealed.createdAt === 'number' &&
+      (sealed.nonce === undefined || typeof sealed.nonce === 'string') &&
       (sealed.returnTo === undefined || typeof sealed.returnTo === 'string') &&
       (sealed.scope === undefined || typeof sealed.scope === 'string')
     ) {
       return {
         state: sealed.state,
         codeVerifier: sealed.codeVerifier,
+        nonce: sealed.nonce,
         returnTo: sealed.returnTo,
         scope: sealed.scope,
         createdAt: sealed.createdAt,

@@ -73,7 +73,7 @@ export class VippsLoginClient {
    */
   exchangeCode(
     callbackUrl: URL,
-    request: Pick<AuthorizationRequest, 'codeVerifier' | 'state'>,
+    request: Pick<AuthorizationRequest, 'codeVerifier' | 'state' | 'nonce'>,
   ): Promise<openid.TokenEndpointResponse> {
     return this.oidc.exchangeCode(callbackUrl, request);
   }

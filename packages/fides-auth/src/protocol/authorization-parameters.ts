@@ -1,7 +1,7 @@
 import { redirectUriOf } from './config.js';
 import type { ProtocolContext } from './context.js';
 import { defaultScope, joinScope } from './scope.js';
-import { createPkcePair, createState } from './pkce.js';
+import { createNonce, createPkcePair, createState } from './pkce.js';
 
 /** One login's authorization request, from `OidcClient.createAuthorizationRequest`. */
 export interface AuthorizationRequest {
@@ -11,6 +11,12 @@ export interface AuthorizationRequest {
   codeChallenge: string;
   /** Echoed back on the callback, where `exchangeCode` checks it. */
   state: string;
+  /**
+   * Ties the ID token to this login: sent as `nonce`, and `exchangeCode`
+   * checks that the ID token carries it. Set when the scope has `openid`, so
+   * when an ID token is expected. Keep it on the server with the verifier.
+   */
+  nonce?: string;
   /** The parameters sent to the authorization endpoint. */
   parameters: Record<string, string>;
 }
@@ -34,12 +40,15 @@ const RESERVED_AUTHORIZATION_PARAMETERS = new Set([
   // Would bypass the PKCE and state parameters above
   'request',
   'request_uri',
-  // The callback expects no nonce, so an ID token carrying one fails the login
+  // Set by createAuthorizationRequest when the scope has `openid`. One from
+  // the app would not be the one the callback expects, so the login would fail
   'nonce',
 ]);
 
 /**
- * Creates a PKCE pair, a state and the authorization parameters for one login.
+ * Creates a PKCE pair, a state, a nonce and the authorization parameters for
+ * one login. The nonce is left out when the scope has no `openid`: there is
+ * then no ID token to carry it.
  * The core of `OidcClient.createAuthorizationRequest`.
  *
  * @throws TypeError if the config has no redirect URI.
@@ -67,6 +76,9 @@ export async function createAuthorizationRequest(
     code_challenge_method: 'S256',
     state,
   };
+  // Decided from the scope as sent: an extra `scope` replaces the config's.
+  const nonce = (parameters.scope ?? '').split(/\s+/).includes('openid') ? createNonce() : undefined;
+  if (nonce) parameters.nonce = nonce;
 
   // Keys only: values such as login_hint can be personal data.
   logger.debug(
@@ -74,5 +86,5 @@ export async function createAuthorizationRequest(
     'PKCE parameters generated'
   );
 
-  return { codeVerifier, codeChallenge, state, parameters };
+  return { codeVerifier, codeChallenge, state, ...(nonce ? { nonce } : {}), parameters };
 }

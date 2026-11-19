@@ -20,7 +20,7 @@ import { createOidcClient } from './client.js';
 const quiet = { create: (): FidesLogger => ({ debug() {}, info() {}, warn() {}, error() {} }) };
 
 /** Exchanges the code on `callbackUrl` with a new client. */
-function exchange(callbackUrl: URL, codeVerifier: string, state: string) {
+function exchange(callbackUrl: URL, codeVerifier: string, state: string, nonce?: string) {
   const client = createOidcClient(
     {
       issuer: 'https://auth.example.com',
@@ -31,7 +31,7 @@ function exchange(callbackUrl: URL, codeVerifier: string, state: string) {
     },
     { logger: quiet },
   );
-  return client.exchangeCode(callbackUrl, { codeVerifier, state });
+  return client.exchangeCode(callbackUrl, { codeVerifier, state, nonce });
 }
 
 const discoveredConfig = { serverMetadata: () => ({}) } as unknown as openid.Configuration;
@@ -89,5 +89,29 @@ describe('exchangeCode — callback URL normalization', () => {
 
     const [, passedCallbackUrl] = vi.mocked(openid.authorizationCodeGrant).mock.calls[0];
     expect((passedCallbackUrl as URL).toString()).toBe(matchingCallback.toString());
+  });
+});
+
+describe('exchangeCode — nonce', () => {
+  const callback = new URL('https://app.example.com/callback?code=auth-code&state=state-1');
+
+  it('hands the nonce of the login to openid-client, with the state and the verifier', async () => {
+    await exchange(callback, 'verifier-1', 'state-1', 'nonce-1');
+
+    const [, , checks] = vi.mocked(openid.authorizationCodeGrant).mock.calls[0];
+    expect(checks).toEqual({
+      pkceCodeVerifier: 'verifier-1',
+      expectedState: 'state-1',
+      expectedNonce: 'nonce-1',
+    });
+  });
+
+  it('expects no nonce for a login that sent none', async () => {
+    await exchange(callback, 'verifier-1', 'state-1');
+
+    const [, , checks] = vi.mocked(openid.authorizationCodeGrant).mock.calls[0];
+    expect(checks).toEqual({ pkceCodeVerifier: 'verifier-1', expectedState: 'state-1' });
+    // Not even as undefined: openid-client reads the key.
+    expect(checks && 'expectedNonce' in checks).toBe(false);
   });
 });

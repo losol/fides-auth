@@ -177,6 +177,7 @@ describe('createOidcClient: authorization requests', () => {
 
     expect(request.codeVerifier).toMatch(/^[\w-]{43,}$/);
     expect(request.state).toMatch(/^[\w-]+$/);
+    expect(request.nonce).toMatch(/^[\w-]{43}$/);
     expect(request.parameters).toEqual({
       redirect_uri: 'https://app.example.test/callback',
       scope: 'openid profile',
@@ -185,6 +186,7 @@ describe('createOidcClient: authorization requests', () => {
       code_challenge: request.codeChallenge,
       code_challenge_method: 'S256',
       state: request.state,
+      nonce: request.nonce,
     });
   });
 
