@@ -15,6 +15,11 @@ export type {
 } from './protocol/authorization-parameters.js';
 export type { ClientCredentialsOptions } from './protocol/client-credentials.js';
 export type { OidcLogoutOptions } from './protocol/logout-url.js';
+export {
+  LogoutTokenError,
+  type LogoutToken,
+  type LogoutTokenErrorReason,
+} from './protocol/logout-token.js';
 export type { RevokeOptions } from './protocol/revocation.js';
 export type { UserInfoOptions } from './protocol/userinfo.js';
 

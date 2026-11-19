@@ -360,6 +360,34 @@ describe('createFidesAuth for Next', () => {
   });
 });
 
+describe('handleBackChannelLogout', () => {
+  const posted = () =>
+    new Request(`${APP}/api/auth/backchannel-logout`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: 'logout_token=not-a-token',
+    });
+
+  it('throws for sessions kept in cookies, which the provider cannot end', async () => {
+    const { auth } = setup();
+
+    await expect(auth.handleBackChannelLogout(posted())).rejects.toThrow(
+      'handleBackChannelLogout needs a sessionStore with findMatching',
+    );
+  });
+
+  it('answers the provider without reading the request\'s cookies', async () => {
+    const { auth } = setup({ sessionStore: createMemorySessionStore() });
+    const before = render.cookieCalls;
+
+    const response = await auth.handleBackChannelLogout(posted());
+
+    // The metadata here has no jwks_uri, so the token can't be verified: refused, not thrown.
+    expect(response.status).toBe(400);
+    expect(render.cookieCalls).toBe(before);
+  });
+});
+
 describe('authorizedFetch and refreshSession', () => {
   it('never refreshes in authorizedFetch: a 401 is an http_error', async () => {
     const { auth } = setup();

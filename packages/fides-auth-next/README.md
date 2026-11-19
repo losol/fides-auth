@@ -37,7 +37,17 @@ export const auth = createFidesAuth({
 
 The library never reads the environment, so pass the values in. It checks the
 secret and the redirect URI on first use, so `next build` can import the module
-without them. A client with `clientAuth: 'none'` throws at once: the server side
+without them. A client with With a `sessionStore` that has `findMatching`, `handleBackChannelLogout` lets
+the provider end a user's sessions: register its route as the client's
+`backchannel_logout_uri`. It takes no cookies, and answers 200 or 400. See
+[Back-channel logout](../fides-auth/docs/server-sessions.md#back-channel-logout).
+
+```typescript
+// app/api/auth/backchannel-logout/route.ts
+export const POST = (request: Request) => auth.handleBackChannelLogout(request);
+```
+
+`clientAuth: 'none'` throws at once: the server side
 of an app is a confidential client.
 
 | Option | Default | |

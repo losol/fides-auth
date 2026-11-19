@@ -5,7 +5,7 @@
 import { createRemoteJWKSet, type JWTPayload, jwtVerify } from 'jose';
 
 /** Asymmetric only, so `none` and `HS*` are rejected. */
-const DEFAULT_ALGORITHMS = [
+export const DEFAULT_ALGORITHMS = [
   'RS256',
   'RS384',
   'RS512',
@@ -18,7 +18,7 @@ const DEFAULT_ALGORITHMS = [
   'EdDSA',
 ];
 
-type RemoteJwks = ReturnType<typeof createRemoteJWKSet>;
+export type RemoteJwks = ReturnType<typeof createRemoteJWKSet>;
 
 /** One getter per JWKS URI; jose refetches it on an unknown `kid`. */
 export interface JwksCache {

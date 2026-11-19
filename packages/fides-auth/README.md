@@ -251,6 +251,13 @@ const user = userFromClaims(claims, "roles"); // { sub, name?, email?, roles }
 `algorithms` defaults to `RS*`, `PS*`, `ES*` and `EdDSA`. The JWKS is cached on
 the client.
 
+`oidc.verifyLogoutToken(logoutToken)` verifies the token of a back-channel
+logout the same way, and then that it has the logout event, a `sub` or a `sid`,
+and no `nonce`. It returns `{ iss, sub?, sid?, jti, claims }` and throws a
+`LogoutTokenError` with a `reason`. On the server,
+[`handleBackChannelLogout`](./docs/server-sessions.md#back-channel-logout) calls
+it and ends the sessions.
+
 #### UserInfo
 
 `oidc.userInfo` gets the claims from the provider's UserInfo endpoint for the
@@ -387,6 +394,7 @@ confidential client.
 | `handleOidcLogout(request, cookies, { state?, logoutHint? })` | `POST` from the app's own pages. Ends the session, revokes its refresh token, and redirects to the provider's end-session endpoint. |
 | `handleSessionInfo(request, cookies)` | `GET`. Whether there is a session, whose, when it ends (`expiresAt`), and whether its access token still works (`tokenStatus`). Never refreshes, never returns tokens. 503 when the session store failed. |
 | `handleHeartbeat(request, cookies)` | `POST`. Refreshes the session: 401 when it is over, 503 when the provider or the store failed. |
+| `handleBackChannelLogout(request)` | `POST` from the provider, with a `logout_token`. Ends the sessions the token names: 200 when done, 400 when the token is refused or the store failed. Needs a `sessionStore` with `findMatching`. See [Back-channel logout](./docs/server-sessions.md#back-channel-logout). |
 | `readSession`, `tryReadSession` | The session or null, or why there is none. `tryReadSession` also gives `tokenStatus`. |
 | `getTokens` | The tokens, which the session doesn't carry. |
 | `readSessionWithTokens` | The session and its tokens in one read, or why there is none. |
@@ -399,7 +407,7 @@ confidential client.
 
 Besides `oauthConfig` and `secret`, the config takes `sessionStore`,
 `storeFields`, `sessionDurationSeconds` (12 hours), `refreshGraceSeconds` (10),
-`applicationUrl` (the redirect URI's origin),
+`applicationUrl` (the redirect URI's origin), `strictOriginCheck` (false),
 `mapSession`, `mapRefresh`, `rolesClaim` (`roles`), `validateReturnTo`, `defaultRedirectPath`
 (`/`), `postLogoutRedirectUri` (`applicationUrl`), `rateLimit`, `logger`,
 `onSessionEvent` and `loginSuccessParam` (true).
@@ -891,7 +899,9 @@ const user = await vipps.getUserInfo(tokens.access_token, { expectedSubject: cla
 - **AES-256-GCM** — Sessions encrypted with authenticated encryption
 - **Bound sessions** — A session is sealed for its provider and client, and in a store for its own key. Another instance with the same secret can't read it, and a stored record can't be moved to another key or sent as a cookie
 - **Open redirect protection** — Return paths are validated and kept on the app's origin
-- **CSRF** — Logout and heartbeat answer only a same-origin `POST`
+- **Nonce** — A login sends a `nonce`, and the ID token must carry it
+- **CSRF** — Logout and heartbeat answer only a same-origin `POST`. With `strictOriginCheck`, they also refuse a request that has neither `Sec-Fetch-Site` nor `Origin`
+- **Back-channel logout** — A signed logout token from the provider ends the user's stored sessions
 - **No secret logging** — Tokens, keys, and PII are never logged
 - **Web Crypto API** — Uses the platform cryptographic primitives (not userland crypto)
 

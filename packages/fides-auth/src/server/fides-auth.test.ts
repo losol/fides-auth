@@ -96,6 +96,7 @@ function fakeOidc() {
       new URL('https://idp.test/logout'),
     ),
     verifyIdToken: vi.fn(),
+    verifyLogoutToken: vi.fn(),
     revoke: vi.fn(async (_token: string, _options?: { tokenTypeHint?: string }) => true),
     userInfo: vi.fn(),
   };
@@ -758,6 +759,41 @@ describe('guards', () => {
     await login(auth, cookies);
     const response = await auth[member](post(path, { origin: 'https://evil.test' }), cookies);
     expect(response.status).toBe(403);
+  });
+
+  it.each([
+    ['handleOidcLogout', '/api/auth/logout'],
+    ['handleHeartbeat', '/api/auth/heartbeat'],
+  ] as const)('lets %s through without Sec-Fetch-Site or Origin, unless strictOriginCheck is on', async (member, path) => {
+    // Not a browser's request: a script, or a server of the app's own.
+    const bare = () => post(path, {});
+
+    const lenient = setup();
+    await login(lenient.auth, lenient.cookies);
+    expect((await lenient.auth[member](bare(), lenient.cookies)).status).not.toBe(403);
+
+    oidc.revoke.mockClear();
+    const strict = setup({ strictOriginCheck: true });
+    await login(strict.auth, strict.cookies);
+    const refused = await strict.auth[member](bare(), strict.cookies);
+    expect(refused.status).toBe(403);
+    // Refused before anything was done: the session is still there.
+    expect(await strict.auth.readSession(strict.cookies)).not.toBeNull();
+    expect(oidc.revoke).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['handleOidcLogout', '/api/auth/logout'],
+    ['handleHeartbeat', '/api/auth/heartbeat'],
+  ] as const)('with strictOriginCheck, %s still answers the app\'s own pages and refuses other sites', async (member, path) => {
+    const { auth, cookies } = setup({ strictOriginCheck: true });
+    await login(auth, cookies);
+
+    expect((await auth[member](post(path, { origin: 'https://evil.test' }), cookies)).status).toBe(403);
+    expect((await auth[member](post(path, { 'sec-fetch-site': 'cross-site' }), cookies)).status).toBe(403);
+    // An older browser sends only Origin.
+    expect((await auth[member](post(path, { origin: APP }), cookies)).status).not.toBe(403);
+    expect((await auth[member](post(path, { 'sec-fetch-site': 'same-origin' }), cookies)).status).not.toBe(403);
   });
 
   it('rate limits every handler', async () => {

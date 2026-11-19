@@ -377,6 +377,75 @@ cookie sessions included, rather than answer that it ended nobody's. Index
 `subHash` for it, as the MongoDB example does: the match may hold no `iss`, so
 an index that starts with `iss` wouldn't serve it.
 
+## Back-channel logout
+
+When a user logs out at the provider, or an administrator ends their session
+there, the provider can tell the app: it posts a signed logout token to a URL
+the client has registered (OpenID Connect Back-Channel Logout 1.0).
+`handleBackChannelLogout` is that URL's handler:
+
+```ts
+// POST /api/auth/backchannel-logout
+export const POST = (request: Request) => auth.handleBackChannelLogout(request);
+```
+
+Register the URL with the provider as the client's `backchannel_logout_uri`.
+It takes no cookies: the request comes from the provider's server, and the
+token's signature is what authenticates it. So it has no CSRF guard, and
+`strictOriginCheck` doesn't apply to it.
+
+The handler verifies the token with `oidc.verifyLogoutToken`, which checks
+what §2.6 of the specification asks for:
+
+- the signature, against the provider's keys, with an asymmetric algorithm;
+- `iss`, `aud`, `iat`, `exp` and `jti`, as for an ID token;
+- a `sub`, a `sid` or both;
+- an `events` claim with the member
+  `http://schemas.openid.net/event/backchannel-logout`;
+- no `nonce`. A login sends one, so an ID token always has it, and a logout
+  token never does: neither passes for the other.
+
+Then it ends the sessions the token names, as `endUserSessions` does, checking
+each sealed record and revoking its refresh token:
+
+| The token has | Ended |
+|---|---|
+| `sid` | The session that was logged in under that provider session. |
+| `sub` and `sid` | The same, when it is also that user's. |
+| `sub` alone | Every session of the user. |
+
+Only sessions whose ID token had the token's `iss` are ended.
+
+| Answer | When |
+|---|---|
+| 200 | The sessions are ended. Also when there were none: the user wasn't signed in here. |
+| 400 `{ "error": "invalid_request" }` | No `logout_token` in a form body, or the token is refused. Why is logged, without the token. |
+| 400 `{ "error": "server_error" }` | The provider's keys couldn't be read, or the store failed. Nothing is known to be ended, so the provider may send the token again. |
+| 405 | Not a `POST`. |
+| 429 | `rateLimit` refused the request. |
+
+Every answer has `Cache-Control: no-store`, and each session ended is a
+`session.cleared` event with `trigger: "back_channel_logout"`.
+
+Things to know:
+
+- **It needs a store that can search.** Without a `sessionStore` with
+  `findMatching`, the handler throws a `TypeError` rather than answer 200 for
+  sessions it can't end. A session kept in cookies lives in the browser, and
+  nothing on the server can end it.
+- **The token works until it expires.** The `jti` is logged, not remembered,
+  so a token that is sent twice ends the same sessions twice. That costs the
+  user at most a login they would have needed anyway, and only for the minute
+  or two the provider gives the token.
+- **`rateLimit` sees these requests too.** A limiter that counts per address
+  counts the provider's server as one client, and a provider that ends many
+  sessions at once sends many requests. Let its address through, or the
+  logouts it refuses are lost.
+- **`sid` needs the provider to send it.** A session has `session.idp.sid`
+  only when the ID token had a `sid` claim. Without it, a token that names
+  only a `sid` finds nothing, and one with a `sub` still ends the user's
+  sessions.
+
 ## Refresh under concurrency
 
 Two requests refreshing one session at once is the failure mode of rotating

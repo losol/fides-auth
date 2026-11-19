@@ -39,7 +39,8 @@ Every 1.x reads a session written by any 1.x. A session of another version is
 never read as one of this, and never silently dropped either.
 
 `session.cleared` has `trigger: "logout"` for a logout, `clearSession` or
-`endUserSessions`, and `trigger: "rejected"` when the library ended a stored
+`endUserSessions`, `trigger: "back_channel_logout"` when the provider ended
+the session with a logout token, and `trigger: "rejected"` when the library ended a stored
 session because the provider refused its refresh for good. That one follows a
 `session.refresh_failed` with `cause: "invalid_grant"`.
 

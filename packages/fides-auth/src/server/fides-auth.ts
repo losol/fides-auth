@@ -25,6 +25,7 @@ import type {
 import { createOidcClient, type OidcClient } from '../protocol/client.js';
 import { redirectUriOf, type OidcClientConfig } from '../protocol/config.js';
 import { getOAuthErrorLogContext } from '../protocol/logging.js';
+import { LogoutTokenError } from '../protocol/logout-token.js';
 import {
   checkSessionDuration,
   type MapRecordSession,
@@ -159,6 +160,15 @@ export interface FidesAuthConfig<TData = Record<string, unknown>> {
   refreshGraceSeconds?: number;
   /** The app's public origin, for the CSRF guard and redirects. Defaults to the redirect URI's origin. */
   applicationUrl?: string;
+  /**
+   * Whether logout and the heartbeat refuse a request that says nothing of
+   * where it came from: one with neither `Sec-Fetch-Site` nor `Origin`. Such
+   * a request isn't a browser's, so it passes by default, and a script or a
+   * server of your own can call the two. Every browser in use sends one of
+   * the headers on a POST, so turn it on when only browsers call them.
+   * @default false
+   */
+  strictOriginCheck?: boolean;
   /** Changes the session built at login. */
   mapSession?: MapSession<TData>;
   /**
@@ -328,6 +338,25 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   /** `POST`. Refreshes the session. 401 means it is over; 503 means the provider or the store failed. */
   handleHeartbeat(request: Request, cookies: CookieStore): Promise<Response>;
   /**
+   * `POST` from the provider, with a `logout_token` in a form body: OpenID
+   * Connect Back-Channel Logout 1.0. Register its URL with the provider as
+   * the client's `backchannel_logout_uri`. It verifies the token with
+   * `oidc.verifyLogoutToken`, ends the sessions it names, the one with its
+   * `sid` or else all of its `sub`, and revokes their refresh tokens, as
+   * `endUserSessions` does. It reads no cookies and has no CSRF guard: the
+   * signed token is what authenticates the request.
+   *
+   * It answers 200 when the sessions are ended, also when there were none,
+   * and 400 with `{ error }` when the request or the token is refused or the
+   * store failed, so the provider may try again. 429 when `rateLimit`
+   * refused it.
+   *
+   * @throws TypeError without a `sessionStore` that has `findMatching`: a
+   * session kept in cookies can't be ended from here, and a 200 would tell
+   * the provider that it was.
+   */
+  handleBackChannelLogout(request: Request): Promise<Response>;
+  /**
    * `GET`. Whether there is a session, whose, when it ends, and whether its
    * access token still works (`tokenStatus`). Never refreshes, never returns
    * tokens. 503 means the session store failed, so there is no answer.
@@ -493,6 +522,40 @@ function methodNotAllowed(allow: string): Response {
 
 const forbidden = () => new Response('Forbidden', { status: 403 });
 
+/** The answer to a back-channel logout that failed (§2.8). `error` is a fixed code, never the token's text. */
+function logoutRefused(error: 'invalid_request' | 'server_error'): Response {
+  return Response.json({ error }, { status: 400, headers: NO_STORE });
+}
+
+/** A logout token is a few hundred bytes. More than this isn't one. */
+const MAX_LOGOUT_BODY_BYTES = 16 * 1024;
+
+/** The body as text, or null when it is longer than `limit` bytes. Reads no further than that. */
+async function readBody(request: Request, limit: number): Promise<string | null> {
+  if (Number(request.headers.get('content-length') ?? 0) > limit) return null;
+  if (!request.body) return '';
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 /**
  * Creates the server side of fides-auth. It does no I/O until a member needs it,
  * and reads the redirect URI only then: an app creates the instance when a module
@@ -526,6 +589,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
     login: loggers.create({ namespace: 'fides-auth:server:oidc-login' }),
     callback: loggers.create({ namespace: 'fides-auth:server:oidc-callback' }),
     logout: loggers.create({ namespace: 'fides-auth:server:oidc-logout' }),
+    backChannel: loggers.create({ namespace: 'fides-auth:server:back-channel-logout' }),
     heartbeat: loggers.create({ namespace: 'fides-auth:server:heartbeat' }),
     sessionInfo: loggers.create({ namespace: 'fides-auth:server:session-info' }),
     returnTo: loggers.create({ namespace: 'fides-auth:server:return-to' }),
@@ -589,6 +653,13 @@ export function createFidesAuth<TData = Record<string, unknown>>(
 
   async function limited(request: Request): Promise<boolean> {
     return !!rateLimit && !(await rateLimit(request));
+  }
+
+  /** The CSRF guard of the endpoints a cookie authenticates. */
+  function fromOwnPages(request: Request): boolean {
+    return isSameOriginRequest(request, settings().applicationUrl, {
+      strict: config.strictOriginCheck === true,
+    });
   }
 
   /** The return path to redirect to: validated, on the app's origin, or the default. */
@@ -799,7 +870,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
 
     async handleOidcLogout(request, cookies, options = {}) {
       if (request.method !== 'POST') return methodNotAllowed('POST');
-      if (!isSameOriginRequest(request, settings().applicationUrl)) {
+      if (!fromOwnPages(request)) {
         log.logout.warn(
           { origin: request.headers.get('origin'), site: request.headers.get('sec-fetch-site') },
           'Cross-origin logout request rejected',
@@ -850,7 +921,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
 
     async handleHeartbeat(request, cookies) {
       if (request.method !== 'POST') return methodNotAllowed('POST');
-      if (!isSameOriginRequest(request, settings().applicationUrl)) {
+      if (!fromOwnPages(request)) {
         log.heartbeat.warn(
           { origin: request.headers.get('origin'), site: request.headers.get('sec-fetch-site') },
           'Cross-origin heartbeat rejected',
@@ -895,6 +966,64 @@ export function createFidesAuth<TData = Record<string, unknown>>(
         }
       }
       return Response.json({ reason: result.reason }, { status: 401, headers: NO_STORE });
+    },
+
+    async handleBackChannelLogout(request) {
+      // Before anything is answered: without a store that can search, no
+      // session can be ended from here, and the provider must not hear 200.
+      if (!sessionStore?.findMatching) {
+        throw new TypeError('handleBackChannelLogout needs a sessionStore with findMatching');
+      }
+      if (request.method !== 'POST') return methodNotAllowed('POST');
+      if (await limited(request)) {
+        log.backChannel.warn('Rate limit exceeded');
+        return new Response(null, { status: 429, headers: NO_STORE });
+      }
+      assertSessionSecret(secret);
+
+      const type = (request.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase();
+      const body = type === 'application/x-www-form-urlencoded' ? await readBody(request, MAX_LOGOUT_BODY_BYTES) : null;
+      const logoutToken = body === null ? null : new URLSearchParams(body).get('logout_token');
+      if (!logoutToken) {
+        log.backChannel.warn({ contentType: type }, 'Back-channel logout without a logout_token');
+        return logoutRefused('invalid_request');
+      }
+
+      let named: { iss: string; sub?: string; sid?: string; jti: string };
+      try {
+        named = await oidc.verifyLogoutToken(logoutToken);
+      } catch (error) {
+        if (error instanceof LogoutTokenError) {
+          // The cause is jose's, which names the claim or the check, never the token.
+          log.backChannel.warn(
+            { reason: error.reason, error: getOAuthErrorLogContext(error.cause) },
+            'Logout token refused',
+          );
+          return logoutRefused('invalid_request');
+        }
+        // The provider's metadata or keys couldn't be read: nothing is known about the token.
+        log.backChannel.error({ error: getOAuthErrorLogContext(error) }, 'Could not verify the logout token');
+        return logoutRefused('server_error');
+      }
+
+      let ended: SessionRecord[];
+      try {
+        // With a `sid` only that session, which must also be the `sub`'s when
+        // both are given. With a `sub` alone, every session of the user.
+        ended = await settings().lifecycle.endMatching(
+          { iss: named.iss, sub: named.sub, sid: named.sid },
+          { trigger: 'back_channel_logout' },
+        );
+      } catch (error) {
+        log.backChannel.error(
+          { jti: named.jti, error: getOAuthErrorLogContext(error) },
+          'Could not end the sessions; the provider may try again',
+        );
+        return logoutRefused('server_error');
+      }
+      for (const record of ended) await revokeRefreshToken(record, log.backChannel);
+      log.backChannel.info({ jti: named.jti, sessions: ended.length }, 'Back-channel logout');
+      return new Response(null, { status: 200, headers: NO_STORE });
     },
 
     async handleSessionInfo(request, cookies) {
