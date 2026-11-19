@@ -3,7 +3,7 @@ import * as openid from 'openid-client';
 import type { DpopKey } from '../shared/types.js';
 import { redirectUriOf } from './config.js';
 import { assertBound, dpopHandle } from './dpop-grant.js';
-import { checkIdTokenAlgorithm } from './fapi-profile.js';
+import { checkIdTokenAlgorithm, requireDpopKey } from './fapi-profile.js';
 import type { ProtocolContext } from './context.js';
 
 /**
@@ -28,6 +28,7 @@ export async function exchangeCode(
   dpopKey?: DpopKey,
 ): Promise<openid.TokenEndpointResponse> {
   const redirectUri = redirectUriOf(oauthConfig);
+  requireDpopKey(oauthConfig, dpopKey, 'exchangeCode');
   // openid-client requires `iss` only when the metadata says the provider sends
   // it. The profile requires it always (RFC 9207), and before the code goes anywhere.
   if (oauthConfig.profile === 'fapi2' && !callbackUrl.searchParams.get('iss')) {

@@ -433,10 +433,11 @@ Things to know:
   `findMatching`, the handler throws a `TypeError` rather than answer 200 for
   sessions it can't end. A session kept in cookies lives in the browser, and
   nothing on the server can end it.
-- **The token works until it expires.** The `jti` is logged, not remembered,
-  so a token that is sent twice ends the same sessions twice. That costs the
-  user at most a login they would have needed anyway, and only for the minute
-  or two the provider gives the token.
+- **The token works for five minutes.** A token whose `iat` is older than
+  that is refused, whatever its `exp`, with 30 seconds allowed for clocks that
+  differ. Inside those minutes the `jti` is logged, not remembered, so a token
+  that is sent twice ends the same sessions twice. That costs the user at most
+  a login they would have needed anyway.
 - **`rateLimit` sees these requests too.** A limiter that counts per address
   counts the provider's server as one client, and a provider that ends many
   sessions at once sends many requests. Let its address through, or the

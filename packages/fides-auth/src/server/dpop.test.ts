@@ -13,7 +13,13 @@ import type { SessionEvent } from '../shared/session-events.js';
 import { createDpopKey } from '../protocol/dpop.js';
 import { AuthorizedFetchError } from './authorized-fetch.js';
 import type { CookieStore } from './cookie-store.js';
-import { createFidesAuth, type FidesAuth, type FidesAuthConfig, type LoginError } from './fides-auth.js';
+import {
+  createFidesAuth,
+  type FidesAuth,
+  type FidesAuthConfig,
+  issuerForKey,
+  type LoginError,
+} from './fides-auth.js';
 import { createTransaction, persistTransaction } from './login-transaction.js';
 import { createMemorySessionStore } from './session-store.js';
 
@@ -21,6 +27,8 @@ const APP = 'https://app.test';
 const ISSUER = 'https://idp.test';
 const API = 'https://api.test/v1/';
 const secret = 'a'.repeat(64);
+/** What the instance seals its sessions and its logins for: its provider and its client. */
+const AUDIENCE = JSON.stringify([issuerForKey(ISSUER), 'web']);
 
 const quiet: FidesLoggerFactory = { create: () => ({ debug() {}, info() {}, warn() {}, error() {} }) };
 
@@ -292,6 +300,7 @@ describe.each([
       cookies,
       createTransaction({ state: 'from-before', codeVerifier: 'verifier-from-before' }, { logger: quiet.create({ namespace: 'test' }) }),
       secret,
+      { audience: AUDIENCE },
     );
 
     const done = await auth.handleOidcCallback(new Request(`${APP}/api/auth/callback?code=c&state=from-before`), cookies);

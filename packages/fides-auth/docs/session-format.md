@@ -134,9 +134,19 @@ anything else that identifies a person is not: put that in the session's
 
 Between the redirect to the provider and the callback, the state, the PKCE
 verifier, the return path and the scope asked for are sealed in a cookie of
-their own: `__Host-oauth_tx_0`, `_1` or `_2`, for ten minutes. It is a JWE
-like the session's, under a key with the info `fides-auth login-tx`, so a
-login never opens as a session.
+their own: `__Host-oauth_tx_0`, `_1` or `_2`, for ten minutes. With a login
+that sends them, the `nonce` and the DPoP key are sealed there too. It is a
+JWE like the session's, under a key of its own, so a login never opens as a
+session.
+
+The key's info is `["fides-auth login-tx", audience]`, with the same audience
+as a session's: the provider and the client. An instance for another
+provider, with the same secret on the same origin, can't finish the login.
+The versions before this sealed with the info `fides-auth login-tx` alone.
+Such a login still opens, so one that is under way during an upgrade
+finishes; nothing is sealed that way any more. Until every instance runs a
+version that seals for its audience, an older one's logins can still be
+finished by another instance.
 
 ## In a test
 
