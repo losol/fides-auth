@@ -1,0 +1,64 @@
+name: Conformance
+
+# The OpenID Foundation conformance suite's relying-party tests, against the
+# library as it is on main. Now and then, never on a push or a pull request:
+# it takes a few minutes, pulls about a gigabyte of images, and depends on
+# another project's registry being up. See conformance/README.md.
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays at 04:17 UTC.
+    - cron: "17 4 * * 1"
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+# The job only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: FAPI 2.0 relying-party tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Build
+        run: pnpm build
+
+      # Starts the suite with Docker, runs every module of the plan, prints the
+      # table, and fails when a module does.
+      - name: Run the conformance suite
+        run: pnpm --filter @eventuras/fides-auth-conformance conformance
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f conformance/results/results.md ]; then
+            cat conformance/results/results.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The run left no results: see the log of the step before." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The table, the suite's log of every module, and what its server printed.
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: conformance-results
+          path: conformance/results/
+          if-no-files-found: warn
+          retention-days: 30
