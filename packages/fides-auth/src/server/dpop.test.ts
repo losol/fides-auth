@@ -14,6 +14,7 @@ import { createDpopKey } from '../protocol/dpop.js';
 import { AuthorizedFetchError } from './authorized-fetch.js';
 import type { CookieStore } from './cookie-store.js';
 import { createFidesAuth, type FidesAuth, type FidesAuthConfig, type LoginError } from './fides-auth.js';
+import { createTransaction, persistTransaction } from './login-transaction.js';
 import { createMemorySessionStore } from './session-store.js';
 
 const APP = 'https://app.test';
@@ -40,6 +41,8 @@ interface Provider {
   jtis: Set<string>;
   /** The tokens the client asked to have revoked. */
   revoked: string[];
+  /** The `dpop_jkt` of the authorization request, which the code is then bound to. */
+  codeBoundTo?: string | null;
 }
 
 let provider: Provider;
@@ -90,6 +93,10 @@ async function tokenEndpoint(init?: RequestInit): Promise<Response> {
       { error, error_description: checked.error },
       { status: 400, headers: provider.tokenNonce ? { 'DPoP-Nonce': provider.tokenNonce } : {} },
     );
+  }
+  // A code that was bound with dpop_jkt is exchanged only with a proof from that key (RFC 9449 §10).
+  if (grant === 'authorization_code' && provider.codeBoundTo && provider.codeBoundTo !== checked.jkt) {
+    return Response.json({ error: 'invalid_grant' }, { status: 400 });
   }
   // A refresh must come with the key the tokens were bound to.
   const refreshToken = body.get('refresh_token');
@@ -196,7 +203,10 @@ function setup(overrides: Partial<FidesAuthConfig> = {}, dpop = true) {
 
 async function login(auth: FidesAuth, cookies: CookieStore): Promise<Response> {
   const started = await auth.handleOidcLogin(new Request(`${APP}/api/auth/login`), cookies);
-  const state = new URL(started.headers.get('location') ?? '').searchParams.get('state');
+  const authorize = new URL(started.headers.get('location') ?? '');
+  const state = authorize.searchParams.get('state');
+  // The provider reads dpop_jkt off the authorization request, as a real one does.
+  provider.codeBoundTo = authorize.searchParams.get('dpop_jkt');
   return auth.handleOidcCallback(new Request(`${APP}/api/auth/callback?code=c&state=${state}`), cookies);
 }
 
@@ -224,6 +234,71 @@ describe.each([
     );
     // The key is a secret: sealed, never in the clear in a cookie.
     expect([...jar.values()].join('\n')).not.toContain(tokens?.dpopKey?.d);
+  });
+
+  it('names the key in the authorization request, so the code can only be exchanged with it', async () => {
+    const { auth } = setup(storage());
+    const { cookies, jar } = browser();
+
+    const started = await auth.handleOidcLogin(new Request(`${APP}/api/auth/login`), cookies);
+    const authorize = new URL(started.headers.get('location') ?? '');
+    const jkt = authorize.searchParams.get('dpop_jkt');
+    expect(jkt).toMatch(/^[\w-]{43}$/);
+
+    provider.codeBoundTo = jkt;
+    const done = await auth.handleOidcCallback(
+      new Request(`${APP}/api/auth/callback?code=c&state=${authorize.searchParams.get('state')}`),
+      cookies,
+    );
+
+    // The provider took the proof for the key it was told of, and that key is the session's.
+    expect(done.headers.get('location')).toBe(`${APP}/?login=success`);
+    const key = (await auth.getTokens(cookies))?.dpopKey;
+    expect(await calculateJwkThumbprint({ kty: 'EC', crv: 'P-256', x: key?.x, y: key?.y })).toBe(jkt);
+    // The transaction that carried the key is spent.
+    expect([...jar.keys()]).toEqual(['__Host-session']);
+  });
+
+  it('gives each login a key of its own', async () => {
+    const { auth } = setup(storage());
+    const jktOf = async () => {
+      const started = await auth.handleOidcLogin(new Request(`${APP}/api/auth/login`), browser().cookies);
+      return new URL(started.headers.get('location') ?? '').searchParams.get('dpop_jkt');
+    };
+
+    expect(await jktOf()).not.toBe(await jktOf());
+  });
+
+  it('fails the login when the code was bound to another key', async () => {
+    const { auth, failures } = setup(storage());
+    const { cookies } = browser();
+    const started = await auth.handleOidcLogin(new Request(`${APP}/api/auth/login`), cookies);
+    const state = new URL(started.headers.get('location') ?? '').searchParams.get('state');
+    // A code from a login someone else started: bound to their key, not this browser's.
+    provider.codeBoundTo = 'the-thumbprint-of-another-key';
+
+    const done = await auth.handleOidcCallback(new Request(`${APP}/api/auth/callback?code=c&state=${state}`), cookies);
+
+    expect(done.headers.get('location')).toBe(`${APP}/?login=error&error=login_failed`);
+    expect(failures).toHaveLength(1);
+    expect(await auth.readSession(cookies)).toBeNull();
+  });
+
+  it('finishes a login that was started before the key was made at the redirect', async () => {
+    const { auth, failures } = setup(storage());
+    const { cookies } = browser();
+    // A deploy between the redirect and the callback: the transaction has no key, and no dpop_jkt was sent.
+    await persistTransaction(
+      cookies,
+      createTransaction({ state: 'from-before', codeVerifier: 'verifier-from-before' }, { logger: quiet.create({ namespace: 'test' }) }),
+      secret,
+    );
+
+    const done = await auth.handleOidcCallback(new Request(`${APP}/api/auth/callback?code=c&state=from-before`), cookies);
+
+    expect(done.headers.get('location')).toBe(`${APP}/?login=success`);
+    expect(failures).toEqual([]);
+    expect((await auth.getTokens(cookies))?.tokenType).toBe('dpop');
   });
 
   it('calls the API with the token as DPoP and a proof for that request', async () => {
@@ -498,7 +573,8 @@ describe('without DPoP', () => {
     const headers = new Headers(init?.headers);
     expect(headers.get('authorization')).toBe(`Bearer ${tokens?.accessToken}`);
     expect(headers.has('dpop')).toBe(false);
-    // And no proof at the token endpoint either.
+    // No dpop_jkt in the authorization request, and no proof at the token endpoint either.
+    expect(provider.codeBoundTo).toBeNull();
     const tokenCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input) === `${ISSUER}/token`);
     expect(new Headers(tokenCall?.[1]?.headers).has('dpop')).toBe(false);
   });

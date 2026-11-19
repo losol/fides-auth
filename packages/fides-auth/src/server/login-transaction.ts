@@ -1,12 +1,14 @@
 // server/login-transaction.ts
 //
 // One login between the authorize redirect and the callback: state, PKCE
-// verifier, nonce, returnTo and start time, sealed into one of a few cookie slots, so
+// verifier, nonce, DPoP key, returnTo and start time, sealed into one of a few cookie slots, so
 // parallel logins in one browser neither overwrite each other nor pile up. It is
 // sealed under a key derived from the secret, so it never opens as a session.
 
 import { assertCookieWithinLimit, defaultOAuthCookieOptions } from '../shared/cookies.js';
+import { isDpopKey } from '../shared/dpop-key.js';
 import type { FidesLogger } from '../shared/logger.js';
+import type { DpopKey } from '../shared/types.js';
 import type { AuthorizationRequest } from '../protocol/authorization-parameters.js';
 import { createEncryptedJWT, decryptJWT } from '../session/utils.js';
 import type { CookieStore } from './cookie-store.js';
@@ -39,6 +41,12 @@ export interface LoginTransaction {
   codeVerifier: string;
   /** The `nonce` the ID token must carry. Absent for a login without `openid`. */
   nonce?: string;
+  /**
+   * The key the code was bound to with `dpop_jkt`, and the tokens will be
+   * bound to. Absent without DPoP. It is the session's key from the start, so
+   * it is sealed here like the verifier.
+   */
+  dpopKey?: DpopKey;
   /** Path to return to after login, already validated. */
   returnTo?: string;
   /** The scope the login asked for, as sent. */
@@ -69,6 +77,8 @@ export class CallbackValidationError extends Error {
 
 export interface CreateTransactionOptions {
   returnTo?: string | null;
+  /** The key the authorization request named as `dpop_jkt`. */
+  dpopKey?: DpopKey;
   /** Where a dropped `returnTo` is reported. */
   logger: FidesLogger;
 }
@@ -92,7 +102,7 @@ export interface ValidateCallbackOptions {
 export function createTransaction(
   request: Pick<AuthorizationRequest, 'state' | 'codeVerifier' | 'nonce'> &
     Partial<Pick<AuthorizationRequest, 'parameters'>>,
-  { returnTo, logger }: CreateTransactionOptions,
+  { returnTo, dpopKey, logger }: CreateTransactionOptions,
 ): LoginTransaction {
   let kept = returnTo || undefined;
   if (kept && new TextEncoder().encode(JSON.stringify(kept)).length > MAX_RETURN_TO_BYTES) {
@@ -104,6 +114,7 @@ export function createTransaction(
     state: request.state,
     codeVerifier: request.codeVerifier,
     ...(request.nonce ? { nonce: request.nonce } : {}),
+    ...(dpopKey ? { dpopKey } : {}),
     ...(kept ? { returnTo: kept } : {}),
     ...(typeof scope === 'string' && scope ? { scope } : {}),
     createdAt: Date.now(),
@@ -260,6 +271,7 @@ async function openWith(value: string, key: Uint8Array): Promise<LoginTransactio
       typeof sealed.codeVerifier === 'string' &&
       typeof sealed.createdAt === 'number' &&
       (sealed.nonce === undefined || typeof sealed.nonce === 'string') &&
+      (sealed.dpopKey === undefined || isDpopKey(sealed.dpopKey)) &&
       (sealed.returnTo === undefined || typeof sealed.returnTo === 'string') &&
       (sealed.scope === undefined || typeof sealed.scope === 'string')
     ) {
@@ -267,6 +279,7 @@ async function openWith(value: string, key: Uint8Array): Promise<LoginTransactio
         state: sealed.state,
         codeVerifier: sealed.codeVerifier,
         nonce: sealed.nonce,
+        dpopKey: sealed.dpopKey as DpopKey | undefined,
         returnTo: sealed.returnTo,
         scope: sealed.scope,
         createdAt: sealed.createdAt,

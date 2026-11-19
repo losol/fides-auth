@@ -8,6 +8,7 @@ import type { FidesLogger } from '../shared/logger.js';
 import { createAuthorizationRequest } from './authorization-parameters.js';
 import type { OidcClientConfig } from './config.js';
 import type { ProtocolContext } from './context.js';
+import { createDpopKey, dpopThumbprint } from './dpop.js';
 import { defaultScope } from './scope.js';
 
 // RFC 7636 Appendix B octets and the verifier/challenge they produce.
@@ -191,6 +192,23 @@ describe('createAuthorizationRequest — extra authorization parameters', () => 
     expect(JSON.stringify(logs)).not.toContain(pkce.nonce);
   });
 
+  it("names the DPoP key's thumbprint as dpop_jkt, so the code is bound to it", async () => {
+    const dpopKey = await createDpopKey();
+
+    const pkce = await createAuthorizationRequest(ctx(oauthConfig), { dpopKey });
+
+    expect(pkce.parameters.dpop_jkt).toBe(await dpopThumbprint(dpopKey));
+    // The thumbprint is of the public key. Nothing of the private part goes along.
+    expect(JSON.stringify(pkce)).not.toContain(dpopKey.d);
+    expect(JSON.stringify(logs)).not.toContain(dpopKey.d);
+  });
+
+  it('sends no dpop_jkt without a key', async () => {
+    const pkce = await createAuthorizationRequest(ctx(oauthConfig));
+
+    expect('dpop_jkt' in pkce.parameters).toBe(false);
+  });
+
   it('lets an extra scope replace the configured scope', async () => {
     const pkce = await createAuthorizationRequest(ctx(oauthConfig), { parameters: { scope: 'openid admin' } });
 
@@ -207,6 +225,7 @@ describe('createAuthorizationRequest — extra authorization parameters', () => 
     'request',
     'request_uri',
     'nonce',
+    'dpop_jkt',
   ])(
     'rejects reserved key %s from either source',
     async (key) => {

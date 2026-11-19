@@ -1,4 +1,6 @@
+import type { DpopKey } from '../shared/types.js';
 import { redirectUriOf } from './config.js';
+import { dpopThumbprint } from './dpop.js';
 import type { ProtocolContext } from './context.js';
 import { defaultScope, joinScope } from './scope.js';
 import { createNonce, createPkcePair, createState } from './pkce.js';
@@ -25,6 +27,14 @@ export interface AuthorizationRequest {
 export interface AuthorizationRequestOptions {
   /** Extra authorization parameters, merged over the config's `authorizationParameters`. */
   parameters?: Record<string, string>;
+  /**
+   * The key the login's tokens will be bound to with DPoP, from
+   * `OidcClient.createDpopKey`. Its thumbprint is sent as `dpop_jkt` (RFC 9449
+   * §10), so the provider issues a code that only this key can exchange.
+   * Keep the key on the server with the verifier, and pass it to
+   * `exchangeCode`.
+   */
+  dpopKey?: DpopKey;
 }
 
 /** Extra parameters can't set these. */
@@ -43,12 +53,16 @@ const RESERVED_AUTHORIZATION_PARAMETERS = new Set([
   // Set by createAuthorizationRequest when the scope has `openid`. One from
   // the app would not be the one the callback expects, so the login would fail
   'nonce',
+  // Set by createAuthorizationRequest from `dpopKey`. Another key's would
+  // bind the code to a key the exchange doesn't have
+  'dpop_jkt',
 ]);
 
 /**
  * Creates a PKCE pair, a state, a nonce and the authorization parameters for
  * one login. The nonce is left out when the scope has no `openid`: there is
- * then no ID token to carry it.
+ * then no ID token to carry it. With a `dpopKey`, its thumbprint goes along
+ * as `dpop_jkt`.
  * The core of `OidcClient.createAuthorizationRequest`.
  *
  * @throws TypeError if the config has no redirect URI.
@@ -79,6 +93,13 @@ export async function createAuthorizationRequest(
   // Decided from the scope as sent: an extra `scope` replaces the config's.
   const nonce = (parameters.scope ?? '').split(/\s+/).includes('openid') ? createNonce() : undefined;
   if (nonce) parameters.nonce = nonce;
+  if (config.profile === 'fapi2' && !options.dpopKey) {
+    // The profile binds the code to the key, so the key must exist before the redirect.
+    throw new TypeError(
+      "profile 'fapi2': createAuthorizationRequest needs a dpopKey, from createDpopKey, to send as dpop_jkt",
+    );
+  }
+  if (options.dpopKey) parameters.dpop_jkt = await dpopThumbprint(options.dpopKey);
 
   // Keys only: values such as login_hint can be personal data.
   logger.debug(

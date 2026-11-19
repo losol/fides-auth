@@ -205,6 +205,7 @@ the config's `scope`. These keys are reserved, and passing one throws:
 - `request` and `request_uri`, which would bypass PKCE and `state`.
 - `nonce`, which fides-auth sets when the scope has `openid` and checks in
   the ID token at the callback.
+- `dpop_jkt`, which fides-auth sets from the DPoP key of the login.
 
 #### Pushed Authorization Requests (PAR, RFC 9126)
 
@@ -266,6 +267,11 @@ Pass it where the tokens are asked for and used:
 
 ```typescript
 const dpopKey = await oidc.createDpopKey();
+// Sends the key's thumbprint as dpop_jkt, so the code is bound to it.
+const request = await oidc.createAuthorizationRequest({ dpopKey });
+const url = await oidc.authorizationUrl(request);
+
+// At the callback, with the same key.
 const tokens = await oidc.exchangeCode(callbackUrl, request, { dpopKey });
 await oidc.refresh(tokens.refresh_token!, { dpopKey });
 await oidc.userInfo(tokens.access_token, { expectedSubject, dpopKey });
@@ -811,8 +817,8 @@ const auth = createFidesAuth({
 });
 ```
 
-- **At login** the callback makes a P-256 key for that session and sends a
-  proof with the code exchange. A provider that answers with a bearer token
+- **At login** a P-256 key is made for that session, and the callback sends
+  a proof with the code exchange. A provider that answers with a bearer token
   fails the login, as `login_failed`: turn it on only for a provider that
   supports DPoP.
 - **The key is kept with the tokens**, sealed in the session: `getTokens`
@@ -847,8 +853,14 @@ session stays one when it is turned on, until the user logs in again.
 A session kept in cookies carries the key in the cookie, sealed like the
 tokens. With a `sessionStore`, the key stays on the server.
 
-Not there yet: `dpop_jkt`, which also binds the authorization code to the
-key, and DPoP for the client credentials grant.
+The key is made when the login starts, and its thumbprint goes in the
+authorization request as `dpop_jkt` (RFC 9449 §10), through PAR when `usePar`
+is set. A provider that supports it binds the authorization code to the key,
+so a code that leaks can't be exchanged by anyone else; one that doesn't
+ignores the parameter. Until the callback the key is sealed in the login
+transaction cookie, next to the PKCE verifier.
+
+Not there yet: DPoP for the client credentials grant.
 
 #### FAPI 2.0
 
@@ -883,6 +895,9 @@ const auth = createFidesAuth({
   only `PS256`, `ES256` and `EdDSA`, so a back-channel logout token signed
   with RS256 is refused. An `algorithms` option with anything else throws a
   `TypeError`.
+- **The code is bound to the DPoP key**: `createAuthorizationRequest` needs
+  a `dpopKey` and sends its thumbprint as `dpop_jkt`. `createFidesAuth` does
+  that by itself.
 - **The callback** must carry the `iss` parameter (RFC 9207). Without it the
   code is not sent to the token endpoint and the login fails as
   `login_failed`, whether or not the provider's metadata says it sends one.
@@ -896,7 +911,6 @@ What it does not cover:
   only the algorithms above.
 - mTLS, for client authentication or for binding tokens, is not implemented.
   The tokens are bound with DPoP.
-- `dpop_jkt` is not sent, so the authorization code is not bound to the key.
 - FAPI 2.0 Message Signing is not implemented: no signed request objects
   (JAR) and no signed authorization responses (JARM).
 - The ID token of a code exchange or a refresh comes straight from the token
