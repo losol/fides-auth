@@ -25,6 +25,11 @@ services:
       OIDC_GOOGLE_SECRET: unused
       OIDC_GITLAB_CLIENTID: unused
       OIDC_GITLAB_SECRET: unused
+    # The back-channel logout tests post a logout token to the client, which
+    # runs on the host and not in a container. `host-gateway` is the host's
+    # address on the Docker bridge; src/run.ts listens on exactly that.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - mongodb
 

@@ -1,7 +1,8 @@
 name: Conformance
 
-# The OpenID Foundation conformance suite's relying-party tests, against the
-# library as it is on main. Now and then, never on a push or a pull request:
+# The OpenID Foundation conformance suite's relying-party tests (FAPI 2.0, the
+# basic OpenID Connect client and back-channel logout), against the library as
+# it is on main. Now and then, never on a push or a pull request:
 # it takes a few minutes, pulls about a gigabyte of images, and depends on
 # another project's registry being up. See conformance/README.md.
 on:
@@ -20,7 +21,7 @@ permissions:
 
 jobs:
   conformance:
-    name: FAPI 2.0 relying-party tests
+    name: Relying-party tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -39,8 +40,10 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # Starts the suite with Docker, runs every module of the plan, prints the
-      # table, and fails when a module does.
+      # Starts the suite with Docker, runs every module of the three plans,
+      # prints the table, and fails when a module does. The back-channel logout
+      # modules have the suite's container call a listener on the runner, at
+      # the Docker bridge's address: see conformance/README.md.
       - name: Run the conformance suite
         run: pnpm --filter @eventuras/fides-auth-conformance conformance
 
