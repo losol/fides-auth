@@ -80,6 +80,8 @@ export type SessionPersistenceMode = 'cookie' | 'server';
 export type SessionClearedTrigger =
   /** The user (or the app) logged out deliberately. */
   | 'logout'
+  /** The provider ended the user's sessions with a back-channel logout. */
+  | 'back_channel_logout'
   /** The session was unusable and cleaned up. */
   | 'rejected';
 

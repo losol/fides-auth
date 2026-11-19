@@ -58,6 +58,13 @@ export interface FidesAuth<TData = Record<string, unknown>> {
   /** `POST`. Refreshes the session. 401 means it is over; 503 means the provider or the store failed. */
   handleHeartbeat(request: Request): Promise<Response>;
   /**
+   * `POST` from the provider, with a `logout_token`: OpenID Connect
+   * Back-Channel Logout 1.0. Ends the sessions the token names and answers
+   * 200, or 400 when the token is refused. It reads no cookies. Throws a
+   * TypeError without a `sessionStore` that has `findMatching`.
+   */
+  handleBackChannelLogout(request: Request): Promise<Response>;
+  /**
    * `GET`. Whether there is a session, and whose. Never refreshes, never
    * returns tokens. 503 means the session store failed, so there is no answer.
    */
@@ -231,6 +238,7 @@ export function createFidesAuth<TData = Record<string, unknown>>(
     handleOidcLogout: async (request, options) =>
       core.handleOidcLogout(request, await nextCookieStore(), options),
     handleHeartbeat: async (request) => core.handleHeartbeat(request, await nextCookieStore()),
+    handleBackChannelLogout: (request) => core.handleBackChannelLogout(request),
     handleSessionInfo: async (request) => core.handleSessionInfo(request, await nextCookieStore()),
 
     readSession: cache(async () => (await tryReadSession()).session),

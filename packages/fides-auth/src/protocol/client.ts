@@ -18,6 +18,7 @@ import type { OidcClientConfig } from './config.js';
 import type { ProtocolContext } from './context.js';
 import { checkTtl, createDiscoveryCache } from './discovery.js';
 import { createJwksCache, verifyIdTokenWith } from './id-token.js';
+import { type LogoutToken, verifyLogoutTokenWith } from './logout-token.js';
 import { withoutResponseBody } from './logging.js';
 import { logoutUrl, type OidcLogoutOptions } from './logout-url.js';
 import { refresh } from './refresh.js';
@@ -118,6 +119,18 @@ export interface OidcClient {
   verifyIdToken(idToken: string, options?: VerifyOptions): Promise<JWTPayload>;
 
   /**
+   * Verifies a logout token, the JWT a provider posts to end a user's sessions
+   * (OpenID Connect Back-Channel Logout 1.0 §2.6): its signature, `iss`, `aud`
+   * and `exp` as for an ID token, that it has a `sub` or a `sid`, an `events`
+   * claim with the back-channel logout member, and no `nonce`. The same token
+   * verifies again until it expires: the `jti` is returned, not remembered.
+   *
+   * @returns Whose sessions to end.
+   * @throws A `LogoutTokenError` if the token is refused, or a TypeError if the metadata has no `issuer` or `jwks_uri`.
+   */
+  verifyLogoutToken(logoutToken: string, options?: VerifyOptions): Promise<LogoutToken>;
+
+  /**
    * Gets the claims from the provider's UserInfo endpoint for the user an
    * access token belongs to. `expectedSubject` is the ID token's `sub`. Use it
    * for claims a provider only gives there.
@@ -200,6 +213,17 @@ export function createOidcClient(
       if (!issuer) throw new TypeError('The provider metadata has no issuer');
       if (!jwks_uri) throw new TypeError('The provider metadata has no jwks_uri');
       return verifyIdTokenWith(jwks.get(jwks_uri), idToken, {
+        issuer,
+        audience: ownConfig.clientId,
+        algorithms: verifyOptions.algorithms,
+      });
+    },
+
+    async verifyLogoutToken(logoutToken, verifyOptions = {}) {
+      const { issuer, jwks_uri } = await metadata();
+      if (!issuer) throw new TypeError('The provider metadata has no issuer');
+      if (!jwks_uri) throw new TypeError('The provider metadata has no jwks_uri');
+      return verifyLogoutTokenWith(jwks.get(jwks_uri), logoutToken, {
         issuer,
         audience: ownConfig.clientId,
         algorithms: verifyOptions.algorithms,
