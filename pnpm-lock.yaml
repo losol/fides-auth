@@ -29,8 +29,8 @@ importers:
         specifier: ^4.3.5
         version: 4.3.5(vite@8.3.5(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))
       '@vitejs/plugin-react':
-        specifier: ^6.2.1
-        version: 6.2.1(vite@8.3.5(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^6.3.0
+        version: 6.3.0(vite@8.3.5(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))
       '@vitejs/plugin-react-swc':
         specifier: ^4.3.3
         version: 4.3.3(@swc/helpers@0.5.23)(vite@8.3.5(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))
@@ -58,8 +58,8 @@ importers:
         specifier: ^22.20.5
         version: 22.20.5
       jose:
-        specifier: ^6.2.15
-        version: 6.2.15
+        specifier: ^6.2.17
+        version: 6.2.17
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -77,8 +77,8 @@ importers:
         specifier: ^22.20.5
         version: 22.20.5
       jose:
-        specifier: ^6.2.15
-        version: 6.2.15
+        specifier: ^6.2.17
+        version: 6.2.17
       oidc-provider:
         specifier: ^9.15.0
         version: 9.15.0
@@ -95,8 +95,8 @@ importers:
   packages/fides-auth:
     dependencies:
       jose:
-        specifier: ^6.2.15
-        version: 6.2.15
+        specifier: ^6.2.17
+        version: 6.2.17
       openid-client:
         specifier: ^6.8.9
         version: 6.8.9
@@ -773,6 +773,9 @@ packages:
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
 
+  '@rolldown/pluginutils@1.1.0':
+    resolution: {integrity: sha512-K+NU2HDCEem4sClgHH4ZZXwdJeNFkJo+hRk479DIwdIviAPN2hFJH1KHHwg8CxHQXvi0M5XY4deTXINfIiSG6w==}
+
   '@sindresorhus/is@4.6.0':
     resolution: {integrity: sha512-t09vSN3MdfsyCHoFcTRCH/iUtG7OJ0CsjzB8cjAmKc/va/kIgeDI/TxsigdncE/4be734m0cvIYwNaV4i2XqAw==}
     engines: {node: '>=10'}
@@ -1145,8 +1148,8 @@ packages:
     peerDependencies:
       vite: ^4 || ^5 || ^6 || ^7 || ^8
 
-  '@vitejs/plugin-react@6.2.1':
-    resolution: {integrity: sha512-9KyWCij3r0+qLG3Q62vBmv0VyevmYibAtxaCIVK9o0k6CXgaajZRIe8tpfchQcdZArJ5b/7OrIz4W3b2uxVRDA==}
+  '@vitejs/plugin-react@6.3.0':
+    resolution: {integrity: sha512-H9E955aVvD2F4zNHCw4eIZbIfF6xKldlh7MNu+hSU7xwQzh65lI/N+CJWqmfhi0PEjDXIt/H7T7J/4wU63KJiw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@rolldown/plugin-babel': ^0.1.7 || ^0.2.0 || ^0.3.0
@@ -1477,8 +1480,8 @@ packages:
   jju@1.4.0:
     resolution: {integrity: sha512-8wb9Yw966OSxApiCt0K3yNJL8pnNeIv+OEq2YMidz4FKP6nonSRoOXc80iXY4JaN2FC11B9qsNmDsm+ZOfMROA==}
 
-  jose@6.2.15:
-    resolution: {integrity: sha512-qdF6ewcZARtef63fJ9AKKZPgxw+t7USH6HLXYcD4CrdmSvDp79rpJSPFEKc90QBeGS63u1KQtN2MZQHC0yDIzA==}
+  jose@6.2.17:
+    resolution: {integrity: sha512-wOuK9V1yujQFH5S0ZWmLcDZN7+IKh9bUCC2ZPCf2HDlol3WWHy+PPyNjEI75FXRLMp3vDKQcupP59xhVU95hcg==}
 
   jsdom@31.0.0:
     resolution: {integrity: sha512-xAkhD9z1eyFC5+QUi9K24CaZJgdCQ2GOGLW1GdVDoQvkp/AxEH9TQ0pAplPOlIiV92hfcgnFOADZypbjgbBT6Q==}
@@ -2600,6 +2603,8 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.1': {}
 
+  '@rolldown/pluginutils@1.1.0': {}
+
   '@sindresorhus/is@4.6.0': {}
 
   '@swc/core-darwin-arm64@1.15.47':
@@ -2847,9 +2852,9 @@ snapshots:
     transitivePeerDependencies:
       - '@swc/helpers'
 
-  '@vitejs/plugin-react@6.2.1(vite@8.3.5(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))':
+  '@vitejs/plugin-react@6.3.0(vite@8.3.5(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1))':
     dependencies:
-      '@rolldown/pluginutils': 1.0.1
+      '@rolldown/pluginutils': 1.1.0
       vite: 8.3.5(@types/node@24.13.2)(jiti@2.7.0)(yaml@2.9.1)
 
   '@vitest/mocker@5.1.0(vite@8.3.5(@types/node@22.20.5)(jiti@2.7.0)(yaml@2.9.1))':
@@ -3117,7 +3122,7 @@ snapshots:
 
   jju@1.4.0: {}
 
-  jose@6.2.15: {}
+  jose@6.2.17: {}
 
   jsdom@31.0.0(@noble/hashes@1.8.0):
     dependencies:
@@ -3319,7 +3324,7 @@ snapshots:
   oidc-provider@9.15.0:
     dependencies:
       debug: 4.4.3
-      jose: 6.2.15
+      jose: 6.2.17
       koa: 3.3.0
     transitivePeerDependencies:
       - supports-color
@@ -3330,7 +3335,7 @@ snapshots:
 
   openid-client@6.8.9:
     dependencies:
-      jose: 6.2.15
+      jose: 6.2.17
       oauth4webapi: 3.8.8
 
   package-manager-detector@1.8.0: {}
@@ -3405,7 +3410,7 @@ snapshots:
   rolldown@1.2.15:
     dependencies:
       '@oxc-project/types': 0.155.0
-      '@rolldown/pluginutils': 1.0.1
+      '@rolldown/pluginutils': 1.1.0
     optionalDependencies:
       '@rolldown/binding-android-arm-eabi': 1.2.15
       '@rolldown/binding-android-arm64': 1.2.15
