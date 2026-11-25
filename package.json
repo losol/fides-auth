@@ -16,6 +16,6 @@
     "@arethetypeswrong/cli": "0.18.5",
     "@biomejs/biome": "2.6.6",
     "@changesets/cli": "^3.0.3",
-    "turbo": "^2.11.10"
+    "turbo": "^2.11.11"
   }
 }
