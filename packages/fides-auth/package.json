@@ -75,9 +75,9 @@
     "@eventuras/typescript-config": "workspace:*",
     "@eventuras/vite-config": "workspace:*",
     "@types/node": "^22.20.5",
-    "jsdom": "31.0.0",
+    "jsdom": "31.0.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5",
+    "vite": "^8.3.8",
     "vitest": "^5.0.5"
   },
   "engines": {
