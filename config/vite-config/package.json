@@ -14,7 +14,7 @@
     "@tailwindcss/vite": "^4.3.5",
     "@vitejs/plugin-react": "^6.3.0",
     "@vitejs/plugin-react-swc": "^4.3.3",
-    "glob": "^14.0.4"
+    "glob": "^14.0.6"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
